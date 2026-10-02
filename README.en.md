@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.2.0-dev.1** · channel **dev (pre-release)** · 2026-10-02
+**Version 0.2.0-dev.2** · channel **dev (pre-release)** · 2026-10-02
 
 </div>
 
@@ -198,17 +198,18 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.2.0-dev.1**
+**Version 0.2.0-dev.2**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 28.0 MiB | `5be95f34a6a5e66537e806d0b04c6d95c8f0941cc59c0ce2461277cc9c9620d9` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 28.6 MiB | `d5b6666e04a15c2eb7f9ce105c120a3b9b068a33ff1ea7b04317a3521f19a780` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 28.0 MiB | `007499af9059e6543681fb6ac49a439170931f62cab95c0d2bf358e44c6a3d1c` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 28.5 MiB | `29a7451a021f38c3f5f331de1308fe313f6d2103b449ea737374898159f7149b` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.2.0-dev.1` | 2026-10-02T14:59:13Z | **current** | `releases/0.2.0-dev.1/` |
+| `0.2.0-dev.2` | 2026-10-02T16:25:39Z | **current** | `releases/0.2.0-dev.2/` |
+| `0.2.0-dev.1` | 2026-10-02T14:59:13Z | available | `releases/0.2.0-dev.1/` |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
@@ -217,7 +218,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.2.0-dev.1 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.2 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 This release is not signed with a key yet: rely on the SHA-256 checksums above.

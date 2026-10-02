@@ -364,16 +364,6 @@ nl|q_channel|Releasekanaal (stable / dev)
 ru|q_channel|Канал релизов (stable / dev)
 zh|q_channel|发布通道（stable / beta）
 ar|q_channel|قناة الإصدارات (stable / dev)
-en|q_tarball|Offline release tarball (empty = download)
-fr|q_tarball|Archive de version hors ligne (vide = télécharger)
-es|q_tarball|Paquete de versión sin conexión (vacío = descargar)
-de|q_tarball|Offline-Release-Archiv (leer = herunterladen)
-it|q_tarball|Archivio di rilascio offline (vuoto = scarica)
-pt|q_tarball|Pacote de versão offline (vazio = baixar)
-nl|q_tarball|Offline release-archief (leeg = downloaden)
-ru|q_tarball|Автономный архив релиза (пусто = скачать)
-zh|q_tarball|离线发布包路径（留空 = 下载）
-ar|q_tarball|حزمة الإصدار دون اتصال (فارغ = تنزيل)
 en|q_bindir|Install directory
 fr|q_bindir|Répertoire d'installation
 es|q_bindir|Directorio de instalación
@@ -864,6 +854,26 @@ nl|sum_setup_note|Open hem om de paneellink, het account en het wachtwoord in de
 ru|sum_setup_note|Откройте её, чтобы настроить ссылку панели, учётную запись и пароль в веб-установщике.
 zh|sum_setup_note|打开它即可在 Web 安装向导中设置面板链接、账户和密码。
 ar|sum_setup_note|افتحه لضبط رابط اللوحة والحساب وكلمة المرور في معالج الويب.
+en|p_dpapi_warn|Port 9444 (data-plane API) is NOT opened: allow it only from your data-plane nodes
+fr|p_dpapi_warn|Le port 9444 (API data plane) n'est PAS ouvert : autorisez-le uniquement depuis vos nœuds data plane
+es|p_dpapi_warn|El puerto 9444 (API del data plane) NO está abierto: permítalo solo desde sus nodos data plane
+de|p_dpapi_warn|Port 9444 (Data-Plane-API) ist NICHT geöffnet: nur von Ihren Data-Plane-Knoten freigeben
+it|p_dpapi_warn|La porta 9444 (API data plane) NON è aperta: consentila solo dai tuoi nodi data plane
+pt|p_dpapi_warn|A porta 9444 (API do data plane) NÃO está aberta: permita-a apenas a partir dos seus nós data plane
+nl|p_dpapi_warn|Poort 9444 (data-plane-API) is NIET geopend: sta alleen toe vanuit uw data-plane-nodes
+ru|p_dpapi_warn|Порт 9444 (API data plane) НЕ открыт: разрешайте его только с ваших узлов data plane
+zh|p_dpapi_warn|端口 9444（数据平面 API）未开放：仅允许来自您的数据平面节点的访问
+ar|p_dpapi_warn|المنفذ 9444 (واجهة data plane) غير مفتوح: اسمح به فقط من عقد data plane الخاصة بك
+en|p_dpapi_only|9444/tcp only from your data planes, e.g.:
+fr|p_dpapi_only|9444/tcp uniquement depuis vos data planes, par ex. :
+es|p_dpapi_only|9444/tcp solo desde sus data planes, p. ej.:
+de|p_dpapi_only|9444/tcp nur von Ihren Data Planes, z. B.:
+it|p_dpapi_only|9444/tcp solo dai tuoi data plane, ad es.:
+pt|p_dpapi_only|9444/tcp apenas a partir dos seus data planes, ex.:
+nl|p_dpapi_only|9444/tcp alleen vanuit uw data planes, bijv.:
+ru|p_dpapi_only|9444/tcp только с ваших data plane, например:
+zh|p_dpapi_only|9444/tcp 仅允许来自您的数据平面，例如：
+ar|p_dpapi_only|9444/tcp فقط من data planes الخاصة بك، مثال:
 en|sum_setup_none|No setup link this time (already issued, or the account already existed). Create a new one with: toutwaf-cp setup-link --regenerate
 fr|sum_setup_none|Pas de lien d'installation cette fois (déjà émis, ou compte déjà existant). Pour en créer un : toutwaf-cp setup-link --regenerate
 es|sum_setup_none|Esta vez no hay enlace de configuración (ya emitido, o la cuenta ya existía). Cree uno con: toutwaf-cp setup-link --regenerate
@@ -1193,9 +1203,11 @@ banner() {
   printf '  %s%s%s  %s·%s  %sinstaller v%s%s\n\n' "$B" "$(t tagline)" "$R" "$D" "$R" "$D" "$INSTALLER_VERSION" "$R"
 }
 
-box_top()    { [ "$QUIET" = 1 ] || printf '%s%s%s %s%s%s %s%s\n' "$ACC" "$TL" "$H" "$B" "$1" "$R$ACC" "$(rule 12)" "$R"; }
+FRAME_W=78
+frame_fill() { local n=$((FRAME_W - 4 - ${#1})); [ "$n" -ge 3 ] || n=3; rule "$n"; }
+box_top()    { [ "$QUIET" = 1 ] || printf '%s%s%s %s%s%s %s%s\n' "$ACC" "$TL" "$H" "$B" "$1" "$R$ACC" "$(frame_fill "$1")" "$R"; }
 box_line()   { [ "$QUIET" = 1 ] || printf '%s%s%s %s\n' "$ACC" "$V" "$R" "$1"; }
-box_bottom() { [ "$QUIET" = 1 ] || printf '%s%s%s%s\n' "$ACC" "$BL" "$(rule 40)" "$R"; }
+box_bottom() { [ "$QUIET" = 1 ] || printf '%s%s%s%s\n' "$ACC" "$BL" "$(rule $((FRAME_W - 1)))" "$R"; }
 
 log()  { printf '%s\n' "$*" >>"${LOG:-/dev/null}" 2>/dev/null || true; return 0; }
 # info: detail line; shown on plain (non-TTY / --no-color) output, kept in the log only while a spinner runs
@@ -1608,23 +1620,26 @@ panel_urls() {   # one "label|url" per line: the control plane's links[] when kn
   fi
   return 0
 }
-setup_url() {
+setup_urls() {   # one "label|url" per line: the one-time setup link on every local IPv4 and on the public address
   [ -n "$BS_SETUP_TOKEN" ] || return 0      # no token = setup already completed, the link would be dead
-  local host="${PUBLIC_IP:-$(local_ips | head -n1)}"; host="${host:-$(fqdn)}"
-  local sp="$BS_SETUP_PATH"
+  local h sp="$BS_SETUP_PATH" hosts=""
   if [ -z "$sp" ]; then sp="/${BS_PATH:+$BS_PATH/}setup"; fi
   case "$sp" in /*) ;; *) sp="/$sp";; esac
-  if [ -n "$BS_SETUP_TOKEN" ] && [[ "$sp" != *"$BS_SETUP_TOKEN"* ]]; then case "$sp" in *\?*) sp="$sp&token=$BS_SETUP_TOKEN";; *) sp="$sp?token=$BS_SETUP_TOKEN";; esac; fi
-  printf 'https://%s:%s%s' "$host" "$CP_PORT" "$sp"
+  if [[ "$sp" != *"$BS_SETUP_TOKEN"* ]]; then case "$sp" in *\?*) sp="$sp&token=$BS_SETUP_TOKEN";; *) sp="$sp?token=$BS_SETUP_TOKEN";; esac; fi
+  while IFS= read -r h; do [ -n "$h" ] && printf '%s|https://%s:%s%s\n' "$(t sum_local)" "$h" "$CP_PORT" "$sp"; done < <(local_ips)
+  if [ -n "$PUBLIC_IP" ]; then printf '%s|https://%s:%s%s\n' "$(t sum_public)" "$PUBLIC_IP" "$CP_PORT" "$sp"
+  elif [ -z "$(local_ips)" ]; then printf '%s|https://%s:%s%s\n' "$(t sum_local)" "$(fqdn)" "$CP_PORT" "$sp"; fi
+  return 0
 }
+setup_url() { setup_urls | head -n1 | cut -d'|' -f2; }
 
 # render_summary tty|plain
 render_summary() {
   local mode="$1" lab url pt pr pu hb="" he=""
   if [ "$mode" = tty ]; then hb="$B"; he="$R"; fi
-  hdr() { if [ "$mode" = tty ]; then printf '%s%s%s %s%s%s %s%s\n' "$ACC" "$TL" "$H" "$B" "$1" "$R$ACC" "$(rule 14)" "$R"; else printf '== %s\n' "$1"; fi; }
+  hdr() { if [ "$mode" = tty ]; then printf '%s%s%s %s%s%s %s%s\n' "$ACC" "$TL" "$H" "$B" "$1" "$R$ACC" "$(frame_fill "$1")" "$R"; else printf '== %s\n' "$1"; fi; }
   row() { if [ "$mode" = tty ]; then printf '%s%s%s %s\n' "$ACC" "$V" "$R" "$1"; else printf '   %s\n' "$1"; fi; }
-  endb() { if [ "$mode" = tty ]; then printf '%s%s%s%s\n' "$ACC" "$BL" "$(rule 40)" "$R"; fi; echo; }
+  endb() { if [ "$mode" = tty ]; then printf '%s%s%s%s\n' "$ACC" "$BL" "$(rule $((FRAME_W - 1)))" "$R"; fi; echo; }
   echo
   if want_cp; then
     hdr "$(t sum_title) - $(t sum_panel)"
@@ -1640,8 +1655,9 @@ render_summary() {
       else row "$(t sum_password): $(t sum_pw_unchanged "${BS_USER:-NAME}")"; fi
       endb
       hdr "$(t sum_setup)"
-      url="$(setup_url)"
-      if [ -n "$url" ]; then row "$hb$url$he"; row "$D$(t sum_setup_note)$R"; else row "$(t sum_setup_none)"; fi
+      local n=0
+      while IFS='|' read -r lab url; do if [ -n "$url" ]; then row "$lab: $hb$url$he"; n=1; fi; done < <(setup_urls)
+      if [ "$n" = 1 ]; then row "$D$(t sum_setup_note)$R"; else row "$(t sum_setup_none)"; fi
       endb
     fi
   fi
@@ -1653,7 +1669,7 @@ render_summary() {
   row "  firewalld: $(printf '%s' "$SUMMARY_PORTS" | awk -F'|' '$1!=9444 && NF>2{printf "firewall-cmd --permanent --add-port=%s/%s && ", $1, $2}')firewall-cmd --reload"
   row "  ufw:       $(printf '%s' "$SUMMARY_PORTS" | awk -F'|' '$1!=9444 && NF>2{printf "ufw allow %s/%s; ", $1, $2}' | sed 's/; $//')"
   if printf '%s' "$SUMMARY_PORTS" | grep -q '^9444|'; then
-    row "  9444/tcp only from your data planes, e.g.:"
+    row "  $(t p_dpapi_only)"
     row "    firewall-cmd --permanent --add-rich-rule='rule family=\"ipv4\" source address=\"<DP_IP>/32\" port port=\"9444\" protocol=\"tcp\" accept'"
     row "    ufw allow from <DP_IP> to any port 9444 proto tcp"
   fi
@@ -2229,7 +2245,7 @@ EOF
       firewall-cmd --permanent --add-service=toutwaf-dp >/dev/null
     fi
     if want_cp && [ "$OPEN_CP_PORT" = 1 ]; then firewall-cmd --permanent --add-port="$CP_PORT/tcp" >/dev/null; fi
-    if want_cp; then warn "port 9444 (data-plane API) is NOT opened: allow it only from your data-plane nodes (firewall-cmd --add-rich-rule)"; fi
+    if want_cp; then warn "$(t p_dpapi_warn) (firewall-cmd --add-rich-rule)"; fi
     firewall-cmd --reload >/dev/null
   elif have ufw && ufw status 2>/dev/null | grep -q "Status: active"; then
     log "Opening ufw ports"
@@ -2406,7 +2422,6 @@ configure_interactively() {
   ask_yn fw "$(t q_firewall)" 1; if [ "$fw" = 1 ]; then OPEN_FW=1; OPEN_CP_PORT=1; else OPEN_FW=0; fi
   ask_yn boot "$(t q_boot)" 1; if [ "$boot" != 1 ]; then NO_ENABLE=1; fi
   if [ -z "$TARBALL" ]; then ask CHANNEL "$(t q_channel)" "$CHANNEL"; fi
-  ask TARBALL "$(t q_tarball)" "$TARBALL"
   ask BIN_DIR "$(t q_bindir)" "$BIN_DIR"
   check_ports
   case "$CHANNEL" in beta) CHANNEL=dev;; stable|dev) ;; *) CHANNEL=stable;; esac

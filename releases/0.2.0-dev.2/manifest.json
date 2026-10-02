@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "version": "0.2.0-dev.2",
+  "channel": "dev",
+  "released_at": "2026-10-02T16:25:39Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 29376203,
+      "sha256": "007499af9059e6543681fb6ac49a439170931f62cab95c0d2bf358e44c6a3d1c"
+    },
+    {
+      "name": "toutwaf-windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "size": 29869236,
+      "sha256": "29a7451a021f38c3f5f331de1308fe313f6d2103b449ea737374898159f7149b"
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "rust target aarch64-unknown-linux-gnu not installed (rustup target add aarch64-unknown-linux-gnu)"
+    }
+  ],
+  "notes": "First public release of ToutWAF, a self-hosted web application and API protection platform.\n\n- Web application firewall with detection for SQL injection, XSS, command injection, file inclusion, SSRF, XXE, template injection and more, with a detection mode before blocking.\n- API protection: OpenAPI and GraphQL validation, JWT checks, rate limiting per consumer, response data-leak prevention.\n- Bot management, anti-DDoS rate limiting, IP and country rules, IP reputation lists and automatic bans.\n- Web console in 10 languages with 7 themes, accent colours, live events, false-positive handling and policy versions with rollback.\n- Secure console access: secret panel link, one-time setup link, changeable account and password.\n- Backups with off-site copies (S3-compatible storage, SFTP, WebDAV), encryption, retention and restore tests.\n- Reverse proxy with TLS, HTTP/2, load balancing and health checks; ACME certificates.\n- Installer for Linux (AlmaLinux, Rocky, Debian, Ubuntu) and Windows with install, update and uninstall.\n- Known limits: HTTP/3, PostgreSQL and ARM64 packages are not included yet; the Windows installer has not been validated on a real Windows host."
+}

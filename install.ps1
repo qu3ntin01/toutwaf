@@ -121,7 +121,6 @@ $script:Catalog = @{
         'q_firewall' = 'Open the firewall automatically (firewalld / ufw)?'
         'q_boot' = 'Start the services at boot?'
         'q_channel' = 'Release channel (stable / dev)'
-        'q_tarball' = 'Offline release tarball (empty = download)'
         'q_bindir' = 'Install directory'
         'q_confirm' = 'Proceed with the installation?'
         'q_purge' = 'Also delete configuration, data and logs? (No = keep them)'
@@ -171,6 +170,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = 'unchanged (never regenerated). Reset it with: toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = 'One-time setup link'
         'sum_setup_note' = 'Open it to configure the panel link, the account and the password in the web installer.'
+        'p_dpapi_warn' = 'Port 9444 (data-plane API) is NOT opened: allow it only from your data-plane nodes'
+        'p_dpapi_only' = '9444/tcp only from your data planes, e.g.:'
         'sum_setup_none' = 'No setup link this time (already issued, or the account already existed). Create a new one with: toutwaf-cp setup-link --regenerate'
         'sum_ports' = 'Ports to open in the firewall'
         'sum_cmds' = 'Commands'
@@ -228,7 +229,6 @@ $script:Catalog = @{
         'q_firewall' = 'Ouvrir automatiquement le pare-feu (firewalld / ufw) ?'
         'q_boot' = 'D\u00e9marrer les services au d\u00e9marrage ?'
         'q_channel' = 'Canal de publication (stable / dev)'
-        'q_tarball' = 'Archive de version hors ligne (vide = t\u00e9l\u00e9charger)'
         'q_bindir' = 'R\u00e9pertoire d''installation'
         'q_confirm' = 'Lancer l''installation ?'
         'q_purge' = 'Supprimer aussi configuration, donn\u00e9es et journaux ? (Non = les conserver)'
@@ -278,6 +278,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = 'inchang\u00e9 (jamais r\u00e9g\u00e9n\u00e9r\u00e9). R\u00e9initialisez-le avec : toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = 'Lien d''installation \u00e0 usage unique'
         'sum_setup_note' = 'Ouvrez-le pour configurer le lien du panneau, le compte et le mot de passe dans l''assistant web.'
+        'p_dpapi_warn' = 'Le port 9444 (API data plane) n''est PAS ouvert : autorisez-le uniquement depuis vos n\u0153uds data plane'
+        'p_dpapi_only' = '9444/tcp uniquement depuis vos data planes, par ex. :'
         'sum_setup_none' = 'Pas de lien d''installation cette fois (d\u00e9j\u00e0 \u00e9mis, ou compte d\u00e9j\u00e0 existant). Pour en cr\u00e9er un : toutwaf-cp setup-link --regenerate'
         'sum_ports' = 'Ports \u00e0 ouvrir dans le pare-feu'
         'sum_cmds' = 'Commandes'
@@ -335,7 +337,6 @@ $script:Catalog = @{
         'q_firewall' = '\u00bfAbrir el cortafuegos autom\u00e1ticamente (firewalld / ufw)?'
         'q_boot' = '\u00bfIniciar los servicios al arrancar?'
         'q_channel' = 'Canal de versiones (stable / dev)'
-        'q_tarball' = 'Paquete de versi\u00f3n sin conexi\u00f3n (vac\u00edo = descargar)'
         'q_bindir' = 'Directorio de instalaci\u00f3n'
         'q_confirm' = '\u00bfContinuar con la instalaci\u00f3n?'
         'q_purge' = '\u00bfBorrar tambi\u00e9n configuraci\u00f3n, datos y registros? (No = conservarlos)'
@@ -385,6 +386,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = 'sin cambios (nunca se regenera). Restabl\u00e9zcala con: toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = 'Enlace de configuraci\u00f3n de un solo uso'
         'sum_setup_note' = '\u00c1bralo para configurar el enlace del panel, la cuenta y la contrase\u00f1a en el asistente web.'
+        'p_dpapi_warn' = 'El puerto 9444 (API del data plane) NO est\u00e1 abierto: perm\u00edtalo solo desde sus nodos data plane'
+        'p_dpapi_only' = '9444/tcp solo desde sus data planes, p. ej.:'
         'sum_setup_none' = 'Esta vez no hay enlace de configuraci\u00f3n (ya emitido, o la cuenta ya exist\u00eda). Cree uno con: toutwaf-cp setup-link --regenerate'
         'sum_ports' = 'Puertos a abrir en el cortafuegos'
         'sum_cmds' = 'Comandos'
@@ -442,7 +445,6 @@ $script:Catalog = @{
         'q_firewall' = 'Firewall automatisch \u00f6ffnen (firewalld / ufw)?'
         'q_boot' = 'Dienste beim Systemstart starten?'
         'q_channel' = 'Release-Kanal (stable / dev)'
-        'q_tarball' = 'Offline-Release-Archiv (leer = herunterladen)'
         'q_bindir' = 'Installationsverzeichnis'
         'q_confirm' = 'Installation starten?'
         'q_purge' = 'Auch Konfiguration, Daten und Logs l\u00f6schen? (Nein = behalten)'
@@ -492,6 +494,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = 'unver\u00e4ndert (wird nie neu erzeugt). Zur\u00fccksetzen mit: toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = 'Einmaliger Einrichtungslink'
         'sum_setup_note' = '\u00d6ffnen Sie ihn, um Panel-Link, Konto und Passwort im Web-Assistenten festzulegen.'
+        'p_dpapi_warn' = 'Port 9444 (Data-Plane-API) ist NICHT ge\u00f6ffnet: nur von Ihren Data-Plane-Knoten freigeben'
+        'p_dpapi_only' = '9444/tcp nur von Ihren Data Planes, z. B.:'
         'sum_setup_none' = 'Diesmal kein Einrichtungslink (bereits ausgestellt oder Konto bestand schon). Neu erzeugen: toutwaf-cp setup-link --regenerate'
         'sum_ports' = 'In der Firewall zu \u00f6ffnende Ports'
         'sum_cmds' = 'Befehle'
@@ -549,7 +553,6 @@ $script:Catalog = @{
         'q_firewall' = 'Aprire automaticamente il firewall (firewalld / ufw)?'
         'q_boot' = 'Avviare i servizi all''avvio?'
         'q_channel' = 'Canale di rilascio (stable / dev)'
-        'q_tarball' = 'Archivio di rilascio offline (vuoto = scarica)'
         'q_bindir' = 'Directory di installazione'
         'q_confirm' = 'Procedere con l''installazione?'
         'q_purge' = 'Eliminare anche configurazione, dati e log? (No = conservali)'
@@ -599,6 +602,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = 'invariata (mai rigenerata). Reimpostala con: toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = 'Link di configurazione monouso'
         'sum_setup_note' = 'Aprilo per configurare il link del pannello, l''account e la password nell''installer web.'
+        'p_dpapi_warn' = 'La porta 9444 (API data plane) NON \u00e8 aperta: consentila solo dai tuoi nodi data plane'
+        'p_dpapi_only' = '9444/tcp solo dai tuoi data plane, ad es.:'
         'sum_setup_none' = 'Nessun link di configurazione questa volta (gi\u00e0 emesso, o account gi\u00e0 esistente). Creane uno con: toutwaf-cp setup-link --regenerate'
         'sum_ports' = 'Porte da aprire nel firewall'
         'sum_cmds' = 'Comandi'
@@ -656,7 +661,6 @@ $script:Catalog = @{
         'q_firewall' = 'Abrir o firewall automaticamente (firewalld / ufw)?'
         'q_boot' = 'Iniciar os servi\u00e7os no arranque?'
         'q_channel' = 'Canal de lan\u00e7amento (stable / dev)'
-        'q_tarball' = 'Pacote de vers\u00e3o offline (vazio = baixar)'
         'q_bindir' = 'Diret\u00f3rio de instala\u00e7\u00e3o'
         'q_confirm' = 'Prosseguir com a instala\u00e7\u00e3o?'
         'q_purge' = 'Apagar tamb\u00e9m configura\u00e7\u00e3o, dados e logs? (N\u00e3o = manter)'
@@ -706,6 +710,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = 'inalterada (nunca regenerada). Reponha com: toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = 'Link de configura\u00e7\u00e3o de uso \u00fanico'
         'sum_setup_note' = 'Abra-o para configurar o link do painel, a conta e a palavra-passe no assistente web.'
+        'p_dpapi_warn' = 'A porta 9444 (API do data plane) N\u00c3O est\u00e1 aberta: permita-a apenas a partir dos seus n\u00f3s data plane'
+        'p_dpapi_only' = '9444/tcp apenas a partir dos seus data planes, ex.:'
         'sum_setup_none' = 'Sem link de configura\u00e7\u00e3o desta vez (j\u00e1 emitido, ou a conta j\u00e1 existia). Crie um com: toutwaf-cp setup-link --regenerate'
         'sum_ports' = 'Portas a abrir no firewall'
         'sum_cmds' = 'Comandos'
@@ -763,7 +769,6 @@ $script:Catalog = @{
         'q_firewall' = 'Firewall automatisch openen (firewalld / ufw)?'
         'q_boot' = 'Services bij het opstarten starten?'
         'q_channel' = 'Releasekanaal (stable / dev)'
-        'q_tarball' = 'Offline release-archief (leeg = downloaden)'
         'q_bindir' = 'Installatiemap'
         'q_confirm' = 'Doorgaan met de installatie?'
         'q_purge' = 'Ook configuratie, data en logs wissen? (Nee = bewaren)'
@@ -813,6 +818,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = 'ongewijzigd (nooit opnieuw gegenereerd). Reset met: toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = 'Eenmalige installatielink'
         'sum_setup_note' = 'Open hem om de paneellink, het account en het wachtwoord in de webinstallatie in te stellen.'
+        'p_dpapi_warn' = 'Poort 9444 (data-plane-API) is NIET geopend: sta alleen toe vanuit uw data-plane-nodes'
+        'p_dpapi_only' = '9444/tcp alleen vanuit uw data planes, bijv.:'
         'sum_setup_none' = 'Nu geen installatielink (al uitgegeven, of account bestond al). Maak een nieuwe met: toutwaf-cp setup-link --regenerate'
         'sum_ports' = 'Te openen poorten in de firewall'
         'sum_cmds' = 'Opdrachten'
@@ -870,7 +877,6 @@ $script:Catalog = @{
         'q_firewall' = '\u0410\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043e\u0442\u043a\u0440\u044b\u0442\u044c \u043f\u043e\u0440\u0442\u044b \u0432 \u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u0435 (firewalld / ufw)?'
         'q_boot' = '\u0417\u0430\u043f\u0443\u0441\u043a\u0430\u0442\u044c \u0441\u043b\u0443\u0436\u0431\u044b \u043f\u0440\u0438 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0435?'
         'q_channel' = '\u041a\u0430\u043d\u0430\u043b \u0440\u0435\u043b\u0438\u0437\u043e\u0432 (stable / dev)'
-        'q_tarball' = '\u0410\u0432\u0442\u043e\u043d\u043e\u043c\u043d\u044b\u0439 \u0430\u0440\u0445\u0438\u0432 \u0440\u0435\u043b\u0438\u0437\u0430 (\u043f\u0443\u0441\u0442\u043e = \u0441\u043a\u0430\u0447\u0430\u0442\u044c)'
         'q_bindir' = '\u041a\u0430\u0442\u0430\u043b\u043e\u0433 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0438'
         'q_confirm' = '\u041d\u0430\u0447\u0430\u0442\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0443?'
         'q_purge' = '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0442\u0430\u043a\u0436\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438, \u0434\u0430\u043d\u043d\u044b\u0435 \u0438 \u0436\u0443\u0440\u043d\u0430\u043b\u044b? (\u041d\u0435\u0442 = \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c)'
@@ -920,6 +926,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = '\u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0451\u043d (\u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u0433\u0435\u043d\u0435\u0440\u0438\u0440\u0443\u0435\u0442\u0441\u044f \u0437\u0430\u043d\u043e\u0432\u043e). \u0421\u0431\u0440\u043e\u0441: toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = '\u041e\u0434\u043d\u043e\u0440\u0430\u0437\u043e\u0432\u0430\u044f \u0441\u0441\u044b\u043b\u043a\u0430 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438'
         'sum_setup_note' = '\u041e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0435\u0451, \u0447\u0442\u043e\u0431\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0438\u0442\u044c \u0441\u0441\u044b\u043b\u043a\u0443 \u043f\u0430\u043d\u0435\u043b\u0438, \u0443\u0447\u0451\u0442\u043d\u0443\u044e \u0437\u0430\u043f\u0438\u0441\u044c \u0438 \u043f\u0430\u0440\u043e\u043b\u044c \u0432 \u0432\u0435\u0431-\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a\u0435.'
+        'p_dpapi_warn' = '\u041f\u043e\u0440\u0442 9444 (API data plane) \u041d\u0415 \u043e\u0442\u043a\u0440\u044b\u0442: \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0439\u0442\u0435 \u0435\u0433\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u0441 \u0432\u0430\u0448\u0438\u0445 \u0443\u0437\u043b\u043e\u0432 data plane'
+        'p_dpapi_only' = '9444/tcp \u0442\u043e\u043b\u044c\u043a\u043e \u0441 \u0432\u0430\u0448\u0438\u0445 data plane, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440:'
         'sum_setup_none' = '\u0421\u0441\u044b\u043b\u043a\u0438 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0441\u0435\u0439\u0447\u0430\u0441 \u043d\u0435\u0442 (\u0443\u0436\u0435 \u0432\u044b\u0434\u0430\u043d\u0430 \u0438\u043b\u0438 \u0443\u0447\u0451\u0442\u043d\u0430\u044f \u0437\u0430\u043f\u0438\u0441\u044c \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u043e\u0432\u0430\u043b\u0430). \u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043d\u043e\u0432\u0443\u044e: toutwaf-cp setup-link --regenerate'
         'sum_ports' = '\u041f\u043e\u0440\u0442\u044b \u0434\u043b\u044f \u043e\u0442\u043a\u0440\u044b\u0442\u0438\u044f \u0432 \u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u0435'
         'sum_cmds' = '\u041a\u043e\u043c\u0430\u043d\u0434\u044b'
@@ -977,7 +985,6 @@ $script:Catalog = @{
         'q_firewall' = '\u662f\u5426\u81ea\u52a8\u653e\u884c\u9632\u706b\u5899\u7aef\u53e3\uff08firewalld / ufw\uff09\uff1f'
         'q_boot' = '\u662f\u5426\u5f00\u673a\u81ea\u52a8\u542f\u52a8\u670d\u52a1\uff1f'
         'q_channel' = '\u53d1\u5e03\u901a\u9053\uff08stable / beta\uff09'
-        'q_tarball' = '\u79bb\u7ebf\u53d1\u5e03\u5305\u8def\u5f84\uff08\u7559\u7a7a = \u4e0b\u8f7d\uff09'
         'q_bindir' = '\u5b89\u88c5\u76ee\u5f55'
         'q_confirm' = '\u5f00\u59cb\u5b89\u88c5\uff1f'
         'q_purge' = '\u540c\u65f6\u5220\u9664\u914d\u7f6e\u3001\u6570\u636e\u548c\u65e5\u5fd7\uff1f\uff08\u5426 = \u4fdd\u7559\uff09'
@@ -1027,6 +1034,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = '\u4fdd\u6301\u4e0d\u53d8\uff08\u4e0d\u4f1a\u91cd\u65b0\u751f\u6210\uff09\u3002\u91cd\u7f6e\u547d\u4ee4\uff1atoutwaf-cp admin reset-password --user {0}'
         'sum_setup' = '\u4e00\u6b21\u6027\u8bbe\u7f6e\u94fe\u63a5'
         'sum_setup_note' = '\u6253\u5f00\u5b83\u5373\u53ef\u5728 Web \u5b89\u88c5\u5411\u5bfc\u4e2d\u8bbe\u7f6e\u9762\u677f\u94fe\u63a5\u3001\u8d26\u6237\u548c\u5bc6\u7801\u3002'
+        'p_dpapi_warn' = '\u7aef\u53e3 9444\uff08\u6570\u636e\u5e73\u9762 API\uff09\u672a\u5f00\u653e\uff1a\u4ec5\u5141\u8bb8\u6765\u81ea\u60a8\u7684\u6570\u636e\u5e73\u9762\u8282\u70b9\u7684\u8bbf\u95ee'
+        'p_dpapi_only' = '9444/tcp \u4ec5\u5141\u8bb8\u6765\u81ea\u60a8\u7684\u6570\u636e\u5e73\u9762\uff0c\u4f8b\u5982\uff1a'
         'sum_setup_none' = '\u672c\u6b21\u6ca1\u6709\u8bbe\u7f6e\u94fe\u63a5\uff08\u5df2\u7b7e\u53d1\uff0c\u6216\u8d26\u6237\u5df2\u5b58\u5728\uff09\u3002\u91cd\u65b0\u751f\u6210\uff1atoutwaf-cp setup-link --regenerate'
         'sum_ports' = '\u9700\u8981\u5728\u9632\u706b\u5899\u653e\u884c\u7684\u7aef\u53e3'
         'sum_cmds' = '\u547d\u4ee4'
@@ -1084,7 +1093,6 @@ $script:Catalog = @{
         'q_firewall' = '\u0641\u062a\u062d \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u062a\u0644\u0642\u0627\u0626\u064a\u0627 (firewalld / ufw)\u061f'
         'q_boot' = '\u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u062e\u062f\u0645\u0627\u062a \u0639\u0646\u062f \u0627\u0644\u0625\u0642\u0644\u0627\u0639\u061f'
         'q_channel' = '\u0642\u0646\u0627\u0629 \u0627\u0644\u0625\u0635\u062f\u0627\u0631\u0627\u062a (stable / dev)'
-        'q_tarball' = '\u062d\u0632\u0645\u0629 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u062f\u0648\u0646 \u0627\u062a\u0635\u0627\u0644 (\u0641\u0627\u0631\u063a = \u062a\u0646\u0632\u064a\u0644)'
         'q_bindir' = '\u0645\u062c\u0644\u062f \u0627\u0644\u062a\u062b\u0628\u064a\u062a'
         'q_confirm' = '\u0627\u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0641\u064a \u0627\u0644\u062a\u062b\u0628\u064a\u062a\u061f'
         'q_purge' = '\u062d\u0630\u0641 \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0648\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0623\u064a\u0636\u0627\u061f (\u0644\u0627 = \u0627\u0644\u0627\u062d\u062a\u0641\u0627\u0638 \u0628\u0647\u0627)'
@@ -1134,6 +1142,8 @@ $script:Catalog = @{
         'sum_pw_unchanged' = '\u062f\u0648\u0646 \u062a\u063a\u064a\u064a\u0631 (\u0644\u0627 \u064a\u0639\u0627\u062f \u062a\u0648\u0644\u064a\u062f\u0647\u0627 \u0623\u0628\u062f\u0627). \u0644\u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062a\u0639\u064a\u064a\u0646: toutwaf-cp admin reset-password --user {0}'
         'sum_setup' = '\u0631\u0627\u0628\u0637 \u0627\u0644\u0625\u0639\u062f\u0627\u062f \u0644\u0645\u0631\u0629 \u0648\u0627\u062d\u062f\u0629'
         'sum_setup_note' = '\u0627\u0641\u062a\u062d\u0647 \u0644\u0636\u0628\u0637 \u0631\u0627\u0628\u0637 \u0627\u0644\u0644\u0648\u062d\u0629 \u0648\u0627\u0644\u062d\u0633\u0627\u0628 \u0648\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0641\u064a \u0645\u0639\u0627\u0644\u062c \u0627\u0644\u0648\u064a\u0628.'
+        'p_dpapi_warn' = '\u0627\u0644\u0645\u0646\u0641\u0630 9444 (\u0648\u0627\u062c\u0647\u0629 data plane) \u063a\u064a\u0631 \u0645\u0641\u062a\u0648\u062d: \u0627\u0633\u0645\u062d \u0628\u0647 \u0641\u0642\u0637 \u0645\u0646 \u0639\u0642\u062f data plane \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0643'
+        'p_dpapi_only' = '9444/tcp \u0641\u0642\u0637 \u0645\u0646 data planes \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0643\u060c \u0645\u062b\u0627\u0644:'
         'sum_setup_none' = '\u0644\u0627 \u064a\u0648\u062c\u062f \u0631\u0627\u0628\u0637 \u0625\u0639\u062f\u0627\u062f \u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u0629 (\u0635\u062f\u0631 \u0633\u0627\u0628\u0642\u0627 \u0623\u0648 \u0627\u0644\u062d\u0633\u0627\u0628 \u0645\u0648\u062c\u0648\u062f). \u0644\u0625\u0646\u0634\u0627\u0621 \u0631\u0627\u0628\u0637 \u062c\u062f\u064a\u062f: toutwaf-cp setup-link --regenerate'
         'sum_ports' = '\u0627\u0644\u0645\u0646\u0627\u0641\u0630 \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u0641\u062a\u062d\u0647\u0627 \u0641\u064a \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629'
         'sum_cmds' = '\u0627\u0644\u0623\u0648\u0627\u0645\u0631'
@@ -1302,9 +1312,10 @@ function Write-Banner {
     Write-Host ''
 }
 
-function Box-Top([string]$title) { if (-not $Quiet) { Write-Host ("{0}{1}{2} {3}{4}{5}{0} {6}{5}" -f $script:Acc, $script:Tl, $script:Hr, $script:B, $title, $script:R, (Rule 12)) } }
+function FrameFill([string]$t) { return [Math]::Max(3, 74 - $t.Length) }
+function Box-Top([string]$title) { if (-not $Quiet) { Write-Host ("{0}{1}{2} {3}{4}{5}{0} {6}{5}" -f $script:Acc, $script:Tl, $script:Hr, $script:B, $title, $script:R, (Rule (FrameFill $title))) } }
 function Box-Line([string]$s) { if (-not $Quiet) { Write-Host ("{0}{1}{2} {3}" -f $script:Acc, $script:Vr, $script:R, $s) } }
-function Box-Bottom { if (-not $Quiet) { Write-Host ("{0}{1}{2}{3}" -f $script:Acc, $script:Bl, (Rule 40), $script:R) } }
+function Box-Bottom { if (-not $Quiet) { Write-Host ("{0}{1}{2}{3}" -f $script:Acc, $script:Bl, (Rule 77), $script:R) } }
 
 function Write-InstallLog([string]$m) {
     if ($script:LogReady) { try { Add-Content -Path $LogFile -Value $m -Encoding UTF8 } catch { $null = $_ } }
@@ -1545,17 +1556,19 @@ function Get-SummaryPorts {
     }
     return $list
 }
-function Get-SetupUrl([string]$publicIp) {
+function Get-SetupUrls([string]$publicIp) {   # label|url for every local IPv4 and the public address
     $tok = Get-BsProp 'setup_token'
-    if (-not $tok) { return '' }
-    $h = $publicIp
-    if (-not $h) { $ips = @(Get-LocalIps); $h = if ($ips.Count -gt 0) { $ips[0] } else { $env:COMPUTERNAME } }
+    if (-not $tok) { return @() }
     $pp = (Get-BsProp 'panel_path').Trim('/')
     $sp = Get-BsProp 'setup_path'
     if (-not $sp) { $sp = if ($pp) { "/$pp/setup" } else { '/setup' } }
     if (-not $sp.StartsWith('/')) { $sp = "/$sp" }
     if ($sp -notlike "*$tok*") { $sp = $sp + $(if ($sp.Contains('?')) { "&token=$tok" } else { "?token=$tok" }) }
-    return "https://${h}:$CpPort$sp"
+    $out = @()
+    foreach ($ip in @(Get-LocalIps)) { $out += ('{0}: https://{1}:{2}{3}' -f (T 'sum_local'), $ip, $CpPort, $sp) }
+    if ($publicIp) { $out += ('{0}: https://{1}:{2}{3}' -f (T 'sum_public'), $publicIp, $CpPort, $sp) }
+    elseif ($out.Count -eq 0) { $out += ('{0}: https://{1}:{2}{3}' -f (T 'sum_local'), $env:COMPUTERNAME, $CpPort, $sp) }
+    return $out
 }
 
 # the summary is a list of rows (kind, text), rendered as boxes on the console or as plain text in the file
@@ -1586,8 +1599,8 @@ function Get-Summary([string]$publicIp) {
             if ($pw) { & $add 'p' ('{0}: {1}   ({2})' -f (T 'sum_password'), $pw, (T 'sum_pw_once')) } else { & $add 'p' ('{0}: {1}' -f (T 'sum_password'), (T 'sum_pw_unchanged' @($(if ($au) { $au } else { 'NAME' })))) }
             & $add 'e' ''
             & $add 'h' (T 'sum_setup')
-            $su = Get-SetupUrl $publicIp
-            if ($su) { & $add 'u' $su; & $add 'd' (T 'sum_setup_note') } else { & $add 'p' (T 'sum_setup_none') }
+            $su = @(Get-SetupUrls $publicIp)
+            if ($su.Count -gt 0) { foreach ($x in $su) { & $add 'u' $x }; & $add 'd' (T 'sum_setup_note') } else { & $add 'p' (T 'sum_setup_none') }
             & $add 'e' ''
         }
     }
@@ -1611,8 +1624,8 @@ function Show-Summary([string]$publicIp) {
     Write-Host ''
     foreach ($r in $rows) {
         switch ($r.K) {
-            'h' { Write-Host ("{0}{1}{2} {3}{4}{5}{0} {6}{5}" -f $script:Acc, $script:Tl, $script:Hr, $script:B, $r.T, $script:R, (Rule 14)) }
-            'e' { Write-Host ("{0}{1}{2}{3}" -f $script:Acc, $script:Bl, (Rule 40), $script:R); Write-Host '' }
+            'h' { Write-Host ("{0}{1}{2} {3}{4}{5}{0} {6}{5}" -f $script:Acc, $script:Tl, $script:Hr, $script:B, $r.T, $script:R, (Rule (FrameFill $r.T))) }
+            'e' { Write-Host ("{0}{1}{2}{3}" -f $script:Acc, $script:Bl, (Rule 77), $script:R); Write-Host '' }
             'u' { $i = $r.T.IndexOf('https://'); Write-Host ("{0}{1}{2} {3}{4}{5}{6}" -f $script:Acc, $script:Vr, $script:R, $r.T.Substring(0, $i), $script:B, $r.T.Substring($i), $script:R) }
             'w' { Write-Host ("{0}{1}{2} {3}{4}{2}" -f $script:Acc, $script:Vr, $script:R, $script:Ylw, $r.T) }
             'd' { Write-Host ("{0}{1}{2} {3}{4}{2}" -f $script:Acc, $script:Vr, $script:R, $script:D, $r.T) }
@@ -1958,7 +1971,7 @@ function Set-Firewall {
         # Domain + Private only by default; -OpenFirewall also opens it on Public networks
         $prof = if ($OpenFirewall) { 'Any' } else { 'Domain,Private' }
         New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Allow -Protocol TCP -LocalPort $CpPort -Program $CpExe -Profile $prof | Out-Null
-        Write-Warn 'port 9444 (data-plane API) is NOT opened: allow it only from your data-plane nodes (New-NetFirewallRule -RemoteAddress)'
+        Write-Warn ((T 'p_dpapi_warn') + ' (New-NetFirewallRule -RemoteAddress)')
     }
 }
 
@@ -2118,7 +2131,6 @@ function Read-InstallOptions {
     if (Read-YesNo (T 'q_firewall') $true) { $script:OpenFirewall = [switch]$true } else { $script:NoFirewall = [switch]$true }
     if (-not (Read-YesNo (T 'q_boot') $true)) { $script:NoEnable = [switch]$true }
     if (-not $ZipPath) { $ch = Read-Answer (T 'q_channel') $script:Channel; if ($ch -in @('stable', 'dev', 'beta')) { $script:Channel = $(if ($ch -eq 'beta') { 'dev' } else { $ch }) } }
-    $script:ZipPath = Read-Answer (T 'q_tarball') $ZipPath
     $script:InstallDir = Read-Answer (T 'q_bindir') $InstallDir
     $script:DpExe = Join-Path $script:InstallDir 'toutwaf-dp.exe'
     $script:CpExe = Join-Path $script:InstallDir 'toutwaf-cp.exe'
