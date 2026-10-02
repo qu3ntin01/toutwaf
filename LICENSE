@@ -1,0 +1,28 @@
+ToutWAF - End User Licence Agreement (binary distribution)
+
+Copyright (c) the ToutWAF vendor. All rights reserved.
+
+This software is licensed, not sold, and is distributed as a binary release: no source code is provided with it.
+By installing or running it you agree to the following terms, which apply in addition to any separate written
+agreement concluded with the vendor (which prevails in case of conflict):
+
+1. Grant. The vendor grants you a non-exclusive, non-transferable right to install and run this software on your
+   own infrastructure, for your own internal use, for as long as you hold a valid agreement with the vendor.
+2. No source, no reverse engineering. You may not decompile, disassemble, reverse-engineer, decrypt or otherwise
+   attempt to derive the source code, algorithms or protocols of this software, and may not circumvent any
+   technical measure protecting it, except to the (narrow) extent a mandatory provision of applicable law makes
+   such a restriction unenforceable, and then only after giving the vendor the chance to provide the information
+   needed.
+3. No redistribution. You may not sell, sublicense, lease, rent or otherwise redistribute this software, in
+   original or modified form, to any third party, except as the vendor's agreement expressly permits.
+4. No warranty. Except as expressly stated in a separate written agreement with the vendor, this software is
+   provided "as is", without warranty of any kind, express or implied, including without limitation warranties of
+   merchantability, fitness for a particular purpose and non-infringement.
+5. Liability. To the maximum extent permitted by applicable law, the vendor's liability arising from this licence
+   is limited to what the vendor's written agreement with you provides, and excludes indirect or consequential
+   damages.
+6. Term. This licence ends automatically if you breach it, or when your agreement with the vendor ends; you must
+   then stop using the software and remove it from your systems.
+
+This text is a generic starting point. It is not legal advice and has not been reviewed by a lawyer: the vendor
+should have it reviewed by their own counsel before relying on it, and may replace it entirely in Settings > License.
