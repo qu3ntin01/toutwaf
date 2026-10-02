@@ -4,7 +4,7 @@ ToutWAF is a self-hosted web application firewall and reverse proxy (data plane 
 
 This repository publishes **binaries and installers only**; it contains no source code. This `main` branch is the stable channel. Pre-releases are on the `dev` branch.
 
-> **No stable release has been published yet.** The installers will report this until the first release is available.
+**Current version: `0.2.0-dev.1`** (released 2026-10-02T14:59:13Z)
 
 ## Install
 
@@ -22,12 +22,29 @@ irm https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/install.ps1 | iex
 
 The installer of this branch defaults to the stable channel. Options (`--channel`, `--version`, `--component`, `--help`) are documented by `install.sh --help`.
 
+## Assets of 0.2.0-dev.1
+
+| Asset | OS | Arch | Size | SHA-256 |
+|---|---|---|---:|---|
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 28.0 MiB | `5be95f34a6a5e66537e806d0b04c6d95c8f0941cc59c0ce2461277cc9c9620d9` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 28.6 MiB | `d5b6666e04a15c2eb7f9ce105c120a3b9b068a33ff1ea7b04317a3521f19a780` |
+
+Targets not built for this release:
+
+- `linux-arm64`: rust target aarch64-unknown-linux-gnu not installed (rustup target add aarch64-unknown-linux-gnu)
+
+## Versions
+
+| Version | Released | Status | Directory |
+|---|---|---|---|
+| `0.2.0-dev.1` | 2026-10-02T14:59:13Z | **current** | `releases/0.2.0-dev.1/` |
+
 ## Verify a download
 
 Every release directory has a `SHA256SUMS` file (`sha256sum -c` compatible) and `channel.json` repeats the hashes of the current release:
 
 ```sh
-cd releases/<version> && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.1 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 These releases are not signed; rely on the SHA-256 checksums above.
