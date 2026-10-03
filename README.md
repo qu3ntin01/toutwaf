@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.2.0-dev.2** · canal **bêta (dev)** · 2026-10-02
+**Version 0.2.0-dev.3** · canal **bêta (dev)** · 2026-10-03
 
 </div>
 
@@ -61,14 +61,20 @@ Il s'installe sur **votre propre serveur** (Linux ou Windows), sans service clou
 |---|---|
 | ![Événements](screenshots/evenements.png) **Événements** : chaque requête, expliquée | ![Sites](screenshots/sites.png) **Sites** : protection et score par site |
 | ![Règles](screenshots/regles.png) **Règles** : modes, exceptions, simulation | ![Sauvegardes](screenshots/sauvegardes.png) **Sauvegardes** : chiffrées, copies hors site |
+| ![Cluster](screenshots/cluster.png) **Cluster** : vos serveurs, score de sécurité et alertes | ![Serveur](screenshots/cluster-serveur.png) **Tableau de bord serveur** : ressources en direct, corrections, terminal |
+| ![Diagnostic](screenshots/diagnostics.png) **Assistant de configuration** : ports 80/443, certificats et moteur de proxy | |
 
-**Choisissez votre thème et votre couleur** (Réglages → Apparence) :
+**Entièrement personnalisable : plusieurs thèmes, mode clair ou sombre, votre propre couleur d'accent** (Réglages → Apparence). L'apparence par défaut est *Aurora* en mode clair avec un accent bleu :
 
 ![Choix du thème](screenshots/themes.png)
 
-| Aurora | Nordic | Exécutif |
+| Aurora (sombre) | Nordic | Exécutif |
 |---|---|---|
 | ![Aurora](screenshots/theme-aurora.png) | ![Nordic](screenshots/theme-nordic.png) | ![Exécutif](screenshots/theme-executive.png) |
+
+| Obsidian | Ember |
+|---|---|
+| ![Obsidian](screenshots/theme-obsidian.png) | ![Ember](screenshots/theme-ember.png) |
 
 > Captures réalisées avec des données de démonstration.
 
@@ -198,17 +204,18 @@ Cibles non compilées pour cette version :
 
 ## Versions et téléchargements
 
-**Version 0.2.0-dev.2**
+**Version 0.2.0-dev.3**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 28.0 MiB | `007499af9059e6543681fb6ac49a439170931f62cab95c0d2bf358e44c6a3d1c` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 28.5 MiB | `29a7451a021f38c3f5f331de1308fe313f6d2103b449ea737374898159f7149b` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 38.4 MiB | `9644c31908fd75d61b63888c308b3e26c66d54656a2877b45fe0445ee86edcae` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 39.0 MiB | `6939b2107e5532c432fb8a57710340c7ea59cb611f08c4c6fb806d21a37f8c16` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.2.0-dev.2` | 2026-10-02T16:25:39Z | **actuelle** | `releases/0.2.0-dev.2/` |
+| `0.2.0-dev.3` | 2026-10-03T08:33:31Z | **actuelle** | `releases/0.2.0-dev.3/` |
+| `0.2.0-dev.2` | 2026-10-02T16:25:39Z | disponible | `releases/0.2.0-dev.2/` |
 | `0.2.0-dev.1` | 2026-10-02T14:59:13Z | disponible | `releases/0.2.0-dev.1/` |
 
 Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
@@ -218,7 +225,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.2.0-dev.2 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.3 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 Cette version n'est pas encore signée par clé : fiez-vous aux empreintes SHA-256 ci-dessus.

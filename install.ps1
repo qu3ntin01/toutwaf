@@ -23,7 +23,8 @@
   the one-time setup link and the ports to open (also saved to %ProgramData%\ToutWAF\INSTALL-SUMMARY.txt, Administrators only).
 
   Actions: -Install (default) -Update -Uninstall [-Purge] -Status -Links. Without any parameter, on a console, a menu is shown.
-  Languages: fr en es de it pt nl ru zh ar (-Lang, default: Windows UI language).
+  Languages: -En -Fr -Es -De -It -Pt -Nl -Ru -Zh -Ar (or -Lang fr, or $env:TOUTWAF_LANG = 'fr') choose the installer language;
+  by default it follows the Windows display language, English when that language is not supported.
 #>
 [CmdletBinding()]
 param(
@@ -55,6 +56,16 @@ param(
     [switch]$Force,
     [switch]$Purge,
     [string]$Lang = '',
+    [switch]$En,
+    [switch]$Fr,
+    [switch]$Es,
+    [switch]$De,
+    [switch]$It,
+    [switch]$Pt,
+    [switch]$Nl,
+    [switch]$Ru,
+    [switch]$Zh,
+    [switch]$Ar,
     [switch]$NoColor,
     [switch]$Quiet,
     [switch]$AcceptDefaults,
@@ -1219,7 +1230,12 @@ function Enable-Vt {
 }
 
 function Initialize-Ui {
+    # order: -Fr / -Lang fr, then $env:TOUTWAF_LANG, then the Windows display language, then English
     $l = $Lang
+    foreach ($code in 'en', 'fr', 'es', 'de', 'it', 'pt', 'nl', 'ru', 'zh', 'ar') {
+        if ((Get-Variable -Name $code -ValueOnly -ErrorAction SilentlyContinue) -eq $true) { $l = $code }
+    }
+    if (-not $l) { $l = $env:TOUTWAF_LANG }
     if (-not $l) { try { $l = (Get-UICulture).TwoLetterISOLanguageName } catch { $l = 'en' } }
     $l = "$l".ToLower()
     if ($l.Length -gt 2) { $l = $l.Substring(0, 2) }
@@ -1864,9 +1880,12 @@ function Get-Release([string]$tmp) {
     $stage = Join-Path $tmp 'stage'
     Expand-Archive -Path $zip -DestinationPath $stage -Force
     # layout: toutwaf-<version>-windows-<arch>\bin\*.exe (a flat archive works too)
-    $bins = @(Get-ChildItem -Path $stage -Recurse -Filter 'toutwaf*.exe')
+    $all = @(Get-ChildItem -Path $stage -Recurse -Filter 'toutwaf*.exe')
+    # the host agent builds (agent-dist) are served by the control plane, they are not installed as programs
+    $bins = @($all | Where-Object { $_.FullName -notmatch '[\\/]agent-dist[\\/]' })
     if ($bins.Count -eq 0) { throw 'No binaries found in the release archive' }
-    return @{ Version = $resolved; Bins = $bins }
+    $agentDist = Get-ChildItem -Path $stage -Recurse -Directory -Filter 'agent-dist' | Select-Object -First 1
+    return @{ Version = $resolved; Bins = $bins; AgentDist = $(if ($agentDist) { $agentDist.FullName } else { '' }) }
 }
 
 function Set-Acls {
@@ -2057,6 +2076,13 @@ function Invoke-InstallFlow([string]$action) {
                 Copy-Item $b.FullName $dst -Force
                 Write-Info "installed $dst"
             }
+        }
+        if ($Component -ne 'dp' -and $script:Rel.AgentDist) {
+            # served to the servers of the cluster by the control plane (replaced at every update)
+            $agentDst = Join-Path $CpDataDir 'agent-dist'
+            New-Item -ItemType Directory -Path $agentDst -Force | Out-Null
+            Copy-Item -Path (Join-Path $script:Rel.AgentDist 'toutwaf-agent-*') -Destination $agentDst -Force
+            Write-Info "host agent builds installed in $agentDst"
         }
         Invoke-Step (T 's_cfg') { Write-Configs }
         Invoke-Step (T 's_units') {

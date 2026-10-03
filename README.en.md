@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.2.0-dev.2** · channel **dev (pre-release)** · 2026-10-02
+**Version 0.2.0-dev.3** · channel **dev (pre-release)** · 2026-10-03
 
 </div>
 
@@ -61,14 +61,20 @@ It installs on **your own server** (Linux or Windows), with no cloud service: yo
 |---|---|
 | ![Events](screenshots/evenements.png) **Events**: every request, explained | ![Sites](screenshots/sites.png) **Sites**: protection and score per site |
 | ![Rules](screenshots/regles.png) **Rules**: modes, exceptions, simulation | ![Backups](screenshots/sauvegardes.png) **Backups**: encrypted, off-site copies |
+| ![Cluster](screenshots/cluster.png) **Cluster**: your servers, security score and alerts | ![Server](screenshots/cluster-serveur.png) **Server dashboard**: live resources, fixes, terminal |
+| ![Diagnostics](screenshots/diagnostics.png) **Setup assistant**: checks ports 80/443, certificates and the data plane | |
 
-**Pick your theme and colour** (Settings → Appearance):
+**Fully customisable: several themes, light or dark mode, your own accent colour** (Settings → Appearance). The default look is *Aurora* in light mode with a blue accent:
 
 ![Theme picker](screenshots/themes.png)
 
-| Aurora | Nordic | Executive |
+| Aurora (dark) | Nordic | Executive |
 |---|---|---|
 | ![Aurora](screenshots/theme-aurora.png) | ![Nordic](screenshots/theme-nordic.png) | ![Executive](screenshots/theme-executive.png) |
+
+| Obsidian | Ember |
+|---|---|
+| ![Obsidian](screenshots/theme-obsidian.png) | ![Ember](screenshots/theme-ember.png) |
 
 > Screenshots taken with demonstration data (the console shown in French).
 
@@ -198,17 +204,18 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.2.0-dev.2**
+**Version 0.2.0-dev.3**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 28.0 MiB | `007499af9059e6543681fb6ac49a439170931f62cab95c0d2bf358e44c6a3d1c` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 28.5 MiB | `29a7451a021f38c3f5f331de1308fe313f6d2103b449ea737374898159f7149b` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 38.4 MiB | `9644c31908fd75d61b63888c308b3e26c66d54656a2877b45fe0445ee86edcae` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 39.0 MiB | `6939b2107e5532c432fb8a57710340c7ea59cb611f08c4c6fb806d21a37f8c16` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.2.0-dev.2` | 2026-10-02T16:25:39Z | **current** | `releases/0.2.0-dev.2/` |
+| `0.2.0-dev.3` | 2026-10-03T08:33:31Z | **current** | `releases/0.2.0-dev.3/` |
+| `0.2.0-dev.2` | 2026-10-02T16:25:39Z | available | `releases/0.2.0-dev.2/` |
 | `0.2.0-dev.1` | 2026-10-02T14:59:13Z | available | `releases/0.2.0-dev.1/` |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
@@ -218,7 +225,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.2.0-dev.2 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.3 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 This release is not signed with a key yet: rely on the SHA-256 checksums above.

@@ -1147,6 +1147,7 @@ detect_ui() {
 }
 
 detect_lang() {
+  # order: --fr / --lang fr, then TOUTWAF_LANG, then the system language (LANG), then English
   if [ -z "$LANG_CODE" ]; then
     local l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"; LANG_CODE="${l%%[_.@-]*}"
   fi
@@ -1317,7 +1318,8 @@ Options:
   --bin-dir DIR | --install-dir DIR   where the binaries go (default /usr/local/bin)
   --purge                    with --uninstall: also delete configuration, data and logs
   --force                    reinstall even when the same version is installed
-  --lang CODE                fr en es de it pt nl ru zh ar (default: from LANG)
+  --fr --en --es --de --it --pt --nl --ru --zh --ar    language of the installer
+  --lang CODE                same as --CODE (or set TOUTWAF_LANG); default: the system language, English when unsupported
   --no-color  --quiet  --accept-defaults   plain output / only the summary / never prompt
   --destdir DIR              stage into DIR without touching the running system
   --dry-run                  print what would be done
@@ -1359,6 +1361,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift;;
     --purge) PURGE=1; shift;;
     --lang) LANG_CODE="$2"; shift 2;;
+    --en|--fr|--es|--de|--it|--pt|--nl|--ru|--zh|--ar) LANG_CODE="${1#--}"; shift;;
     --no-color) NO_COLOR_FLAG=1; shift;;
     --quiet|-q) QUIET=1; shift;;
     --accept-defaults) ACCEPT_DEFAULTS=1; shift;;
@@ -2328,6 +2331,22 @@ backup_before_update() {
 # ------------------------------------------------------------------------------------------------ install / update flow
 CHANGED=0; OLD_DP=""; UPDATE_NOOP=0; PANEL_RAN=0
 phase_account() { create_user; make_dirs; }
+# The control plane serves the host agent builds to the servers of the cluster: they ship in every archive (agent-dist/)
+# and are kept next to the control plane data, replaced at every update.
+install_agent_dist() {
+  local d="" src f own grp
+  for src in "$(dirname "$SRC_DIR")/agent-dist" "$SRC_DIR/agent-dist"; do
+    if [ -d "$src" ]; then d="$src"; break; fi
+  done
+  [ -n "$d" ] || { info "this release carries no host agent builds (the Cluster page cannot enrol servers until you update)"; return 0; }
+  own="$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")"; grp="$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")"
+  run install -d -m 0750 -o "$own" -g "$grp" "$(p "$DATA_DIR/agent-dist")" || return 0
+  for f in "$d"/toutwaf-agent-*; do
+    [ -f "$f" ] || continue
+    run install -m 0640 -o "$own" -g "$grp" "$f" "$(p "$DATA_DIR/agent-dist/$(basename "$f")")" || warn "could not install $(basename "$f")"
+  done
+  info "host agent builds installed in $DATA_DIR/agent-dist"
+}
 phase_binaries() {
   if want_dp; then
     OLD_DP="$(installed_version "$(p "$BIN_DIR/toutwaf-dp")")"
@@ -2336,6 +2355,7 @@ phase_binaries() {
   if want_cp; then
     if install_binary toutwaf-cp; then CHANGED=1; fi
     if install_binary toutwafctl; then CHANGED=1; fi
+    install_agent_dist
   fi
   return 0
 }
