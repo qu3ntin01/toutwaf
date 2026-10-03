@@ -2,6 +2,19 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.2.0-dev.5 - 2026-10-03
+
+Pre-release of ToutWAF 0.2.0 (dev channel).
+
+- Product updates from the console: pick the channel (stable or dev), a banner and notification as soon as a new version is published (checked every 5 minutes), release notes, "Update now" with live progress and automatic rollback.
+- Host firewall: the installer opens the ports ToutWAF needs automatically (firewalld / ufw), with a Settings > Firewall card to open them later; the agent port 9444 is never opened publicly.
+- New default installation directory: /var/toutwaf (bin, conf, data, logs; option --home). Existing installations keep their paths.
+- Free edition: 5 sites, 1 node, 2 users.
+- Much better detection of the technology behind your site in the first-run wizard (WordPress, Joomla, Drupal, Magento, PrestaShop, Laravel, Django, Next.js, Nextcloud and many more) with confidence and evidence; the wizard can be skipped; help next to the origin URL field.
+- The certificate order button now shows its errors; stale console tokens are renewed automatically.
+- Menu sections start folded; Definitions table fits smaller screens.
+- Known limits: HTTP/3, PostgreSQL and ARM64 packages are not included yet; the Windows installer script is not yet validated end to end on a real Windows host (the Windows agent is).
+
 ## 0.2.0-dev.4 - 2026-10-03
 
 Pre-release of ToutWAF 0.2.0 (dev channel).

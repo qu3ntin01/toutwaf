@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.2.0-dev.4** · canal **bêta (dev)** · 2026-10-03
+**Version 0.2.0-dev.5** · canal **bêta (dev)** · 2026-10-03
 
 </div>
 
@@ -161,7 +161,7 @@ curl -fsSL https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/install.sh | 
 3. **Un lien d'installation à usage unique** qui ouvre un assistant pour choisir votre propre lien secret, votre identifiant et votre mot de passe.
 4. **Les ports à ouvrir** dans le pare-feu, avec les commandes exactes (`firewalld`, `ufw`, Windows). N'oubliez pas le groupe de sécurité de votre hébergeur.
 
-Le même récapitulatif est enregistré dans `/etc/toutwaf/INSTALL-SUMMARY.txt` (lisible par `root` uniquement). Le lien secret, l'identifiant et le mot de passe se **changent ensuite dans Réglages → Accès** et **Mon compte**.
+Le même récapitulatif est enregistré dans `/var/toutwaf/conf/INSTALL-SUMMARY.txt` (lisible par `root` uniquement). Le lien secret, l'identifiant et le mot de passe se **changent ensuite dans Réglages → Accès** et **Mon compte**.
 
 | Port | Usage | À ouvrir ? |
 |---|---|---|
@@ -186,7 +186,7 @@ Commandes utiles : `toutwafctl doctor` (diagnostic), `toutwaf-cp admin reset-pas
 | **stable** | [`main`](https://github.com/qu3ntin01/toutwaf/tree/main) | production | `…/main/install.sh` |
 | **bêta (dev)** | [`dev`](https://github.com/qu3ntin01/toutwaf/tree/dev) | tests, nouveautés | `…/dev/install.sh` |
 
-L'installeur retient le canal choisi (`/etc/toutwaf/installer.conf`) ; `--channel stable|dev` permet d'en changer. La console indique quand une version plus récente est disponible.
+L'installeur retient le canal choisi (`/var/toutwaf/conf/installer.conf`) ; `--channel stable|dev` permet d'en changer. La console indique quand une version plus récente est disponible.
 
 ## Limites connues
 
@@ -205,17 +205,18 @@ Cibles non compilées pour cette version :
 
 ## Versions et téléchargements
 
-**Version 0.2.0-dev.4**
+**Version 0.2.0-dev.5**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 38.7 MiB | `2eba29ebaf27b60b186d8150e2a85e6795e1a49d3e06e2afbf6c7c139b9c48f3` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 39.3 MiB | `bb98a3496e8e2d29c5d7ea1b679362f60f4c58ffa66ae4d6fae11b2c17e03491` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 39.2 MiB | `fd5e9d10a3c93dde1354d6d36e982fd4f6e55084d340efd8b6b0d91cb924cd62` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 40.0 MiB | `0565ef10bf9de831de3416e2ff3e0fd380f78c68e7cb9839e58e275aab4dadd7` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.2.0-dev.4` | 2026-10-03T13:59:43Z | **actuelle** | `releases/0.2.0-dev.4/` |
+| `0.2.0-dev.5` | 2026-10-03T17:20:42Z | **actuelle** | `releases/0.2.0-dev.5/` |
+| `0.2.0-dev.4` | 2026-10-03T13:59:43Z | disponible | `releases/0.2.0-dev.4/` |
 | `0.2.0-dev.3` | 2026-10-03T08:33:31Z | disponible | `releases/0.2.0-dev.3/` |
 | `0.2.0-dev.2` | 2026-10-02T16:25:39Z | disponible | `releases/0.2.0-dev.2/` |
 | `0.2.0-dev.1` | 2026-10-02T14:59:13Z | disponible | `releases/0.2.0-dev.1/` |
@@ -227,7 +228,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.2.0-dev.4 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.5 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 Cette version n'est pas encore signée par clé : fiez-vous aux empreintes SHA-256 ci-dessus.
