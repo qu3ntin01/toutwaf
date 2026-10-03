@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.2.0-dev.3** · canal **bêta (dev)** · 2026-10-03
+**Version 0.2.0-dev.4** · canal **bêta (dev)** · 2026-10-03
 
 </div>
 
@@ -192,9 +192,10 @@ L'installeur retient le canal choisi (`/etc/toutwaf/installer.conf`) ; `--channe
 
 Soyons transparents sur ce qui n'est pas (encore) couvert :
 
-- **Plateformes** : installation validée de bout en bout sur AlmaLinux 10, Rocky Linux 9 et Debian 12 avec les binaires de cette version ; AlmaLinux 9 et Ubuntu 24.04 ont passé les essais précédents sur une version antérieure. Les autres distributions ne sont pas testées. **Windows** : installeur écrit mais pas encore validé sur un vrai poste Windows. **Aucun paquet ARM64** pour l'instant.
+- **Plateformes** : installation validée de bout en bout sur AlmaLinux 10, Rocky Linux 9 et Debian 12 avec les binaires de cette version ; AlmaLinux 9 et Ubuntu 24.04 ont passé les essais précédents sur une version antérieure. Les autres distributions ne sont pas testées. **Windows** : l'agent d'hôte (cluster) est testé sur un vrai Windows Server 2025 (audit, mesures, scan Microsoft Defender, terminal) ; le script d'installation Windows lui-même n'est pas encore validé de bout en bout sur un vrai poste. **Aucun paquet ARM64** pour l'instant.
 - **Pas encore disponible** : HTTP/3, base de données PostgreSQL (SQLite uniquement), inspection du contenu des messages gRPC.
-- **Peu éprouvé** : SSO SAML (OIDC testé), chargement du jeu OWASP CRS complet (testé sur un jeu réduit), certificats DNS-01 chez Cloudflare/OVH/Route 53, intégrations tierces (SIEM, tickets).
+- **Peu éprouvé** : SSO SAML (OIDC testé), téléchargement automatique toutes les heures des versions d'OWASP CRS depuis GitHub sur plusieurs jours (le jeu CRS 4.31 complet est, lui, testé dans notre banc), certificats DNS-01 chez Cloudflare/OVH/Route 53, intégrations tierces (SIEM, tickets).
+- **Détection** : mesurée avec un outil indépendant (GoTestWAF : 673/673 attaques bloquées, 0/141 faux positifs) et sur un jeu de charges publiques jamais vu pendant le développement (89,9 % en brut ; 99,95 % une fois écartés les fragments de bruit qui ne sont pas des attaques, liste communiquée à nos relecteurs). Aucun WAF n'attrape tout : prévoyez d'ajuster des exceptions pour vos applications. Compromis connus : opérateurs de type MongoDB (`$ne`, `$where`) dans les champs JSON/formulaire et deux `../` ou plus dans une valeur sont bloqués.
 - **Performances** : mesurées sur une machine de test partagée (quelques milliers de requêtes par seconde par instance). Pour votre charge, mesurez sur votre matériel avant la mise en production.
 - Les traductions de la console et des messages d'erreur ont été rédigées avec l'aide d'outils automatiques et n'ont pas encore été relues par des locuteurs natifs.
 - Aucune certification (ANSSI, PCI DSS, ISO 27001) n'est revendiquée.
@@ -204,17 +205,18 @@ Cibles non compilées pour cette version :
 
 ## Versions et téléchargements
 
-**Version 0.2.0-dev.3**
+**Version 0.2.0-dev.4**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 38.4 MiB | `9644c31908fd75d61b63888c308b3e26c66d54656a2877b45fe0445ee86edcae` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 39.0 MiB | `6939b2107e5532c432fb8a57710340c7ea59cb611f08c4c6fb806d21a37f8c16` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 38.7 MiB | `2eba29ebaf27b60b186d8150e2a85e6795e1a49d3e06e2afbf6c7c139b9c48f3` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 39.3 MiB | `bb98a3496e8e2d29c5d7ea1b679362f60f4c58ffa66ae4d6fae11b2c17e03491` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.2.0-dev.3` | 2026-10-03T08:33:31Z | **actuelle** | `releases/0.2.0-dev.3/` |
+| `0.2.0-dev.4` | 2026-10-03T13:59:43Z | **actuelle** | `releases/0.2.0-dev.4/` |
+| `0.2.0-dev.3` | 2026-10-03T08:33:31Z | disponible | `releases/0.2.0-dev.3/` |
 | `0.2.0-dev.2` | 2026-10-02T16:25:39Z | disponible | `releases/0.2.0-dev.2/` |
 | `0.2.0-dev.1` | 2026-10-02T14:59:13Z | disponible | `releases/0.2.0-dev.1/` |
 
@@ -225,7 +227,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.2.0-dev.3 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.4 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 Cette version n'est pas encore signée par clé : fiez-vous aux empreintes SHA-256 ci-dessus.

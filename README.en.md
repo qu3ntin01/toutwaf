@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.2.0-dev.3** · channel **dev (pre-release)** · 2026-10-03
+**Version 0.2.0-dev.4** · channel **dev (pre-release)** · 2026-10-03
 
 </div>
 
@@ -192,9 +192,10 @@ The installer remembers the chosen channel (`/etc/toutwaf/installer.conf`); `--c
 
 Let's be transparent about what is not (yet) covered:
 
-- **Platforms**: installation validated end to end on AlmaLinux 10, Rocky Linux 9 and Debian 12 with the binaries of this release; AlmaLinux 9 and Ubuntu 24.04 passed earlier runs on a previous build. Other distributions are untested. **Windows**: installer written but not yet validated on a real Windows host. **No ARM64 package** for now.
+- **Platforms**: installation validated end to end on AlmaLinux 10, Rocky Linux 9 and Debian 12 with the binaries of this release; AlmaLinux 9 and Ubuntu 24.04 passed earlier runs on a previous build. Other distributions are untested. **Windows**: the host agent (cluster) is tested on a real Windows Server 2025 (audit, telemetry, Microsoft Defender scan, terminal); the Windows installer script itself is not yet validated end to end on a real host. **No ARM64 package** for now.
 - **Not available yet**: HTTP/3, PostgreSQL (SQLite only), inspection of gRPC message contents.
-- **Lightly tested**: SAML SSO (OIDC tested), loading the full OWASP CRS ruleset (tested on a reduced set), DNS-01 certificates with Cloudflare/OVH/Route 53, third-party integrations (SIEM, ticketing).
+- **Lightly tested**: SAML SSO (OIDC tested), the automatic hourly download of the OWASP CRS releases from GitHub over several days (the full CRS 4.31 ruleset itself is tested in our test rig), DNS-01 certificates with Cloudflare/OVH/Route 53, third-party integrations (SIEM, ticketing).
+- **Detection**: measured with an independent tool (GoTestWAF: 673/673 attacks blocked, 0/141 false positives) and on a public payload set never seen during development (89.9 % raw; 99.95 % once non-attack fuzz fragments are removed, with the list of excluded fragments disclosed to our reviewers). No WAF catches everything: expect to tune exceptions for your applications. Known trade-offs: MongoDB-style operators (`$ne`, `$where`) in JSON/form fields and two or more `../` in a value are blocked.
 - **Performance**: measured on a shared test machine (a few thousand requests per second per instance). Measure on your own hardware before going to production.
 - Console and error-message translations were written with the help of automated tools and have not yet been reviewed by native speakers.
 - No certification (ANSSI, PCI DSS, ISO 27001) is claimed.
@@ -204,17 +205,18 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.2.0-dev.3**
+**Version 0.2.0-dev.4**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 38.4 MiB | `9644c31908fd75d61b63888c308b3e26c66d54656a2877b45fe0445ee86edcae` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 39.0 MiB | `6939b2107e5532c432fb8a57710340c7ea59cb611f08c4c6fb806d21a37f8c16` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 38.7 MiB | `2eba29ebaf27b60b186d8150e2a85e6795e1a49d3e06e2afbf6c7c139b9c48f3` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 39.3 MiB | `bb98a3496e8e2d29c5d7ea1b679362f60f4c58ffa66ae4d6fae11b2c17e03491` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.2.0-dev.3` | 2026-10-03T08:33:31Z | **current** | `releases/0.2.0-dev.3/` |
+| `0.2.0-dev.4` | 2026-10-03T13:59:43Z | **current** | `releases/0.2.0-dev.4/` |
+| `0.2.0-dev.3` | 2026-10-03T08:33:31Z | available | `releases/0.2.0-dev.3/` |
 | `0.2.0-dev.2` | 2026-10-02T16:25:39Z | available | `releases/0.2.0-dev.2/` |
 | `0.2.0-dev.1` | 2026-10-02T14:59:13Z | available | `releases/0.2.0-dev.1/` |
 
@@ -225,7 +227,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.2.0-dev.3 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.4 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 This release is not signed with a key yet: rely on the SHA-256 checksums above.
