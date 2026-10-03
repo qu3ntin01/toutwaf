@@ -62,7 +62,7 @@ It installs on **your own server** (Linux or Windows), with no cloud service: yo
 | ![Events](screenshots/evenements.png) **Events**: every request, explained | ![Sites](screenshots/sites.png) **Sites**: protection and score per site |
 | ![Rules](screenshots/regles.png) **Rules**: modes, exceptions, simulation | ![Backups](screenshots/sauvegardes.png) **Backups**: encrypted, off-site copies |
 | ![Cluster](screenshots/cluster.png) **Cluster**: your servers, security score and alerts | ![Server](screenshots/cluster-serveur.png) **Server dashboard**: live resources, fixes, terminal |
-| ![Diagnostics](screenshots/diagnostics.png) **Setup assistant**: checks ports 80/443, certificates and the data plane | |
+| ![Diagnostics](screenshots/diagnostics.png) **Setup assistant**: checks ports 80/443, certificates and the data plane | ![Definitions](screenshots/definitions.png) **Definitions**: 19 sources updated automatically every hour |
 
 **Fully customisable: several themes, light or dark mode, your own accent colour** (Settings → Appearance). The default look is *Aurora* in light mode with a blue accent:
 

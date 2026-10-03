@@ -62,7 +62,7 @@ Il s'installe sur **votre propre serveur** (Linux ou Windows), sans service clou
 | ![Événements](screenshots/evenements.png) **Événements** : chaque requête, expliquée | ![Sites](screenshots/sites.png) **Sites** : protection et score par site |
 | ![Règles](screenshots/regles.png) **Règles** : modes, exceptions, simulation | ![Sauvegardes](screenshots/sauvegardes.png) **Sauvegardes** : chiffrées, copies hors site |
 | ![Cluster](screenshots/cluster.png) **Cluster** : vos serveurs, score de sécurité et alertes | ![Serveur](screenshots/cluster-serveur.png) **Tableau de bord serveur** : ressources en direct, corrections, terminal |
-| ![Diagnostic](screenshots/diagnostics.png) **Assistant de configuration** : ports 80/443, certificats et moteur de proxy | |
+| ![Diagnostic](screenshots/diagnostics.png) **Assistant de configuration** : ports 80/443, certificats et moteur de proxy | ![Définitions](screenshots/definitions.png) **Définitions** : 19 sources mises à jour automatiquement toutes les heures |
 
 **Entièrement personnalisable : plusieurs thèmes, mode clair ou sombre, votre propre couleur d'accent** (Réglages → Apparence). L'apparence par défaut est *Aurora* en mode clair avec un accent bleu :
 
