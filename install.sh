@@ -9,10 +9,11 @@
 # What it does (idempotent: re-run to upgrade, existing configuration is never overwritten):
 #   * installs toutwaf-dp (data plane) and/or toutwaf-cp + toutwafctl (control plane) from a signed release
 #     verifying SHA-256 (and the Ed25519 signature when a release public key is configured)
-#   * creates the unprivileged `toutwaf` system user, /etc/toutwaf, /var/lib/toutwaf, /var/log/toutwaf
+#   * creates the unprivileged `toutwaf` system user and one installation home, /var/toutwaf by default (bin/ conf/ data/ logs/; --home DIR);
+#     an installation made before this layout keeps /etc/toutwaf, /var/lib/toutwaf, /var/log/toutwaf and is never moved
 #   * installs hardened systemd units (NoNewPrivileges, ProtectSystem=strict, seccomp SystemCallFilter, ...)
 #   * grants CAP_NET_BIND_SERVICE (ambient + setcap) so ports 80/443 work without root
-#   * opens the firewall (firewalld or ufw), labels files for SELinux, installs logrotate + sysctl tuning
+#   * opens the firewall by default when firewalld or ufw is active (80/443 + console port; --console-from, --no-firewall), labels files for SELinux, installs logrotate + sysctl tuning
 #   * prepares the panel (`toutwaf-cp bootstrap`) and prints the panel links, the one-time setup link and the ports to open
 #   * upgrades with automatic rollback when the new version fails its health check
 set -Eeuo pipefail
@@ -24,6 +25,11 @@ REPO="${TOUTWAF_REPO:-qu3ntin01/toutwaf}"                  # public binaries-onl
 DEFAULT_CHANNEL="stable"                                   # the copy of this script published on the dev branch has: DEFAULT_CHANNEL="dev"
 VERSION="${TOUTWAF_VERSION:-latest}"
 COMPONENT="${TOUTWAF_COMPONENT:-all}"          # dp | cp | all
+# Layout: one installation HOME (default /var/toutwaf) holding bin/ conf/ data/ logs/. An existing installation keeps its own paths
+# (the legacy /usr/local/bin + /etc/toutwaf + /var/lib/toutwaf + /var/log/toutwaf, or any HOME chosen earlier): see resolve_layout.
+HOME_DIR="${TOUTWAF_HOME:-}"; HOME_EXPLICIT=0; [ -z "$HOME_DIR" ] || HOME_EXPLICIT=1
+BIN_EXPLICIT=0; [ -z "${TOUTWAF_BIN_DIR:-}" ] || BIN_EXPLICIT=1
+LAYOUT=""; LAYOUT_NOTE=""                       # home | existing
 BIN_DIR="${TOUTWAF_BIN_DIR:-/usr/local/bin}"
 CONF_DIR="/etc/toutwaf"
 DATA_DIR="/var/lib/toutwaf"
@@ -35,7 +41,8 @@ CP_BIN="${TOUTWAF_CP_BIN:-}"                    # override of the toutwaf-cp use
 TARBALL=""                                      # local tarball instead of download
 CP_URL=""; NODE_TOKEN=""; ENROLL_TOKEN=""; NODE_GROUP=""; CP_CA=""
 CP_PORT=9443; HTTP_PORT=80; HTTPS_PORT=443; PUBLIC_HOST=""; CHANNEL="${TOUTWAF_CHANNEL:-}"
-OPEN_FW=""                                      # "" = legacy default (data-plane ports only), 1 = also the console port, 0 = none
+OPEN_FW=""                                      # "" = default: open what is needed when firewalld / ufw is active; 1 = same, explicit; 0 = never touch the firewall
+CONSOLE_FROM=""                                 # restrict the console port to this address / CIDR ("" = reachable from anywhere)
 OPEN_CP_PORT=0; NO_SELINUX=0; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
 QUIET=0; NO_COLOR_FLAG=0; ACCEPT_DEFAULTS=0
 ACTION=""; PURGE=0; LANG_CODE="${TOUTWAF_LANG:-}"; NARGS=$#
@@ -524,6 +531,136 @@ nl|s_selinux|SELinux configureren
 ru|s_selinux|Настройка SELinux
 zh|s_selinux|配置 SELinux
 ar|s_selinux|إعداد SELinux
+en|q_console_from|Only allow this network to reach the console (CIDR such as 203.0.113.0/24, empty = anyone)
+fr|q_console_from|N'autoriser que ce réseau à joindre la console (CIDR, ex. 203.0.113.0/24 ; vide = tout le monde)
+es|q_console_from|Permitir solo esta red hacia la consola (CIDR, p. ej. 203.0.113.0/24; vacío = cualquiera)
+de|q_console_from|Konsole nur für dieses Netz freigeben (CIDR, z. B. 203.0.113.0/24; leer = alle)
+it|q_console_from|Consenti alla console solo questa rete (CIDR, es. 203.0.113.0/24; vuoto = chiunque)
+pt|q_console_from|Permitir apenas esta rede na console (CIDR, ex. 203.0.113.0/24; vazio = qualquer um)
+nl|q_console_from|Console alleen voor dit netwerk openen (CIDR, bv. 203.0.113.0/24; leeg = iedereen)
+ru|q_console_from|Разрешить доступ к консоли только из этой сети (CIDR, напр. 203.0.113.0/24; пусто = всем)
+zh|q_console_from|仅允许该网络访问控制台（CIDR，如 203.0.113.0/24；留空 = 任何人）
+ar|q_console_from|السماح لهذه الشبكة فقط بالوصول إلى لوحة التحكم (CIDR مثل 203.0.113.0/24؛ فارغ = الجميع)
+en|q_console_from_bad|Not an address or CIDR (0.0.0.0/0 is the same as empty): the console port stays open to everyone.
+fr|q_console_from_bad|Ni adresse ni CIDR valide (0.0.0.0/0 revient à vide) : le port de la console reste ouvert à tous.
+es|q_console_from_bad|No es una dirección ni un CIDR (0.0.0.0/0 equivale a vacío): el puerto de la consola queda abierto a todos.
+de|q_console_from_bad|Keine Adresse und kein CIDR (0.0.0.0/0 entspricht leer): der Konsolenport bleibt für alle offen.
+it|q_console_from_bad|Non è un indirizzo né un CIDR (0.0.0.0/0 equivale a vuoto): la porta della console resta aperta a tutti.
+pt|q_console_from_bad|Não é um endereço nem um CIDR (0.0.0.0/0 equivale a vazio): a porta da console fica aberta a todos.
+nl|q_console_from_bad|Geen adres of CIDR (0.0.0.0/0 is hetzelfde als leeg): de consolepoort blijft voor iedereen open.
+ru|q_console_from_bad|Не адрес и не CIDR (0.0.0.0/0 равно пустому): порт консоли остаётся открытым для всех.
+zh|q_console_from_bad|不是有效的地址或 CIDR（0.0.0.0/0 等同于留空）：控制台端口对所有人开放。
+ar|q_console_from_bad|ليس عنوانا ولا CIDR صالحا (0.0.0.0/0 يعادل فارغا): يبقى منفذ لوحة التحكم مفتوحا للجميع.
+en|fw_console_note|The console (port %s) holds the administration login: opening it to the whole Internet is convenient but exposed.
+fr|fw_console_note|La console (port %s) porte la connexion d'administration : l'ouvrir à tout Internet est pratique mais exposé.
+es|fw_console_note|La consola (puerto %s) contiene el acceso de administración: abrirla a todo Internet es cómodo pero expuesto.
+de|fw_console_note|Die Konsole (Port %s) enthält die Admin-Anmeldung: sie für das ganze Internet zu öffnen ist bequem, aber exponiert.
+it|fw_console_note|La console (porta %s) ospita l'accesso amministrativo: aprirla a tutta Internet è comodo ma esposto.
+pt|fw_console_note|A console (porta %s) contém o login de administração: abri-la a toda a Internet é cômodo, mas exposto.
+nl|fw_console_note|De console (poort %s) bevat de beheerlogin: openen voor heel internet is handig maar blootgesteld.
+ru|fw_console_note|Консоль (порт %s) содержит вход администратора: открывать её всему Интернету удобно, но небезопасно.
+zh|fw_console_note|控制台（端口 %s）承载管理员登录：向整个互联网开放虽然方便，但存在暴露风险。
+ar|fw_console_note|لوحة التحكم (المنفذ %s) تحوي تسجيل دخول الإدارة: فتحها لكل الإنترنت مريح لكنه معرّض للخطر.
+en|fw_console_open|Console port %s is open to everyone: restrict it with --console-from CIDR or in the console (Settings > Firewall)
+fr|fw_console_open|Le port %s de la console est ouvert à tous : restreignez-le avec --console-from CIDR ou dans la console (Réglages > Pare-feu)
+es|fw_console_open|El puerto %s de la consola está abierto a todos: restrínjalo con --console-from CIDR o en la consola (Ajustes > Cortafuegos)
+de|fw_console_open|Konsolenport %s ist für alle offen: mit --console-from CIDR oder in der Konsole (Einstellungen > Firewall) einschränken
+it|fw_console_open|La porta %s della console è aperta a tutti: limitala con --console-from CIDR o nella console (Impostazioni > Firewall)
+pt|fw_console_open|A porta %s da console está aberta a todos: restrinja com --console-from CIDR ou na console (Configurações > Firewall)
+nl|fw_console_open|Consolepoort %s staat open voor iedereen: beperk met --console-from CIDR of in de console (Instellingen > Firewall)
+ru|fw_console_open|Порт консоли %s открыт для всех: ограничьте его через --console-from CIDR или в консоли (Настройки > Брандмауэр)
+zh|fw_console_open|控制台端口 %s 对所有人开放：请用 --console-from CIDR 或在控制台（设置 > 防火墙）中限制
+ar|fw_console_open|منفذ لوحة التحكم %s مفتوح للجميع: قيّده بـ --console-from CIDR أو من اللوحة (الإعدادات > جدار الحماية)
+en|fw_console_from|Console port %s is only open to %s
+fr|fw_console_from|Le port %s de la console n'est ouvert qu'à %s
+es|fw_console_from|El puerto %s de la consola solo está abierto a %s
+de|fw_console_from|Konsolenport %s ist nur für %s offen
+it|fw_console_from|La porta %s della console è aperta solo a %s
+pt|fw_console_from|A porta %s da console está aberta apenas a %s
+nl|fw_console_from|Consolepoort %s staat alleen open voor %s
+ru|fw_console_from|Порт консоли %s открыт только для %s
+zh|fw_console_from|控制台端口 %s 仅对 %s 开放
+ar|fw_console_from|منفذ لوحة التحكم %s مفتوح فقط لـ %s
+en|fw_none|No active firewall (firewalld / ufw / nftables / iptables) found: nothing filters the traffic, no port to open
+fr|fw_none|Aucun pare-feu actif (firewalld / ufw / nftables / iptables) : rien ne filtre le trafic, aucun port à ouvrir
+es|fw_none|No hay cortafuegos activo (firewalld / ufw / nftables / iptables): nada filtra el tráfico, no hay puertos que abrir
+de|fw_none|Keine aktive Firewall (firewalld / ufw / nftables / iptables) gefunden: nichts filtert den Verkehr, keine Ports zu öffnen
+it|fw_none|Nessun firewall attivo (firewalld / ufw / nftables / iptables): nulla filtra il traffico, nessuna porta da aprire
+pt|fw_none|Nenhum firewall ativo (firewalld / ufw / nftables / iptables): nada filtra o tráfego, nenhuma porta a abrir
+nl|fw_none|Geen actieve firewall (firewalld / ufw / nftables / iptables) gevonden: niets filtert het verkeer, geen poorten te openen
+ru|fw_none|Активный брандмауэр (firewalld / ufw / nftables / iptables) не найден: трафик не фильтруется, открывать порты не нужно
+zh|fw_none|未发现活动的防火墙（firewalld / ufw / nftables / iptables）：流量未被过滤，无需放行端口
+ar|fw_none|لم يُعثر على جدار حماية نشط (firewalld / ufw / nftables / iptables): لا شيء يرشح الحركة ولا منافذ لفتحها
+en|fw_manual|The %s firewall is not modified by the installer: run these commands yourself
+fr|fw_manual|Le pare-feu %s n'est pas modifié par l'installeur : exécutez vous-même ces commandes
+es|fw_manual|El cortafuegos %s no lo modifica el instalador: ejecute usted estos comandos
+de|fw_manual|Die Firewall %s wird vom Installer nicht verändert: führen Sie diese Befehle selbst aus
+it|fw_manual|Il firewall %s non viene modificato dall'installer: esegui tu questi comandi
+pt|fw_manual|O firewall %s não é modificado pelo instalador: execute você mesmo estes comandos
+nl|fw_manual|De firewall %s wordt niet door de installer gewijzigd: voer deze commando's zelf uit
+ru|fw_manual|Брандмауэр %s установщик не изменяет: выполните эти команды сами
+zh|fw_manual|安装程序不会修改 %s 防火墙：请自行执行以下命令
+ar|fw_manual|لا يعدّل المثبّت جدار الحماية %s: نفّذ هذه الأوامر بنفسك
+en|fw_failed|The firewall could not be configured: %s
+fr|fw_failed|Le pare-feu n'a pas pu être configuré : %s
+es|fw_failed|No se pudo configurar el cortafuegos: %s
+de|fw_failed|Die Firewall konnte nicht konfiguriert werden: %s
+it|fw_failed|Impossibile configurare il firewall: %s
+pt|fw_failed|Não foi possível configurar o firewall: %s
+nl|fw_failed|De firewall kon niet worden geconfigureerd: %s
+ru|fw_failed|Не удалось настроить брандмауэр: %s
+zh|fw_failed|无法配置防火墙：%s
+ar|fw_failed|تعذر إعداد جدار الحماية: %s
+en|home_fresh|New installation: everything goes under %s (bin, conf, data, logs)
+fr|home_fresh|Nouvelle installation : tout est placé sous %s (bin, conf, data, logs)
+es|home_fresh|Instalación nueva: todo va bajo %s (bin, conf, data, logs)
+de|home_fresh|Neuinstallation: alles liegt unter %s (bin, conf, data, logs)
+it|home_fresh|Nuova installazione: tutto sotto %s (bin, conf, data, logs)
+pt|home_fresh|Nova instalação: tudo fica em %s (bin, conf, data, logs)
+nl|home_fresh|Nieuwe installatie: alles komt onder %s (bin, conf, data, logs)
+ru|home_fresh|Новая установка: всё размещается в %s (bin, conf, data, logs)
+zh|home_fresh|全新安装：所有内容位于 %s（bin、conf、data、logs）
+ar|home_fresh|تثبيت جديد: كل شيء تحت %s (bin وconf وdata وlogs)
+en|home_legacy|Existing installation detected: its paths are kept (bin %s, conf %s, data %s). Nothing is moved; use --home DIR for the new layout.
+fr|home_legacy|Installation existante détectée : ses chemins sont conservés (bin %s, conf %s, data %s). Rien n'est déplacé ; utilisez --home DIR pour la nouvelle disposition.
+es|home_legacy|Instalación existente detectada: se mantienen sus rutas (bin %s, conf %s, data %s). No se mueve nada; use --home DIR para la nueva disposición.
+de|home_legacy|Bestehende Installation erkannt: ihre Pfade bleiben (bin %s, conf %s, data %s). Nichts wird verschoben; --home DIR für das neue Layout.
+it|home_legacy|Installazione esistente rilevata: i suoi percorsi restano (bin %s, conf %s, data %s). Nulla viene spostato; usa --home DIR per il nuovo layout.
+pt|home_legacy|Instalação existente detectada: os caminhos são mantidos (bin %s, conf %s, data %s). Nada é movido; use --home DIR para o novo layout.
+nl|home_legacy|Bestaande installatie gevonden: de paden blijven (bin %s, conf %s, data %s). Er wordt niets verplaatst; gebruik --home DIR voor de nieuwe indeling.
+ru|home_legacy|Обнаружена существующая установка: её пути сохраняются (bin %s, conf %s, data %s). Ничего не переносится; для новой схемы используйте --home DIR.
+zh|home_legacy|检测到现有安装：沿用其路径（bin %s、conf %s、data %s）。不会移动任何内容；使用 --home DIR 采用新布局。
+ar|home_legacy|تم اكتشاف تثبيت قائم: تبقى مساراته (bin %s وconf %s وdata %s). لا يُنقل شيء؛ استخدم --home DIR للتخطيط الجديد.
+en|home_explicit_legacy|--home %s was given while an installation exists in %s: its data is NOT moved
+fr|home_explicit_legacy|--home %s a été donné alors qu'une installation existe dans %s : ses données ne sont PAS déplacées
+es|home_explicit_legacy|Se indicó --home %s mientras existe una instalación en %s: sus datos NO se mueven
+de|home_explicit_legacy|--home %s wurde angegeben, obwohl in %s eine Installation existiert: deren Daten werden NICHT verschoben
+it|home_explicit_legacy|--home %s indicato mentre esiste un'installazione in %s: i suoi dati NON vengono spostati
+pt|home_explicit_legacy|--home %s foi informado enquanto existe uma instalação em %s: os dados dela NÃO são movidos
+nl|home_explicit_legacy|--home %s opgegeven terwijl er een installatie bestaat in %s: de data wordt NIET verplaatst
+ru|home_explicit_legacy|--home %s указан при существующей установке в %s: её данные НЕ переносятся
+zh|home_explicit_legacy|已指定 --home %s，但 %s 中已有安装：其数据不会被移动
+ar|home_explicit_legacy|تم تحديد --home %s بينما يوجد تثبيت في %s: بياناته لا تُنقل
+en|home_bad|--home must be an absolute path (letters, digits, . _ - + /), not / and not under /proc /sys /dev: %s
+fr|home_bad|--home doit être un chemin absolu (lettres, chiffres, . _ - + /), ni / ni sous /proc /sys /dev : %s
+es|home_bad|--home debe ser una ruta absoluta (letras, dígitos, . _ - + /), no / ni bajo /proc /sys /dev: %s
+de|home_bad|--home muss ein absoluter Pfad sein (Buchstaben, Ziffern, . _ - + /), nicht / und nicht unter /proc /sys /dev: %s
+it|home_bad|--home deve essere un percorso assoluto (lettere, cifre, . _ - + /), non / né sotto /proc /sys /dev: %s
+pt|home_bad|--home deve ser um caminho absoluto (letras, dígitos, . _ - + /), não / nem sob /proc /sys /dev: %s
+nl|home_bad|--home moet een absoluut pad zijn (letters, cijfers, . _ - + /), niet / en niet onder /proc /sys /dev: %s
+ru|home_bad|--home должен быть абсолютным путём (буквы, цифры, . _ - + /), не / и не в /proc /sys /dev: %s
+zh|home_bad|--home 必须是绝对路径（字母、数字、. _ - + /），不能是 / 也不能位于 /proc /sys /dev 下：%s
+ar|home_bad|يجب أن يكون --home مسارا مطلقا (حروف وأرقام . _ - + /) وليس / ولا تحت /proc /sys /dev: %s
+en|home_noexec|%s is on a noexec mount: the binaries could not run from there, choose another --home
+fr|home_noexec|%s est sur un montage noexec : les binaires n'y pourraient pas s'exécuter, choisissez un autre --home
+es|home_noexec|%s está en un montaje noexec: los binarios no podrían ejecutarse allí, elija otro --home
+de|home_noexec|%s liegt auf einem noexec-Mount: die Programme könnten dort nicht laufen, wählen Sie ein anderes --home
+it|home_noexec|%s si trova su un mount noexec: i binari non potrebbero girarvi, scegli un altro --home
+pt|home_noexec|%s está em uma montagem noexec: os binários não poderiam executar ali, escolha outro --home
+nl|home_noexec|%s staat op een noexec-mount: de programma's kunnen daar niet draaien, kies een ander --home
+ru|home_noexec|%s находится на noexec-разделе: бинарные файлы там не запустятся, выберите другой --home
+zh|home_noexec|%s 位于 noexec 挂载上：二进制文件无法在此运行，请选择其他 --home
+ar|home_noexec|%s على نقطة تركيب noexec: لا يمكن تشغيل الملفات التنفيذية هناك، اختر --home آخر
 en|s_fw|Configuring the firewall
 fr|s_fw|Configuration du pare-feu
 es|s_fw|Configurando el cortafuegos
@@ -1116,7 +1253,7 @@ t() {
   [ -n "$line" ] || line="$(printf '%s\n' "$CATALOG" | grep -m1 "^en|$key|" || true)"
   fmt="${line#*|*|}"; [ -n "$line" ] || fmt="$key"
   # shellcheck disable=SC2059
-  printf "$fmt" "$@"
+  printf -- "$fmt" "$@"
 }
 
 # ------------------------------------------------------------------------------------------------ UI helpers
@@ -1211,6 +1348,8 @@ box_line()   { [ "$QUIET" = 1 ] || printf '%s%s%s %s\n' "$ACC" "$V" "$R" "$1"; }
 box_bottom() { [ "$QUIET" = 1 ] || printf '%s%s%s%s\n' "$ACC" "$BL" "$(rule $((FRAME_W - 1)))" "$R"; }
 
 log()  { printf '%s\n' "$*" >>"${LOG:-/dev/null}" 2>/dev/null || true; return 0; }
+# progress: when the control plane's update helper runs us (TOUTWAF_PROGRESS_FILE), every step is appended there for the console
+progress() { if [ -n "${TOUTWAF_PROGRESS_FILE:-}" ]; then printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$TOUTWAF_PROGRESS_FILE" 2>/dev/null || true; fi; return 0; }
 # info: detail line; shown on plain (non-TTY / --no-color) output, kept in the log only while a spinner runs
 info() {
   log "$*"
@@ -1218,12 +1357,13 @@ info() {
   return 0
 }
 warn() {
-  WARNINGS+=("$*"); log "[warn] $*"
+  WARNINGS+=("$*"); log "[warn] $*"; progress "[warn] $*"
   if [ "$SPIN_PID" = "" ] && [ "$UI_COLOR" = 0 ] && [ "$QUIET" = 0 ]; then printf '[warn] %s\n' "$*" >&3; fi
   return 0
 }
 spin_kill() { if [ -n "$SPIN_PID" ]; then kill "$SPIN_PID" 2>/dev/null || true; wait "$SPIN_PID" 2>/dev/null || true; SPIN_PID=""; printf '\r\033[K'; fi; return 0; }
 fail_report() {   # message
+  progress "ERROR $1${2:+ ($2)}"
   spin_kill
   [ "$UI_COLOR" = 1 ] && printf '\033[?25h'
   printf '%s%s %s%s%s\n' "$RED" "$ERM" "$1" "$R" "${2:+ ($2)}" >&3
@@ -1240,7 +1380,7 @@ trap on_err ERR
 
 # step "message" cmd args...: spinner (TTY) or bullet, output of the command goes to the log; a failure aborts (ERR trap)
 step() {
-  CUR_STEP="$1"; shift
+  CUR_STEP="$1"; shift; progress "$CUR_STEP"
   if [ "$DRY_RUN" = 1 ]; then printf '  %s %s\n' "$BUL" "$CUR_STEP"; "$@"; return 0; fi
   if [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ]; then
     printf '\033[?25l'
@@ -1302,7 +1442,7 @@ Actions:
 Options:
   --component dp|cp|all      what to install (default: all)
   --version X.Y.Z|latest     release to install (default: latest of the channel)
-  --channel stable|dev       release channel: stable = branch main, dev = branch dev (remembered in /etc/toutwaf/installer.conf)
+  --channel stable|dev       release channel: stable = branch main, dev = branch dev (remembered in <home>/conf/installer.conf)
   --tarball FILE             install from a local release tarball (offline)
   --base-url URL             mirror of the release tree (expects <URL>/channel.json and <URL>/releases/<version>/..., see deploy/RELEASE-LAYOUT.md)
   --cp-url URL               enrol the data plane with this control plane (e.g. https://cp:9444)
@@ -1312,10 +1452,14 @@ Options:
   --group NAME               node group (default: default)
   --cp-port N                console port (default 9443)        --http-port N / --https-port N   data-plane ports (80 / 443)
   --public-host HOST         public host name or IP shown in the panel links (default: auto-detected)
-  --open-firewall            open the needed firewall ports automatically (firewalld / ufw), including the console port
-  --open-cp-port             (same as above for the console port only)
-  --no-firewall --no-selinux --no-sysctl --no-start --no-enable
-  --bin-dir DIR | --install-dir DIR   where the binaries go (default /usr/local/bin)
+  --open-firewall            open the needed firewall ports (default when firewalld or ufw is active): 80/443 for the data plane and the
+                             console port. The data-plane API port (9444) is never opened by the installer.
+  --console-from CIDR        only allow this address / network to reach the console port (e.g. 203.0.113.0/24); default: anywhere
+  --no-firewall              never touch the firewall (nftables / iptables hosts are never modified either: the commands are printed)
+  --no-selinux --no-sysctl --no-start --no-enable
+  --home DIR                 installation home (default /var/toutwaf, or TOUTWAF_HOME): bin/ conf/ data/ logs/ below it; CLIs are linked in
+                             /usr/local/bin. An existing installation keeps its paths and is never moved unless you pass --home.
+  --bin-dir DIR | --install-dir DIR   where the binaries go (default HOME/bin; /usr/local/bin for an installation made before HOME existed)
   --purge                    with --uninstall: also delete configuration, data and logs
   --force                    reinstall even when the same version is installed
   --fr --en --es --de --it --pt --nl --ru --zh --ar    language of the installer
@@ -1350,12 +1494,14 @@ while [ $# -gt 0 ]; do
     --public-host) PUBLIC_HOST="$2"; shift 2;;
     --open-firewall) OPEN_FW=1; shift;;
     --open-cp-port) OPEN_CP_PORT=1; shift;;
+    --console-from) CONSOLE_FROM="$2"; shift 2;;
     --no-firewall) OPEN_FW=0; shift;;
     --no-selinux) NO_SELINUX=1; shift;;
     --no-sysctl) NO_SYSCTL=1; shift;;
     --no-start) NO_START=1; shift;;
     --no-enable) NO_ENABLE=1; shift;;
-    --bin-dir|--install-dir) BIN_DIR="$2"; shift 2;;
+    --home) HOME_DIR="$2"; HOME_EXPLICIT=1; shift 2;;
+    --bin-dir|--install-dir) BIN_DIR="$2"; BIN_EXPLICIT=1; shift 2;;
     --force) FORCE=1; shift;;
     --destdir) DESTDIR="$2"; shift 2;;
     --dry-run) DRY_RUN=1; shift;;
@@ -1376,8 +1522,12 @@ case "$CHANNEL" in beta) CHANNEL=dev;; esac
 case "$CHANNEL" in ""|stable|dev) ;; *) die "--channel must be stable or dev";; esac
 check_ports() { local pv; for pv in "$CP_PORT" "$HTTP_PORT" "$HTTPS_PORT"; do [[ "$pv" =~ ^[0-9]+$ ]] && [ "$pv" -ge 1 ] && [ "$pv" -le 65535 ] || die "invalid port: $pv"; done; }
 check_ports
-[ "$OPEN_CP_PORT" = 1 ] && [ -z "$OPEN_FW" ] && OPEN_FW=1
+# firewall: opening what ToutWAF needs is the default when firewalld / ufw is active (the helper checks that); --no-firewall opts out
+[ -n "$OPEN_FW" ] || OPEN_FW=1
 [ "$OPEN_FW" = 1 ] && OPEN_CP_PORT=1
+if [ -n "$CONSOLE_FROM" ]; then
+  if ! [[ "$CONSOLE_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$CONSOLE_FROM" == */0 ]]; then die "--console-from must be an address or a CIDR such as 203.0.113.0/24 (not 0.0.0.0/0)"; fi
+fi
 STAGING=0; [ -n "$DESTDIR" ] && STAGING=1
 
 # ------------------------------------------------------------------------------------------------ environment
@@ -1451,7 +1601,75 @@ load_existing_ports() {
 }
 
 # ------------------------------------------------------------------------------------------------ release channel
-INSTALLER_CONF="$(p "$CONF_DIR/installer.conf")"
+INSTALLER_CONF=""
+# ---- layout ---------------------------------------------------------------------------------------------------------------------
+valid_home() {
+  local h="$1"
+  [[ "$h" =~ ^/[A-Za-z0-9._/+-]+$ ]] || return 1
+  case "$h" in //*|*//*|*/../*|*/..|*/./*|*/.|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*) return 1;; esac
+  return 0
+}
+set_layout_vars() { INSTALLER_CONF="$(p "$CONF_DIR/installer.conf")"; }
+apply_home() {
+  HOME_DIR="${1%/}"; LAYOUT=home
+  [ "$BIN_EXPLICIT" = 1 ] || BIN_DIR="$HOME_DIR/bin"
+  CONF_DIR="$HOME_DIR/conf"; DATA_DIR="$HOME_DIR/data"; LOG_DIR="$HOME_DIR/logs"
+  set_layout_vars
+}
+# /etc/toutwaf.layout remembers a HOME layout (so that --update / --uninstall find it again even after an uninstall that kept the data)
+LAYOUT_FILE="$(p /etc/toutwaf.layout)"
+write_layout_file() {
+  [ "$LAYOUT" = home ] && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] || return 0
+  printf '# written by install.sh: installation home of this host (bin/ conf/ data/ logs/)\nHOME=%s\n' "$HOME_DIR" >"$LAYOUT_FILE" && chmod 0644 "$LAYOUT_FILE"
+  return 0
+}
+# EX_*: paths of an installation that already exists (read from its systemd units, else from the usual places)
+EX_FOUND=0; EX_BIN=""; EX_CONF=""; EX_DATA=""; EX_LOG=""; EX_HOME=""
+detect_existing_layout() {
+  EX_FOUND=0; EX_BIN=""; EX_CONF=""; EX_DATA=""; EX_LOG=""
+  local u f x
+  if [ -r "$LAYOUT_FILE" ]; then
+    x="$(sed -n 's/^HOME=//p' "$LAYOUT_FILE" | head -n1)"
+    if valid_home "$x" && { [ -d "$(p "$x/conf")" ] || [ -d "$(p "$x/data")" ]; }; then
+      EX_FOUND=1; EX_CONF="$x/conf"; EX_DATA="$x/data"; EX_LOG="$x/logs"; EX_BIN="$x/bin"; EX_HOME="$x"; return 0
+    fi
+  fi
+  for u in toutwaf-cp toutwaf-dp; do
+    f="$(p /etc/systemd/system/$u.service)"; [ -f "$f" ] || continue
+    EX_DATA="$(sed -n 's/^ReadWritePaths=\([^ ]*\)[ ].*/\1/p' "$f" | head -n1)"
+    EX_LOG="$(sed -n 's/^ReadWritePaths=[^ ]*[ ]\([^ ]*\).*/\1/p' "$f" | head -n1)"
+    EX_CONF="$(sed -n 's/^ReadOnlyPaths=\([^ ]*\).*/\1/p' "$f" | head -n1)"
+    x="$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' "$f" | head -n1)"; EX_BIN="${x%/*}"
+    for x in "$EX_DATA" "$EX_LOG" "$EX_CONF" "$EX_BIN"; do valid_home "$x" || { EX_DATA=""; break; }; done
+    [ -n "$EX_DATA" ] && { EX_FOUND=1; return 0; }
+  done
+  # no unit (staging, or units removed): look for configuration / binaries in the usual places
+  if [ -f "$(p /etc/toutwaf/toutwaf-cp.yaml)" ] || [ -f "$(p /etc/toutwaf/toutwaf-dp.yaml)" ] || [ -f "$(p /var/lib/toutwaf/toutwaf.db)" ] \
+     || [ -x "$(p /usr/local/bin/toutwaf-cp)" ] || [ -x "$(p /usr/local/bin/toutwaf-dp)" ]; then
+    EX_FOUND=1; EX_CONF=/etc/toutwaf; EX_DATA=/var/lib/toutwaf; EX_LOG=/var/log/toutwaf; EX_BIN="${TOUTWAF_BIN_DIR:-/usr/local/bin}"; return 0
+  fi
+  if [ -f "$(p /var/toutwaf/conf/toutwaf-cp.yaml)" ] || [ -f "$(p /var/toutwaf/conf/toutwaf-dp.yaml)" ]; then
+    EX_FOUND=1; EX_CONF=/var/toutwaf/conf; EX_DATA=/var/toutwaf/data; EX_LOG=/var/toutwaf/logs; EX_BIN=/var/toutwaf/bin
+  fi
+  return 0
+}
+resolve_layout() {
+  if [ -n "$HOME_DIR" ] && ! valid_home "$HOME_DIR"; then die "$(t home_bad "$HOME_DIR")"; fi
+  detect_existing_layout
+  if [ "$HOME_EXPLICIT" = 1 ]; then
+    apply_home "$HOME_DIR"
+    if [ "$EX_FOUND" = 1 ] && [ "$EX_DATA" != "$DATA_DIR" ]; then LAYOUT_NOTE="$(t home_explicit_legacy "$HOME_DIR" "$EX_DATA")"; else LAYOUT_NOTE="$(t home_fresh "$HOME_DIR")"; fi
+  elif [ "$EX_FOUND" = 1 ]; then
+    LAYOUT=existing
+    [ "$BIN_EXPLICIT" = 1 ] || BIN_DIR="$EX_BIN"
+    CONF_DIR="$EX_CONF"; DATA_DIR="$EX_DATA"; LOG_DIR="$EX_LOG"; set_layout_vars
+    if [ -n "$EX_HOME" ]; then LAYOUT=home; HOME_DIR="$EX_HOME"; elif [ "$EX_CONF" = /var/toutwaf/conf ]; then LAYOUT=home; HOME_DIR=/var/toutwaf; else LAYOUT_NOTE="$(t home_legacy "$BIN_DIR" "$CONF_DIR" "$DATA_DIR")"; fi
+  else
+    apply_home /var/toutwaf; LAYOUT_NOTE="$(t home_fresh "$HOME_DIR")"
+  fi
+  return 0
+}
+resolve_layout
 conf_get() { [ -r "$INSTALLER_CONF" ] && sed -n "s/^$1=//p" "$INSTALLER_CONF" | head -n1 || true; }
 # precedence: --channel / TOUTWAF_CHANNEL > a non-stable DEFAULT_CHANNEL baked into this copy > remembered installer.conf > stable
 decide_channel() {
@@ -1741,8 +1959,9 @@ cmd_links() {
 }
 
 # ------------------------------------------------------------------------------------------------ uninstall
+FW_CLOSED=0
 cmd_uninstall() {
-  local a s b
+  local a s b l
   banner; box_top "$(t un_title)"; box_bottom
   if interactive; then
     ask_yn a "$(t q_confirm_un)" 0; [ "$a" = 1 ] || { say "  $(t aborted)"; exit 0; }
@@ -1751,20 +1970,28 @@ cmd_uninstall() {
     ask_yn a "$(t q_purge)" 0; [ "$a" = 1 ] || die "$(t aborted)"
   fi
   detect_installed; load_existing_ports
-  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-dp.service toutwaf-cp.service; do
+  # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
+  if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-dp.service toutwaf-cp.service; do
     if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
     run rm -f "$(p /etc/systemd/system/$s)"
   done
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl daemon-reload; fi
-  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
+  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
   run rm -f "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"
-  if [ "$STAGING" = 0 ] && have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall; do
+    l="$(p /usr/local/bin/$b)"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
+  done
+  run rm -f "$(p "$CONF_DIR/firewall.conf")" "$(p "$CONF_DIR/firewall.managed")"
+  if [ "$STAGING" = 0 ] && [ "${FW_CLOSED:-0}" = 0 ] && have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then   # installation without the helper (older versions)
     run firewall-cmd --permanent --remove-service=toutwaf-dp >/dev/null 2>&1 || true
     run firewall-cmd --permanent --remove-port="$CP_PORT/tcp" >/dev/null 2>&1 || true
     run firewall-cmd --reload >/dev/null 2>&1 || true
   fi
   if [ "$PURGE" = 1 ]; then
     run rm -rf "$(p "$CONF_DIR")" "$(p "$DATA_DIR")" "$(p "$LOG_DIR")"
+    if [ "$LAYOUT" = home ]; then rmdir "$(p "$BIN_DIR")" "$(p "$HOME_DIR")" 2>/dev/null || true; fi
+    run rm -f "$LAYOUT_FILE"   # only when empty: the parent directory and foreign content stay
     if [ "$STAGING" = 0 ] && have userdel; then run userdel "$SVC_USER" >/dev/null 2>&1 || true; fi
     say "  $(paint "$GRN" "$OKM") $(t un_purged)"
   else
@@ -1881,13 +2108,40 @@ create_user() {
 }
 
 make_dirs() {
-  local d
+  local d par
+  if [ "$LAYOUT" = home ]; then
+    # the parent of the home (/var by default, or whatever --home names) is created only when absent and never modified when it exists
+    par="${HOME_DIR%/*}"; [ -n "$par" ] || par=/
+    [ -d "$(p "$par")" ] || run install -d -m 0755 "$(p "$par")"
+    if [ ! -d "$(p "$HOME_DIR")" ]; then run install -d -m 0755 "$(p "$HOME_DIR")"; fi
+    run install -d -m 0755 "$(p "$BIN_DIR")"
+    check_noexec "$(p "$BIN_DIR")"
+    write_layout_file
+  fi
   run install -d -m 0750 -o "$([ "$STAGING" = 1 ] && id -un || echo root)" -g "$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")" "$(p "$CONF_DIR")" "$(p "$CONF_DIR/certs")"
   for d in "$DATA_DIR" "$LOG_DIR" "$DATA_DIR/certs" "$DATA_DIR/spool" "$DATA_DIR/backup"; do
     run install -d -m 0750 -o "$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")" -g "$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")" "$(p "$d")"
   done
 }
 
+# refuse a directory on a noexec mount: the binaries could not start from there
+check_noexec() {
+  [ "$STAGING" = 1 ] && return 0
+  have findmnt || return 0
+  findmnt -no OPTIONS -T "$1" 2>/dev/null | tr ',' '\n' | grep -qx noexec && die "$(t home_noexec "$1")"
+  return 0
+}
+# the CLIs stay on PATH when the binaries live under HOME
+link_cli() {
+  [ "$BIN_DIR" = /usr/local/bin ] && return 0
+  local b l; run install -d -m 0755 "$(p /usr/local/bin)"
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall; do
+    [ -e "$(p "$BIN_DIR/$b")" ] || continue
+    l="$(p /usr/local/bin/$b)"
+    if [ -L "$l" ] || [ ! -e "$l" ]; then run ln -sfn "$BIN_DIR/$b" "$l"; fi
+  done
+  return 0
+}
 install_binary() {    # name ; returns 1 when already up to date
   local name="$1" src="$SRC_DIR/$1" dst; dst="$(p "$BIN_DIR/$name")"
   [ -e "$src" ] || { [ "$DRY_RUN" = 1 ] && return 0; die "$name missing from the release"; }
@@ -2004,6 +2258,11 @@ sd_opt() {
   if [ -z "$SD_VER" ]; then SD_VER="$(systemctl --version 2>/dev/null | awk 'NR==1{print $2}')"; [[ "$SD_VER" =~ ^[0-9]+$ ]] || SD_VER=999; fi
   if [ "$SD_VER" -ge "$1" ]; then printf '%s\n' "$2"; else printf '# %s (needs systemd >= %s, running %s)\n' "$2" "$1" "$SD_VER"; fi
 }
+# StateDirectory= / LogsDirectory= make systemd create /var/lib/toutwaf and /var/log/toutwaf: only wanted for the legacy locations
+state_dir_lines() {
+  if [ "$DATA_DIR" = /var/lib/toutwaf ]; then printf 'StateDirectory=toutwaf\nStateDirectoryMode=0750\n'; fi
+  if [ "$LOG_DIR" = /var/log/toutwaf ]; then printf 'LogsDirectory=toutwaf\nLogsDirectoryMode=0750\n'; fi
+}
 write_units() {
   [ "$DRY_RUN" = 1 ] && return 0
   local sd; sd="$(p /etc/systemd/system)"; mkdir -p "$sd"
@@ -2059,10 +2318,7 @@ SystemCallFilter=~@privileged @resources @mount @swap @reboot @raw-io @obsolete 
 UMask=0027
 ReadWritePaths=$DATA_DIR $LOG_DIR
 ReadOnlyPaths=$CONF_DIR
-StateDirectory=toutwaf
-StateDirectoryMode=0750
-LogsDirectory=toutwaf
-LogsDirectoryMode=0750
+$(state_dir_lines)
 
 [Install]
 WantedBy=multi-user.target
@@ -2110,18 +2366,15 @@ SystemCallFilter=~@privileged @resources @mount @swap @reboot @raw-io @obsolete 
 UMask=0027
 ReadWritePaths=$DATA_DIR $LOG_DIR
 ReadOnlyPaths=$CONF_DIR
-StateDirectory=toutwaf
-StateDirectoryMode=0750
-LogsDirectory=toutwaf
-LogsDirectoryMode=0750
+$(state_dir_lines)
 
 [Install]
 WantedBy=multi-user.target
 EOF
   fi
   mkdir -p "$(p /usr/lib/sysusers.d)" "$(p /usr/lib/tmpfiles.d)" "$(p /etc/logrotate.d)"
-  printf 'u toutwaf - "ToutWAF service account" /var/lib/toutwaf /usr/sbin/nologin\n' >"$(p /usr/lib/sysusers.d/toutwaf.conf)"
-  printf 'd /var/lib/toutwaf 0750 toutwaf toutwaf -\nd /var/log/toutwaf 0750 toutwaf toutwaf -\n' >"$(p /usr/lib/tmpfiles.d/toutwaf.conf)"
+  printf 'u toutwaf - "ToutWAF service account" %s /usr/sbin/nologin\n' "$DATA_DIR" >"$(p /usr/lib/sysusers.d/toutwaf.conf)"
+  printf 'd %s 0750 toutwaf toutwaf -\nd %s 0750 toutwaf toutwaf -\n' "$DATA_DIR" "$LOG_DIR" >"$(p /usr/lib/tmpfiles.d/toutwaf.conf)"
   cat >"$(p /etc/logrotate.d/toutwaf)" <<EOF
 $LOG_DIR/*.log $LOG_DIR/*.ndjson {
     daily
@@ -2136,39 +2389,398 @@ $LOG_DIR/*.log $LOG_DIR/*.ndjson {
     create 0640 $SVC_USER $SVC_USER
 }
 EOF
-  # Helper used by the control plane's "update_engine" command. toutwaf-dp runs it as the unprivileged `toutwaf` user
-  # (NoNewPrivileges, read-only filesystem), which cannot upgrade anything itself. So the hook only records the request
-  # in $DATA_DIR/upgrade-request; toutwaf-upgrade.path notices it and starts toutwaf-upgrade.service (root, oneshot),
-  # which re-runs this installer for the requested version (checksum/signature verified, automatic rollback).
-  if want_dp; then
-  cat >"$(p "$BIN_DIR/toutwaf-upgrade")" <<EOF
+  if want_dp || want_cp; then write_helpers "$sd"; fi
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ root helpers
+# toutwaf-cp and toutwaf-dp run as the unprivileged `toutwaf` user in a read-only sandbox, so they cannot upgrade anything or touch
+# the firewall. Each action goes through a small root helper that is started by a systemd path unit when the service account drops
+# a request file into $DATA_DIR, validates every value again, does the work and writes a status file the control plane reads back:
+#   toutwaf-upgrade   download + verify + install a release, health check, automatic rollback  (console: Updates; DP: update_engine)
+#   toutwaf-firewall  open the ports ToutWAF needs in firewalld / ufw                            (console: Settings > Firewall; this installer)
+# The scripts carry a "toutwaf-<name>-proto: N" marker that the control plane checks before offering the button.
+emit_helper() {   # NAME  (template on stdin)
+  local dst tmp; dst="$(p "$BIN_DIR/$1")"; tmp="$dst.new"
+  sed -e "s#@DATA_DIR@#$DATA_DIR#g" -e "s#@CONF_DIR@#$CONF_DIR#g" -e "s#@BIN_DIR@#$BIN_DIR#g" -e "s#@REPO@#$REPO#g" -e "s#@SVC_USER@#$SVC_USER#g" >"$tmp"
+  chmod 0755 "$tmp"; mv -f "$tmp" "$dst"   # new inode: a helper that is running right now (it is updating us) keeps reading its old copy
+}
+write_helpers() {
+  local sd="$1"
+  emit_helper toutwaf-upgrade <<'TW_UPGRADE_TPL'
 #!/usr/bin/env bash
-# toutwaf-upgrade request   (default; called by toutwaf-dp with TW_DESIRED_ENGINE_VERSION) record an upgrade request
-# toutwaf-upgrade apply     (root; called by toutwaf-upgrade.service) perform it
-set -euo pipefail
-REQ="$DATA_DIR/upgrade-request"
-valid() { [[ "\$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\$ ]]; }
-case "\${1:-request}" in
+# toutwaf-upgrade-proto: 2
+#
+# toutwaf-upgrade request   (called by toutwaf-dp with TW_DESIRED_ENGINE_VERSION) record a data-plane upgrade request
+# toutwaf-upgrade apply     (root; called by toutwaf-upgrade.service) perform the pending request
+#
+# The control plane (user toutwaf, read-only sandbox) and the data plane cannot upgrade anything themselves: they only write
+# @DATA_DIR@/upgrade-request (KEY=VALUE). toutwaf-upgrade.path notices it and starts toutwaf-upgrade.service, which runs
+# this script as root. Everything in the request file is untrusted input here and is validated again, key by key.
+# Progress and the outcome are written to @DATA_DIR@/upgrade-status (STATE=queued|running|succeeded|failed|rolled_back)
+# and @DATA_DIR@/upgrade.log, which the control plane reads back (also after its own restart).
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; BIN_DIR='@BIN_DIR@'; REPO='@REPO@'; SVC_USER='@SVC_USER@'
+REQ="$DATA_DIR/upgrade-request"; STATUS="$DATA_DIR/upgrade-status"; LOGF="$DATA_DIR/upgrade.log"
+
+valid_version() { [[ "$1" == latest ]] || [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]{0,40})?$ ]]; }
+valid_channel() { [[ "$1" == stable || "$1" == dev ]]; }
+valid_comp()    { [[ "$1" == all || "$1" == cp || "$1" == dp ]]; }
+valid_job()     { [[ -z "$1" || "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
+req_get() { sed -n "s/^$1=//p" "$REQ" 2>/dev/null | tail -n1 | tr -d '\r'; }
+conf_get() { sed -n "s/^$1=//p" "$CONF_DIR/installer.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
+own() { chown "$SVC_USER:$SVC_USER" "$1" 2>/dev/null || true; chmod 0644 "$1" 2>/dev/null || true; }
+
+S_STATE=""; S_PHASE=""; S_CHANNEL=""; S_FROM=""; S_TO=""; S_JOB=""; S_MSG=""; S_STARTED=""; S_FINISHED=""
+write_status() {
+  local tmp; tmp="$(mktemp "$STATUS.XXXXXX")" || return 0
+  { printf 'STATE=%s\nPHASE=%s\nCHANNEL=%s\nFROM=%s\nTO=%s\nJOB=%s\nSTARTED=%s\nFINISHED=%s\n' "$S_STATE" "$S_PHASE" "$S_CHANNEL" "$S_FROM" "$S_TO" "$S_JOB" "$S_STARTED" "$S_FINISHED"
+    printf 'MESSAGE=%s\n' "$(printf '%s' "$S_MSG" | tr -d '\000-\037' | cut -c1-300)"; } >"$tmp"
+  own "$tmp"; mv -f "$tmp" "$STATUS"
+}
+plog() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$LOGF"; }
+cur_version() {
+  local v=""
+  if [ -x "$BIN_DIR/toutwaf-cp" ]; then v="$("$BIN_DIR/toutwaf-cp" version 2>/dev/null | awk 'NR==1{print $2}')"; fi
+  if [ -z "$v" ] && [ -x "$BIN_DIR/toutwaf-dp" ]; then v="$("$BIN_DIR/toutwaf-dp" --version 2>/dev/null | awk 'NR==1{print $2}')"; fi
+  printf '%s' "$v"
+}
+fail() {   # message
+  S_STATE=failed; S_MSG="$1"; S_FINISHED="$(date +%s)"; write_status; plog "ERROR $1"; exit 1
+}
+
+case "${1:-request}" in
   request)
-    v="\${TW_DESIRED_ENGINE_VERSION:-latest}"; [ -n "\$v" ] || v=latest
-    valid "\$v" || { echo "toutwaf-upgrade: invalid version '\$v'" >&2; exit 1; }
-    tmp="\$(mktemp "\$REQ.XXXXXX")"; printf '%s\\n' "\$v" >"\$tmp"; mv -f "\$tmp" "\$REQ"
-    echo "toutwaf-upgrade: upgrade to \$v requested (applied by toutwaf-upgrade.service)";;
+    v="${TW_DESIRED_ENGINE_VERSION:-latest}"; [ -n "$v" ] || v=latest
+    valid_version "$v" || { echo "toutwaf-upgrade: invalid version '$v'" >&2; exit 1; }
+    tmp="$(mktemp "$REQ.XXXXXX")"
+    printf 'PROTO=2\nCOMPONENT=dp\nCHANNEL=%s\nVERSION=%s\nALLOW_DOWNGRADE=0\nJOB=\n' "$(conf_get CHANNEL | grep -x -e stable -e dev || echo stable)" "$v" >"$tmp"
+    mv -f "$tmp" "$REQ"
+    echo "toutwaf-upgrade: upgrade to $v requested (applied by toutwaf-upgrade.service)";;
   apply)
-    [ "\$(id -u)" -eq 0 ] || { echo "toutwaf-upgrade apply must run as root" >&2; exit 1; }
-    [ -f "\$REQ" ] || exit 0
-    v="\$(head -n1 "\$REQ")"; rm -f "\$REQ"
-    valid "\$v" || { echo "toutwaf-upgrade: invalid version '\$v'" >&2; exit 1; }
-    ch="\$(sed -n 's/^CHANNEL=//p' "$CONF_DIR/installer.conf" 2>/dev/null | head -n1)"; [ "\$ch" = dev ] && br=dev || { ch=stable; br=main; }
-    url="\${TOUTWAF_INSTALLER_URL:-https://raw.githubusercontent.com/$REPO/\$br/install.sh}"
-    curl -fsSL --retry 3 "\$url" | bash -s -- --update --component dp --version "\$v" --channel "\$ch" --yes --no-color;;
+    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-upgrade apply must run as root" >&2; exit 1; }
+    [ -f "$REQ" ] || exit 0
+    # legacy request (protocol 1): one line holding the version
+    if grep -q '=' "$REQ"; then
+      comp="$(req_get COMPONENT)"; chan="$(req_get CHANNEL)"; ver="$(req_get VERSION)"; dg="$(req_get ALLOW_DOWNGRADE)"; job="$(req_get JOB)"
+    else
+      ver="$(head -n1 "$REQ" | tr -d '\r')"; comp=dp; chan="$(conf_get CHANNEL)"; dg=0; job=""
+    fi
+    rm -f "$REQ"
+    : >"$LOGF"; own "$LOGF"
+    S_JOB="$job"; S_CHANNEL="$chan"; S_TO="$ver"; S_FROM="$(cur_version)"; S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"
+    valid_comp "$comp" && valid_channel "$chan" && valid_version "$ver" && valid_job "$job" || { S_JOB=""; fail "invalid update request"; }
+    [ "$dg" = 1 ] || dg=0
+    write_status
+    plog "update requested: component=$comp channel=$chan version=$ver downgrade_allowed=$dg"
+    br=main; [ "$chan" = dev ] && br=dev
+    base="$(conf_get BASE_URL)"; case "$base" in http://*|https://*) ;; *) base="";; esac
+    url="${TOUTWAF_INSTALLER_URL:-${base:+$base/install.sh}}"; url="${url:-https://raw.githubusercontent.com/$REPO/$br/install.sh}"
+    inst="$(mktemp)"; trap 'rm -f "$inst"' EXIT
+    S_PHASE="Downloading the installer"; write_status; plog "$S_PHASE ($url)"
+    curl -fsSL --retry 3 --connect-timeout 15 -o "$inst" "$url" 2>>"$LOGF" && head -c2 "$inst" | grep -q '^#!' || fail "cannot download the installer from $url"
+    args=(--update --component "$comp" --channel "$chan" --yes --no-color --quiet)
+    [ "$ver" = latest ] || args+=(--version "$ver")
+    [ -z "$base" ] || args+=(--base-url "$base")
+    [ "$dg" = 1 ] && args+=(--force)
+    S_PHASE="Running the installer"; write_status
+    out="$(mktemp)"
+    TOUTWAF_PROGRESS_FILE="$LOGF" bash "$inst" "${args[@]}" >"$out" 2>&1 </dev/null; rc=$?
+    # the installer's own messages (errors, rollback notices) go to the log too
+    sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -v '^[[:space:]]*$' | tail -n 40 | while IFS= read -r l; do plog "$l"; done
+    S_TO="$(cur_version)"; [ -n "$S_TO" ] || S_TO="$ver"
+    S_FINISHED="$(date +%s)"
+    if [ "$rc" -eq 0 ]; then
+      S_STATE=succeeded; S_PHASE="Done"; S_MSG=""; plog "update finished: now running ${S_TO}"
+    else
+      msg="$(sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -iE 'error|fail|did not|refus|downgrad|checksum|signature|withdrawn|yanked' | tail -n1 | sed 's/^[^[:alnum:]]*//')"
+      S_MSG="${msg:-installer exited with status $rc}"
+      if grep -qi 'rolled back to the previous version' "$out" "$LOGF" 2>/dev/null; then S_STATE=rolled_back; else S_STATE=failed; fi
+      S_PHASE="Failed"; plog "ERROR update failed (rc=$rc): $S_MSG"
+    fi
+    write_status; rm -f "$out"
+    exit "$rc";;
   *) echo "usage: toutwaf-upgrade [request|apply]" >&2; exit 2;;
 esac
-EOF
-  chmod 0755 "$(p "$BIN_DIR/toutwaf-upgrade")"
+TW_UPGRADE_TPL
+  emit_helper toutwaf-firewall <<'TW_FIREWALL_TPL'
+#!/usr/bin/env bash
+# toutwaf-firewall-proto: 1
+#
+# toutwaf-firewall status                       scan the host firewall and write @DATA_DIR@/firewall-status
+# toutwaf-firewall open [--dp 80,443] [--console PORT [--console-from CIDR]] [--agent PORT --agent-from CIDR]
+#                                               open ports (installer, root)
+# toutwaf-firewall apply                        (root; toutwaf-firewall.service) perform @DATA_DIR@/firewall-request
+# toutwaf-firewall close                        remove every rule this helper added (uninstall)
+# toutwaf-firewall print                        print the exact commands for this host
+#
+# Drives firewalld and ufw only. nftables-only and iptables-only hosts are never modified: the exact commands are printed and
+# reported (RESULT=unmanaged). Only ports recorded by the installer in @CONF_DIR@/firewall.conf (root-owned) can be opened,
+# only tcp, and only with a validated source network. The data-plane API port is never opened to everyone.
+# Rules added here are remembered in @CONF_DIR@/firewall.managed so that `close` removes exactly those and nothing else.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; SVC_USER='@SVC_USER@'
+REQ="$DATA_DIR/firewall-request"; STATUS="$DATA_DIR/firewall-status"; CONF="$CONF_DIR/firewall.conf"; MANAGED="$CONF_DIR/firewall.managed"
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---- validation (the request file is writable by the service account: never trust it) ------------------------------------
+valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+valid_job()  { [[ -z "$1" || "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
+# a source is an IPv4/IPv6 address or CIDR, nothing else (no spaces, quotes, newlines: it ends up in a firewall rule)
+valid_src()  {
+  [[ "$1" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || return 1
+  case "$1" in */0) return 1;; esac
+  if [[ "$1" == *:* ]]; then [[ "$1" =~ ^[0-9a-fA-F:.]+(/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))?$ ]] && [[ "$1" == *:*:* || "$1" == ::* ]]
+  else [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[12][0-9]|3[0-2]))?$ ]] && ! [[ "$1" =~ (^|\.)(25[6-9]|2[6-9][0-9]|[3-9][0-9][0-9])(\.|/|$) ]]; fi
+}
+fam() { [[ "$1" == *:* ]] && echo ipv6 || echo ipv4; }
+conf_get() { sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -n1 | tr -d '\r"'"'"; }
+in_list() { local x="$1"; shift; local i; for i in "$@"; do [ "$i" = "$x" ] && return 0; done; return 1; }
+own() { chown "$SVC_USER:$SVC_USER" "$1" 2>/dev/null || true; chmod 0644 "$1" 2>/dev/null || true; }
+
+CONF_DP=""; CONF_CONSOLE=""; CONF_AGENT=""
+load_conf() {
+  CONF_DP="$(conf_get DP_PORTS | tr ',' ' ')"; CONF_CONSOLE="$(conf_get CONSOLE_PORT)"; CONF_AGENT="$(conf_get AGENT_PORT)"
+}
+
+# ---- backend detection ------------------------------------------------------------------------------------------------------
+BACKEND=none; ACTIVE=0; TOOLS=""
+detect() {
+  BACKEND=none; ACTIVE=0; TOOLS=""
+  have firewall-cmd && TOOLS="$TOOLS,firewall-cmd"; have ufw && TOOLS="$TOOLS,ufw"; have nft && TOOLS="$TOOLS,nft"; have iptables && TOOLS="$TOOLS,iptables"
+  TOOLS="${TOOLS#,}"
+  if have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then BACKEND=firewalld; ACTIVE=1
+  elif have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then BACKEND=ufw; ACTIVE=1
+  elif have nft && nft list ruleset 2>/dev/null | awk '/hook input/{h=1} h && (/policy drop/ || /(^|[ \t])(drop|reject)($|[ \t])/){f=1} END{exit !f}'; then BACKEND=nftables; ACTIVE=1
+  elif have iptables && iptables -S INPUT 2>/dev/null | grep -qE '^-P INPUT (DROP|REJECT)|^-A INPUT .*-j (DROP|REJECT)'; then BACKEND=iptables; ACTIVE=1
+  fi
+}
+
+# ---- what is open (only the ports ToutWAF cares about) -----------------------------------------------------------------------
+all_ports() { echo $CONF_DP $CONF_CONSOLE $CONF_AGENT; }
+OPEN=""
+add_open() { OPEN="${OPEN:+$OPEN,}tcp:$1${2:+@$2}"; }
+scan_open() {
+  OPEN=""
+  local p src ports spec
+  case "$BACKEND" in
+    firewalld)
+      local lp svcs s
+      lp=" $(firewall-cmd --list-ports 2>/dev/null | tr '\n' ' ') "
+      svcs="$(firewall-cmd --list-services 2>/dev/null)"
+      for s in $svcs; do lp="$lp $(firewall-cmd --permanent --service="$s" --get-ports 2>/dev/null | tr '\n' ' ') "; done
+      for p in $(all_ports); do case "$lp" in *" $p/tcp "*) add_open "$p";; esac; done
+      firewall-cmd --list-rich-rules 2>/dev/null | while IFS= read -r l; do
+        src="$(printf '%s' "$l" | sed -n 's/.*source address="\([^"]*\)".*/\1/p')"; p="$(printf '%s' "$l" | sed -n 's/.* port="\([0-9]*\)".*/\1/p')"
+        case "$l" in *'protocol="tcp"'*accept*) ;; *) continue;; esac
+        [ -n "$src" ] && [ -n "$p" ] && valid_src "$src" && in_list "$p" $(all_ports) && echo "tcp:$p@$src"
+      done >"$TMPOPEN"
+      while IFS= read -r l; do OPEN="${OPEN:+$OPEN,}$l"; done <"$TMPOPEN";;
+    ufw)
+      ufw status 2>/dev/null | awk '$1 ~ /^[0-9]+(\/tcp)?$/ && $2 == "ALLOW" {print $1, $3}' >"$TMPOPEN"
+      while read -r spec src; do
+        p="${spec%/tcp}"; valid_port "$p" || continue; in_list "$p" $(all_ports) || continue
+        case "$src" in Anywhere) add_open "$p";; *) valid_src "$src" && add_open "$p" "$src";; esac
+      done <"$TMPOPEN";;
+  esac
+}
+
+JOB=""
+write_status() {   # RESULT MESSAGE
+  local tmp; tmp="$(mktemp "$STATUS.XXXXXX")" || return 0
+  { printf 'BACKEND=%s\nACTIVE=%s\nOPEN=%s\nTOOLS=%s\nCHECKED=%s\nRESULT=%s\nJOB=%s\n' "$BACKEND" "$ACTIVE" "$OPEN" "$TOOLS" "$(date +%s)" "$1" "$JOB"
+    printf 'MESSAGE=%s\n' "$(printf '%s' "$2" | tr -d '\000-\037' | cut -c1-300)"; } >"$tmp"
+  own "$tmp"; mv -f "$tmp" "$STATUS"
+}
+
+# ---- commands (printed for hosts we do not drive, and by `print`) -----------------------------------------------------------
+print_commands() {   # backend  dp-ports  console  console-from  agent  agent-from
+  local b="$1" dp="$2" con="$3" cfrom="$4" ag="$5" afrom="$6" p
+  for p in $dp; do
+    case "$b" in
+      firewalld) echo "firewall-cmd --permanent --add-port=$p/tcp";; ufw) echo "ufw allow $p/tcp";;
+      nftables) echo "nft add rule inet filter input tcp dport $p accept";; iptables) echo "iptables -I INPUT -p tcp --dport $p -j ACCEPT";;
+    esac
+  done
+  rule_cmd() {   # port from
+    local port="$1" from="$2"
+    case "$b" in
+      firewalld) if [ -n "$from" ]; then echo "firewall-cmd --permanent --add-rich-rule='rule family=\"$(fam "$from")\" source address=\"$from\" port port=\"$port\" protocol=\"tcp\" accept'"; else echo "firewall-cmd --permanent --add-port=$port/tcp"; fi;;
+      ufw) if [ -n "$from" ]; then echo "ufw allow proto tcp from $from to any port $port"; else echo "ufw allow $port/tcp"; fi;;
+      nftables) if [ -n "$from" ]; then echo "nft add rule inet filter input $([[ "$from" == *:* ]] && echo ip6 || echo ip) saddr $from tcp dport $port accept"; else echo "nft add rule inet filter input tcp dport $port accept"; fi;;
+      iptables) if [ -n "$from" ]; then echo "iptables -I INPUT -p tcp -s $from --dport $port -j ACCEPT"; else echo "iptables -I INPUT -p tcp --dport $port -j ACCEPT"; fi;;
+    esac
+  }
+  [ -n "$con" ] && rule_cmd "$con" "$cfrom"
+  [ -n "$ag" ] && rule_cmd "$ag" "${afrom:-<DATA_PLANE_IP>}"
+  case "$b" in firewalld) echo "firewall-cmd --reload";;
+    nftables) echo "# then make it permanent in /etc/nftables.conf";; iptables) echo "# then make it permanent (iptables-save / netfilter-persistent)";; esac
+  return 0
+}
+
+# ---- managed list ------------------------------------------------------------------------------------------------------------
+managed_has() { grep -qxF -- "$1" "$MANAGED" 2>/dev/null; }
+managed_add() { managed_has "$1" || printf '%s\n' "$1" >>"$MANAGED"; chmod 0644 "$MANAGED" 2>/dev/null || true; }
+
+# ---- opening ----------------------------------------------------------------------------------------------------------------
+fwd_rich() { printf 'rule family="%s" source address="%s" port port="%s" protocol="tcp" accept' "$(fam "$2")" "$2" "$1"; }
+open_firewalld() {   # dp-ports console cfrom agent afrom
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" p rule
+  if [ -n "$dp" ]; then
+    local xml=/etc/firewalld/services/toutwaf-dp.xml tmpx
+    tmpx="$(mktemp)"; {
+      printf '<?xml version="1.0" encoding="utf-8"?>\n<service>\n  <short>ToutWAF data plane</short>\n  <description>ToutWAF reverse proxy: HTTP and HTTPS (HTTP/3 / QUIC is not implemented, so UDP 443 stays closed)</description>\n'
+      for p in $dp; do printf '  <port protocol="tcp" port="%s"/>\n' "$p"; done; printf '</service>\n'; } >"$tmpx"
+    if [ "$(cat "$xml" 2>/dev/null)" != "$(cat "$tmpx")" ]; then install -m 0644 "$tmpx" "$xml"; firewall-cmd --reload >/dev/null 2>&1 || true; fi
+    rm -f "$tmpx"
+    if ! firewall-cmd --permanent --query-service=toutwaf-dp >/dev/null 2>&1; then firewall-cmd --permanent --add-service=toutwaf-dp >/dev/null || return 1; fi
+    managed_add "firewalld service toutwaf-dp"
+  fi
+  if [ -n "$con" ]; then
+    if [ -n "$cfrom" ]; then rule="$(fwd_rich "$con" "$cfrom")"
+      firewall-cmd --permanent --query-rich-rule="$rule" >/dev/null 2>&1 || firewall-cmd --permanent --add-rich-rule="$rule" >/dev/null || return 1
+      managed_add "firewalld rich $rule"
+    else
+      firewall-cmd --permanent --query-port="$con/tcp" >/dev/null 2>&1 || { firewall-cmd --permanent --add-port="$con/tcp" >/dev/null || return 1; managed_add "firewalld port $con/tcp"; }
+    fi
+  fi
+  if [ -n "$ag" ]; then
+    rule="$(fwd_rich "$ag" "$afrom")"
+    firewall-cmd --permanent --query-rich-rule="$rule" >/dev/null 2>&1 || firewall-cmd --permanent --add-rich-rule="$rule" >/dev/null || return 1
+    managed_add "firewalld rich $rule"
+  fi
+  firewall-cmd --reload >/dev/null || return 1
+}
+open_ufw() {
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" p out
+  ufw_allow() {   # key  args...
+    local key="$1"; shift
+    out="$(ufw "$@" 2>&1)" || return 1
+    case "$out" in *Skipping*) ;; *) managed_add "ufw $key";; esac
+  }
+  for p in $dp; do ufw_allow "allow $p/tcp" allow "$p/tcp" comment ToutWAF || return 1; done
+  if [ -n "$con" ]; then
+    if [ -n "$cfrom" ]; then ufw_allow "allow proto tcp from $cfrom to any port $con" allow proto tcp from "$cfrom" to any port "$con" comment ToutWAF || return 1
+    else ufw_allow "allow $con/tcp" allow "$con/tcp" comment ToutWAF || return 1; fi
+  fi
+  if [ -n "$ag" ]; then ufw_allow "allow proto tcp from $afrom to any port $ag" allow proto tcp from "$afrom" to any port "$ag" comment ToutWAF || return 1; fi
+  return 0
+}
+
+do_open() {   # dp-ports console cfrom agent afrom   (already syntactically valid)
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" p
+  load_conf
+  # only what the installer recorded for this host
+  for p in $dp; do in_list "$p" $CONF_DP || { write_status error "port $p is not a data-plane port recorded in firewall.conf"; return 1; }; done
+  if [ -n "$con" ] && [ "$con" != "$CONF_CONSOLE" ]; then write_status error "port $con is not the console port recorded in firewall.conf"; return 1; fi
+  if [ -n "$ag" ]; then
+    [ "$ag" = "$CONF_AGENT" ] || { write_status error "port $ag is not the data-plane API port recorded in firewall.conf"; return 1; }
+    [ -n "$afrom" ] || { write_status error "the data-plane API port is never opened to everyone: a source network is required"; return 1; }
+  fi
+  detect
+  case "$BACKEND" in
+    firewalld) open_firewalld "$dp" "$con" "$cfrom" "$ag" "$afrom" || { scan_open; write_status error "firewalld refused the rules (see: journalctl -u toutwaf-firewall)"; return 1; };;
+    ufw) open_ufw "$dp" "$con" "$cfrom" "$ag" "$afrom" || { scan_open; write_status error "ufw refused the rules (see: journalctl -u toutwaf-firewall)"; return 1; };;
+    nftables|iptables)
+      scan_open
+      echo "toutwaf-firewall: $BACKEND is not managed automatically. Run these commands yourself:" >&2
+      print_commands "$BACKEND" "$dp" "$con" "$cfrom" "$ag" "$afrom" >&2
+      write_status unmanaged "$BACKEND is not managed by ToutWAF: run the commands shown in the console (Settings > Firewall) or in the installer output"; return 2;;
+    *)
+      scan_open
+      write_status ok "no active host firewall (firewalld / ufw / nftables / iptables) was found: nothing filters the traffic, nothing to open"; return 0;;
+  esac
+  scan_open
+  write_status ok "ports opened"
+  return 0
+}
+
+do_status() { detect; scan_open; write_status ok "${1:-scan}"; }
+
+parse_open_args() {   # sets A_DP A_CON A_CFROM A_AG A_AFROM from "$@"; returns 1 on invalid input
+  A_DP=""; A_CON=""; A_CFROM=""; A_AG=""; A_AFROM=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dp) A_DP="$(printf '%s' "$2" | tr ',' ' ')"; shift 2;;
+      --console) A_CON="$2"; shift 2;;
+      --console-from) A_CFROM="$2"; shift 2;;
+      --agent) A_AG="$2"; shift 2;;
+      --agent-from) A_AFROM="$2"; shift 2;;
+      *) echo "toutwaf-firewall: unknown option $1" >&2; return 1;;
+    esac
+  done
+  local p n=0
+  for p in $A_DP; do valid_port "$p" || return 1; n=$((n + 1)); done; [ "$n" -le 8 ] || return 1
+  [ -z "$A_CON" ] || valid_port "$A_CON" || return 1
+  [ -z "$A_AG" ] || valid_port "$A_AG" || return 1
+  [ -z "$A_CFROM" ] || valid_src "$A_CFROM" || return 1
+  [ -z "$A_AFROM" ] || valid_src "$A_AFROM" || return 1
+  [ -n "$A_DP$A_CON$A_AG" ] || return 1
+  return 0
+}
+
+TMPOPEN="$(mktemp)"; trap 'rm -f "$TMPOPEN"' EXIT
+case "${1:-}" in
+  status) [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }; load_conf; do_status; cat "$STATUS" 2>/dev/null | sed -n '1,3p';;
+  open)
+    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
+    shift; parse_open_args "$@" || { echo "toutwaf-firewall: invalid arguments" >&2; exit 2; }
+    do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM"; exit $?;;
+  apply)
+    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
+    [ -f "$REQ" ] || exit 0
+    # take a private copy first: the service account can rewrite the file while we read it
+    cp "$REQ" "$TMPOPEN.req" 2>/dev/null; rm -f "$REQ"; trap 'rm -f "$TMPOPEN" "$TMPOPEN.req"' EXIT
+    rq() { sed -n "s/^$1=//p" "$TMPOPEN.req" | tail -n1 | tr -d '\r'; }
+    JOB="$(rq JOB)"; valid_job "$JOB" || JOB=""
+    load_conf; detect
+    act="$(rq ACTION)"
+    case "$act" in
+      status) do_status "scan requested from the console"; exit 0;;
+      open)
+        dp="$(rq DP_PORTS | tr ',' ' ')"; con="$(rq CONSOLE_PORT)"; cf="$(rq CONSOLE_FROM)"; ag="$(rq AGENT_PORT)"; af="$(rq AGENT_FROM)"
+        args=(); [ -z "$dp" ] || args+=(--dp "$(printf '%s' "$dp" | tr ' ' ',')"); [ -z "$con" ] || args+=(--console "$con"); [ -z "$cf" ] || args+=(--console-from "$cf")
+        [ -z "$ag" ] || args+=(--agent "$ag"); [ -z "$af" ] || args+=(--agent-from "$af")
+        if ! parse_open_args "${args[@]}"; then detect; scan_open; write_status error "invalid firewall request"; exit 1; fi
+        do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM"; rc=$?; [ "$rc" -eq 2 ] && rc=0; exit "$rc";;
+      *) detect; scan_open; write_status error "unknown action"; exit 1;;
+    esac;;
+  close)
+    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
+    detect; load_conf
+    if [ -f "$MANAGED" ]; then
+      while IFS= read -r l; do
+        case "$l" in
+          "firewalld service toutwaf-dp") [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-service=toutwaf-dp >/dev/null 2>&1;;
+          "firewalld port "*) pt="${l#firewalld port }"; [[ "$pt" =~ ^[0-9]{1,5}/tcp$ ]] && [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-port="$pt" >/dev/null 2>&1;;
+          "firewalld rich "*) r="${l#firewalld rich }"
+            [[ "$r" =~ ^rule\ family=\"ipv[46]\"\ source\ address=\"[0-9a-fA-F:./]+\"\ port\ port=\"[0-9]{1,5}\"\ protocol=\"tcp\"\ accept$ ]] && [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-rich-rule="$r" >/dev/null 2>&1;;
+          "ufw allow "*)
+            r="${l#ufw }"
+            if [[ "$r" =~ ^allow\ [0-9]{1,5}/tcp$ ]]; then [ "$BACKEND" = ufw ] && ufw --force delete $r >/dev/null 2>&1
+            elif [[ "$r" =~ ^allow\ proto\ tcp\ from\ [0-9a-fA-F:./]+\ to\ any\ port\ [0-9]{1,5}$ ]]; then [ "$BACKEND" = ufw ] && ufw --force delete $r >/dev/null 2>&1; fi;;
+        esac
+      done <"$MANAGED"
+      [ "$BACKEND" = firewalld ] && firewall-cmd --reload >/dev/null 2>&1
+      rm -f "$MANAGED"
+    elif [ "$BACKEND" = firewalld ]; then
+      # installation made before rules were tracked: it only ever added the toutwaf-dp service (and the console port)
+      firewall-cmd --permanent --remove-service=toutwaf-dp >/dev/null 2>&1
+      [ -n "$CONF_CONSOLE" ] && firewall-cmd --permanent --remove-port="$CONF_CONSOLE/tcp" >/dev/null 2>&1
+      firewall-cmd --reload >/dev/null 2>&1
+    fi
+    rm -f /etc/firewalld/services/toutwaf-dp.xml "$STATUS"
+    exit 0;;
+  print)
+    load_conf; detect
+    b="$BACKEND"; [ "$b" != none ] || b=firewalld
+    print_commands "$b" "$CONF_DP" "$CONF_CONSOLE" "" "$CONF_AGENT" ""; exit 0;;
+  *) echo "usage: toutwaf-firewall status|open ...|apply|close|print" >&2; exit 2;;
+esac
+TW_FIREWALL_TPL
   cat >"$sd/toutwaf-upgrade.path" <<EOF
 [Unit]
-Description=ToutWAF data plane upgrade requests
+Description=ToutWAF upgrade requests (data plane update_engine, console Updates page)
 
 [Path]
 PathExists=$DATA_DIR/upgrade-request
@@ -2179,7 +2791,7 @@ WantedBy=multi-user.target
 EOF
   cat >"$sd/toutwaf-upgrade.service" <<EOF
 [Unit]
-Description=ToutWAF data plane upgrade (requested by the control plane)
+Description=ToutWAF upgrade (requested by the control plane or the data plane)
 After=network-online.target
 Wants=network-online.target
 
@@ -2187,7 +2799,30 @@ Wants=network-online.target
 Type=oneshot
 EnvironmentFile=-$CONF_DIR/upgrade.env
 ExecStart=$BIN_DIR/toutwaf-upgrade apply
-TimeoutStartSec=15min
+TimeoutStartSec=20min
+EOF
+  if want_cp; then
+    cat >"$sd/toutwaf-firewall.path" <<EOF
+[Unit]
+Description=ToutWAF firewall requests (console Settings > Firewall)
+
+[Path]
+PathExists=$DATA_DIR/firewall-request
+Unit=toutwaf-firewall.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-firewall.service" <<EOF
+[Unit]
+Description=ToutWAF firewall helper (requested by the control plane)
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-firewall apply
+TimeoutStartSec=2min
+PrivateTmp=yes
+ProtectHome=yes
 EOF
   fi
   return 0
@@ -2220,8 +2855,12 @@ setup_selinux() {
   semanage fcontext -a -t etc_t "$CONF_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t etc_t "$CONF_DIR(/.*)?" || true
   semanage fcontext -a -t var_lib_t "$DATA_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t var_lib_t "$DATA_DIR(/.*)?" || true
   semanage fcontext -a -t var_log_t "$LOG_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t var_log_t "$LOG_DIR(/.*)?" || true
-  semanage fcontext -a -t bin_t "$BIN_DIR/toutwaf-(dp|cp|upgrade)" 2>/dev/null || semanage fcontext -m -t bin_t "$BIN_DIR/toutwaf-(dp|cp|upgrade)" || true
+  semanage fcontext -a -t bin_t "$BIN_DIR/toutwaf-(dp|cp|upgrade|firewall)" 2>/dev/null || semanage fcontext -m -t bin_t "$BIN_DIR/toutwaf-(dp|cp|upgrade|firewall)" || true
   semanage fcontext -a -t bin_t "$BIN_DIR/toutwafctl" 2>/dev/null || true
+  if [ "$LAYOUT" = home ]; then   # the HOME directory itself (bin/ conf/ data/ logs/ get their own types above)
+    semanage fcontext -a -t usr_t "$HOME_DIR" 2>/dev/null || semanage fcontext -m -t usr_t "$HOME_DIR" || true
+    restorecon -F "$HOME_DIR" 2>/dev/null || true
+  fi
   restorecon -RF "$CONF_DIR" "$DATA_DIR" "$LOG_DIR" "$BIN_DIR"/toutwaf* 2>/dev/null || true
   # the console/DP-facing ports are labelled http_port_t so that confined admin tooling can reach them
   if want_cp; then for port in "$CP_PORT" 9444; do semanage port -a -t http_port_t -p tcp "$port" 2>/dev/null || true; done; fi
@@ -2230,31 +2869,42 @@ setup_selinux() {
   return 0
 }
 
+# firewall.conf (root-owned): the ports of this host that toutwaf-firewall may open. Written at every install / update (so that a
+# console "Open the required ports" works after a port change); only an install opens ports, an update never re-opens what an
+# administrator closed.
+write_firewall_conf() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  [ -d "$(p "$CONF_DIR")" ] || return 0
+  detect_installed
+  { printf '# written by install.sh: the ports of this host that toutwaf-firewall (root helper) is allowed to open; edit with care\n'
+    [ "$INST_DP" = 1 ] && printf 'DP_PORTS="%s %s"\n' "$HTTP_PORT" "$HTTPS_PORT"
+    [ "$INST_CP" = 1 ] && printf 'CONSOLE_PORT=%s\nAGENT_PORT=9444\n' "$CP_PORT"; } >"$(p "$CONF_DIR/firewall.conf")"
+  chmod 0644 "$(p "$CONF_DIR/firewall.conf")"
+  return 0
+}
+
 setup_firewall() {
-  if [ "$STAGING" = 1 ] || [ "$OPEN_FW" = 0 ]; then return 0; fi
-  if have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
-    log "Opening firewalld ports"
-    if want_dp; then
-      cat >/etc/firewalld/services/toutwaf-dp.xml <<EOF
-<?xml version="1.0" encoding="utf-8"?>
-<service>
-  <short>ToutWAF data plane</short>
-  <description>ToutWAF reverse proxy: HTTP and HTTPS (HTTP/3 / QUIC is not implemented, so UDP 443 stays closed)</description>
-  <port protocol="tcp" port="$HTTP_PORT"/>
-  <port protocol="tcp" port="$HTTPS_PORT"/>
-</service>
-EOF
-      firewall-cmd --reload >/dev/null 2>&1 || true
-      firewall-cmd --permanent --add-service=toutwaf-dp >/dev/null
-    fi
-    if want_cp && [ "$OPEN_CP_PORT" = 1 ]; then firewall-cmd --permanent --add-port="$CP_PORT/tcp" >/dev/null; fi
-    if want_cp; then warn "$(t p_dpapi_warn) (firewall-cmd --add-rich-rule)"; fi
-    firewall-cmd --reload >/dev/null
-  elif have ufw && ufw status 2>/dev/null | grep -q "Status: active"; then
-    log "Opening ufw ports"
-    if want_dp; then ufw allow "$HTTP_PORT/tcp" >/dev/null; ufw allow "$HTTPS_PORT/tcp" >/dev/null; fi
-    if want_cp && [ "$OPEN_CP_PORT" = 1 ]; then ufw allow "$CP_PORT/tcp" >/dev/null; fi
-  fi
+  write_firewall_conf
+  if [ "$STAGING" = 1 ] || [ "$OPEN_FW" = 0 ] || [ "$ACTION" = update ]; then return 0; fi
+  local fwh="$BIN_DIR/toutwaf-firewall" args=() out rc=0 backend
+  [ -x "$fwh" ] || { warn "toutwaf-firewall helper missing: firewall not configured"; return 0; }
+  detect_installed
+  [ "$INST_DP" = 1 ] && args+=(--dp "$HTTP_PORT,$HTTPS_PORT")
+  if [ "$INST_CP" = 1 ] && [ "$OPEN_CP_PORT" = 1 ]; then args+=(--console "$CP_PORT"); [ -z "$CONSOLE_FROM" ] || args+=(--console-from "$CONSOLE_FROM"); fi
+  [ "${#args[@]}" -gt 0 ] || return 0
+  out="$("$fwh" open "${args[@]}" 2>&1)" || rc=$?
+  log "toutwaf-firewall open ${args[*]} -> rc=$rc: $out"
+  backend="$("$fwh" status 2>/dev/null | sed -n 's/^BACKEND=//p' | head -n1 || true)"
+  case "$rc:$backend" in
+    0:firewalld|0:ufw) info "firewall ($backend): ports opened";
+      if [ "$INST_CP" = 1 ] && [ "$OPEN_CP_PORT" = 1 ]; then
+        if [ -n "$CONSOLE_FROM" ]; then info "$(t fw_console_from "$CP_PORT" "$CONSOLE_FROM")"; else warn "$(t fw_console_open "$CP_PORT")"; fi
+      fi;;
+    0:*) info "$(t fw_none)";;
+    2:*) warn "$(t fw_manual "${backend:-?}")"; printf '%s\n' "$out" | sed -n '/^[a-z#]/{/^toutwaf-firewall/!p}' | while IFS= read -r l; do warn "    $l"; done;;
+    *) warn "$(t fw_failed "$out")";;
+  esac
+  if [ "$INST_CP" = 1 ]; then warn "$(t p_dpapi_warn) (--console-from / Settings > Firewall)"; fi
   return 0
 }
 
@@ -2357,6 +3007,7 @@ phase_binaries() {
     if install_binary toutwafctl; then CHANGED=1; fi
     install_agent_dist
   fi
+  link_cli
   return 0
 }
 phase_config() { if want_dp; then dp_config; fi; if want_cp; then cp_config; fi; return 0; }
@@ -2364,6 +3015,9 @@ phase_units() { write_units; tune_sysctl; set_caps; return 0; }
 prepare_panel() { prepare_panel_run; }
 
 start_services() {
+  # the update helper serves the console Updates page (cp) and update_engine (dp); the firewall helper serves Settings > Firewall (cp)
+  if want_dp || want_cp; then systemctl enable --now toutwaf-upgrade.path >/dev/null 2>&1 || warn "could not enable toutwaf-upgrade.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-firewall.path >/dev/null 2>&1 || warn "could not enable toutwaf-firewall.path"; fi
   if want_cp; then
     systemctl enable toutwaf-cp >/dev/null 2>&1 || true
     if svc_active toutwaf-cp && [ "$CHANGED" = 0 ]; then :; else
@@ -2376,7 +3030,6 @@ start_services() {
     fi
   fi
   if want_dp; then
-    systemctl enable --now toutwaf-upgrade.path >/dev/null 2>&1 || warn "could not enable toutwaf-upgrade.path"
     systemctl enable toutwaf-dp >/dev/null 2>&1 || true
     if svc_active toutwaf-dp && [ "$CHANGED" = 0 ]; then log "data plane unchanged; reloading configuration"; systemctl reload toutwaf-dp || true
     else
@@ -2414,7 +3067,7 @@ do_install_flow() {
   load_existing_ports
   step "$(t s_units)" phase_units
   if [ "$STAGING" = 0 ]; then step "$(t s_selinux)" setup_selinux; fi
-  if [ "$STAGING" = 0 ] && [ "$OPEN_FW" != 0 ]; then step "$(t s_fw)" setup_firewall; fi
+  if [ "$STAGING" = 0 ]; then step "$(t s_fw)" setup_firewall; fi
   if want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_boot)" prepare_panel; fi
   if [ "$HAS_SYSTEMD" = 1 ] && [ "$DRY_RUN" = 0 ]; then
     run systemctl daemon-reload
@@ -2424,7 +3077,7 @@ do_install_flow() {
       say "  $BUL services installed but not started (--no-start)"
     fi
     if [ "$NO_ENABLE" = 1 ]; then
-      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
+      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-firewall.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
     fi
   fi
   return 0
@@ -2440,9 +3093,17 @@ configure_interactively() {
   if want_cp; then ask CP_PORT "$(t q_cp_port)" "$CP_PORT"; ask PUBLIC_HOST "$(t q_public_host)" "$PUBLIC_HOST"; fi
   if want_dp; then ask HTTP_PORT "$(t q_http_port)" "$HTTP_PORT"; ask HTTPS_PORT "$(t q_https_port)" "$HTTPS_PORT"; fi
   ask_yn fw "$(t q_firewall)" 1; if [ "$fw" = 1 ]; then OPEN_FW=1; OPEN_CP_PORT=1; else OPEN_FW=0; fi
+  if want_cp && [ "$OPEN_FW" = 1 ]; then
+    say "  $D$(t fw_console_note "$CP_PORT")$R"
+    ask CONSOLE_FROM "$(t q_console_from)" "$CONSOLE_FROM"
+    if [ -n "$CONSOLE_FROM" ] && { ! [[ "$CONSOLE_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$CONSOLE_FROM" == */0 ]]; }; then say "  $(paint "$RED" "$(t q_console_from_bad)")"; CONSOLE_FROM=""; fi
+  fi
   ask_yn boot "$(t q_boot)" 1; if [ "$boot" != 1 ]; then NO_ENABLE=1; fi
   if [ -z "$TARBALL" ]; then ask CHANNEL "$(t q_channel)" "$CHANNEL"; fi
-  ask BIN_DIR "$(t q_bindir)" "$BIN_DIR"
+  if [ "$LAYOUT" = home ] && [ "$BIN_EXPLICIT" = 0 ]; then
+    local h="$HOME_DIR"; ask h "$(t q_bindir)" "$HOME_DIR"
+    if valid_home "$h"; then apply_home "$h"; else say "  $(paint "$RED" "$(t home_bad "$h")")"; fi
+  else ask BIN_DIR "$(t q_bindir)" "$BIN_DIR"; fi
   check_ports
   case "$CHANNEL" in beta) CHANNEL=dev;; stable|dev) ;; *) CHANNEL=stable;; esac
   ask_yn go "$(t q_confirm)" 1; [ "$go" = 1 ] || { say "  $(t aborted)"; exit 0; }
@@ -2508,6 +3169,7 @@ fi
 if [ -n "$ENROLL_TOKEN$NODE_TOKEN" ] && [ -z "$CP_URL" ]; then die "$(t need_cp)"; fi
 banner
 say "  ${D}os=$OS_ID $OS_VER arch=$ARCH component=$COMPONENT channel=$CHANNEL${DESTDIR:+ staging=$DESTDIR}$R"
+[ -z "$LAYOUT_NOTE" ] || say "  ${D}$LAYOUT_NOTE$R"
 if want_cp && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; then detect_public_ip; fi
 do_install_flow
 

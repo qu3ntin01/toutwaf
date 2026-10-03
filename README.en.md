@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.2.0-dev.4** · channel **stable** · 2026-10-03
+**Version 0.2.0-dev.5** · channel **stable** · 2026-10-03
 
 </div>
 
@@ -161,7 +161,7 @@ At the end of the installation the installer prints a box with everything you ne
 3. **A one-time setup link** that opens a wizard to choose your own secret link, user name and password.
 4. **The ports to open** in the firewall, with the exact commands (`firewalld`, `ufw`, Windows). Don't forget your hosting provider's security group.
 
-The same summary is saved in `/etc/toutwaf/INSTALL-SUMMARY.txt` (readable by `root` only). The secret link, user name and password can then be **changed in Settings → Access** and **My account**.
+The same summary is saved in `/var/toutwaf/conf/INSTALL-SUMMARY.txt` (readable by `root` only). The secret link, user name and password can then be **changed in Settings → Access** and **My account**.
 
 | Port | Use | Open it? |
 |---|---|---|
@@ -186,7 +186,7 @@ Useful commands: `toutwafctl doctor` (diagnostics), `toutwaf-cp admin reset-pass
 | **stable** | [`main`](https://github.com/qu3ntin01/toutwaf/tree/main) | production | `…/main/install.sh` |
 | **beta (dev)** | [`dev`](https://github.com/qu3ntin01/toutwaf/tree/dev) | testing, new features | `…/dev/install.sh` |
 
-The installer remembers the chosen channel (`/etc/toutwaf/installer.conf`); `--channel stable|dev` switches it. The console tells you when a newer version is available.
+The installer remembers the chosen channel (`/var/toutwaf/conf/installer.conf`); `--channel stable|dev` switches it. The console tells you when a newer version is available.
 
 ## Known limitations
 
@@ -205,17 +205,18 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.2.0-dev.4**
+**Version 0.2.0-dev.5**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 38.7 MiB | `2eba29ebaf27b60b186d8150e2a85e6795e1a49d3e06e2afbf6c7c139b9c48f3` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 39.3 MiB | `bb98a3496e8e2d29c5d7ea1b679362f60f4c58ffa66ae4d6fae11b2c17e03491` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 39.2 MiB | `fd5e9d10a3c93dde1354d6d36e982fd4f6e55084d340efd8b6b0d91cb924cd62` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 40.0 MiB | `0565ef10bf9de831de3416e2ff3e0fd380f78c68e7cb9839e58e275aab4dadd7` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.2.0-dev.4` | 2026-10-03T13:59:43Z | **current** | `releases/0.2.0-dev.4/` |
+| `0.2.0-dev.5` | 2026-10-03T17:20:42Z | **current** | `releases/0.2.0-dev.5/` |
+| `0.2.0-dev.4` | 2026-10-03T13:59:43Z | available | `releases/0.2.0-dev.4/` |
 | `0.2.0-dev.1` | 2026-10-02T14:59:13Z | available | `releases/0.2.0-dev.1/` |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
@@ -225,7 +226,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.2.0-dev.4 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.5 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 This release is not signed with a key yet: rely on the SHA-256 checksums above.

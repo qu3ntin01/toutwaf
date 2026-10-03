@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "version": "0.2.0-dev.5",
+  "channel": "stable",
+  "released_at": "2026-10-03T17:20:42Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 41153310,
+      "sha256": "fd5e9d10a3c93dde1354d6d36e982fd4f6e55084d340efd8b6b0d91cb924cd62"
+    },
+    {
+      "name": "toutwaf-windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "size": 41932921,
+      "sha256": "0565ef10bf9de831de3416e2ff3e0fd380f78c68e7cb9839e58e275aab4dadd7"
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "rust target aarch64-unknown-linux-gnu not installed (rustup target add aarch64-unknown-linux-gnu)"
+    }
+  ],
+  "notes": "Pre-release of ToutWAF 0.2.0 (dev channel).\n\n- Product updates from the console: pick the channel (stable or dev), a banner and notification as soon as a new version is published (checked every 5 minutes), release notes, \"Update now\" with live progress and automatic rollback.\n- Host firewall: the installer opens the ports ToutWAF needs automatically (firewalld / ufw), with a Settings \u003e Firewall card to open them later; the agent port 9444 is never opened publicly.\n- New default installation directory: /var/toutwaf (bin, conf, data, logs; option --home). Existing installations keep their paths.\n- Free edition: 5 sites, 1 node, 2 users.\n- Much better detection of the technology behind your site in the first-run wizard (WordPress, Joomla, Drupal, Magento, PrestaShop, Laravel, Django, Next.js, Nextcloud and many more) with confidence and evidence; the wizard can be skipped; help next to the origin URL field.\n- The certificate order button now shows its errors; stale console tokens are renewed automatically.\n- Menu sections start folded; Definitions table fits smaller screens.\n- Known limits: HTTP/3, PostgreSQL and ARM64 packages are not included yet; the Windows installer script is not yet validated end to end on a real Windows host (the Windows agent is)."
+}
