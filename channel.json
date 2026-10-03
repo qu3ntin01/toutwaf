@@ -1,7 +1,7 @@
 {
   "channel": "stable",
-  "version": "0.2.0-dev.1",
-  "released_at": "2026-10-02T14:59:13Z",
+  "version": "0.2.0-dev.4",
+  "released_at": "2026-10-03T13:59:43Z",
   "min_installer": "2",
   "notes_url": "CHANGELOG.md",
   "assets": [
@@ -9,15 +9,15 @@
       "name": "toutwaf-linux-amd64.tar.gz",
       "os": "linux",
       "arch": "amd64",
-      "size": 29363945,
-      "sha256": "5be95f34a6a5e66537e806d0b04c6d95c8f0941cc59c0ce2461277cc9c9620d9"
+      "size": 40618773,
+      "sha256": "2eba29ebaf27b60b186d8150e2a85e6795e1a49d3e06e2afbf6c7c139b9c48f3"
     },
     {
       "name": "toutwaf-windows-amd64.zip",
       "os": "windows",
       "arch": "amd64",
-      "size": 29953142,
-      "sha256": "d5b6666e04a15c2eb7f9ce105c120a3b9b068a33ff1ea7b04317a3521f19a780"
+      "size": 41230191,
+      "sha256": "bb98a3496e8e2d29c5d7ea1b679362f60f4c58ffa66ae4d6fae11b2c17e03491"
     }
   ],
   "yanked": [],
@@ -26,6 +26,11 @@
       "version": "0.2.0-dev.1",
       "released_at": "2026-10-02T14:59:13Z",
       "path": "releases/0.2.0-dev.1/"
+    },
+    {
+      "version": "0.2.0-dev.4",
+      "released_at": "2026-10-03T13:59:43Z",
+      "path": "releases/0.2.0-dev.4/"
     }
   ]
 }
