@@ -2,6 +2,16 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.2.0-dev.6 - 2026-10-04
+
+## 0.2.0-dev.6
+
+- **Linux compatibility**: the installer checks the system before changing anything (`--check-compat`, `--skip-os-check`) and lists compatible versions. Full install test passed on 30 container images: AlmaLinux/Rocky/Oracle 8-10, CentOS Stream 9-10, Fedora 41-44, Amazon Linux 2023, Debian 11-13, Ubuntu 20.04-26.04, openSUSE Leap 15.6/16.0, Tumbleweed, Arch; RHEL 8-10 validated on Red Hat UBI images. New families: SUSE, Arch, Amazon.
+- **ARM64** (Raspberry Pi 64-bit, Graviton, Ampere) and **Windows ARM64**: binaries included. Emulation-tested only (Linux), never run on real ARM hardware; 32-bit ARM is refused.
+- **Docker image** (amd64/arm64) with compose files for Mac (Apple Silicon and Intel) and any Docker host; native macOS is not provided.
+- **ToutPanel integration**: Cluster > Web servers (install through command or SSH, dedicated token, TLS pin endpoint, heartbeat and status).
+- Free edition documented: 5 sites, 1 node, 2 users, 1 organisation, 50 million requests per month.
+
 ## 0.2.0-dev.5 - 2026-10-03
 
 Pre-release of ToutWAF 0.2.0 (dev channel).

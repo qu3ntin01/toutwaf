@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.2.0-dev.5** · channel **dev (pre-release)** · 2026-10-03
+**Version 0.2.0-dev.6** · channel **dev (pre-release)** · 2026-10-04
 
 </div>
 
@@ -47,13 +47,16 @@ It installs on **your own server** (Linux or Windows), with no cloud service: yo
 - TLS 1.2/1.3, HTTP/2, WebSocket, load balancing, health checks, cache, compression, automatic certificates (Let's Encrypt / ZeroSSL).
 
 **Administration console**
-- **10 languages** (French, English, Spanish, German, Italian, Portuguese, Dutch, Russian, Chinese, Arabic); **7 themes** and a custom accent colour.
+- **10 languages** (French, English, Spanish, German, Italian, Portuguese, Dutch, Russian, Chinese, Arabic); **7 themes**, a custom accent colour, a default *Aurora* look (light, blue accent, Plus Jakarta Sans font) and a menu whose sections start folded.
 - Live events with search, an explanation of every decision, a "false positive" button, policy versions with rollback, roles and permissions, two-factor authentication, SSO, audit log, REST API.
 - Secure access: secret link, one-time setup link, changeable account and password.
+- **Product updates from the console**: pick the `stable` or `dev` channel, get an instant notice (top-bar pill, banner, toast) as soon as a version is published (checked about every 5 minutes), read the release notes and click **Update now** to follow a live progress; if the new version does not start, the previous one is restored automatically.
+- **First-run wizard** you can skip, with help next to the origin URL field and a **stack detection** that shows the layers found (web server, language, framework, CMS...), a confidence level and the evidence behind each guess.
 
 **Operations**
 - **Encrypted backups** with off-site copies (S3-compatible, SFTP, WebDAV), retention and automatic restore tests.
 - Alerts and integrations (SIEM, Slack, Teams, e-mail, PagerDuty...), Prometheus metrics, multi-organisation.
+- **Host firewall**: on Linux the installer opens the ports ToutWAF needs when firewalld or ufw is active, and **Settings → Firewall** shows the state of each port and opens the missing ones.
 
 ## Screenshots
 
@@ -102,10 +105,11 @@ One server is enough to install everything; you can also put several `toutwaf-dp
 
 | | Linux | Windows |
 |---|---|---|
-| System | x86_64 with systemd. **Validated**: AlmaLinux 10, Rocky Linux 9, Debian 12. | Windows 10/11 or Windows Server, x64 (installer [not yet validated on a real Windows host](#known-limitations)) |
+| System | x86_64 or **64-bit ARM (aarch64, Raspberry Pi 3/4/5 and Zero 2 W with a 64-bit OS)**, with systemd. **Validated** (x86_64): AlmaLinux 10, Rocky Linux 9, Debian 12.. The arm64 build is [not yet tested on real hardware](#known-limitations); 32-bit ARM (armv7) is not supported | Windows 10/11 or Windows Server, x64 or **ARM64 (Windows on ARM, never run: build cross-compiled and header-checked only)** (installer [not yet validated on a real Windows host](#known-limitations)) |
 | Resources | 1 GB RAM, 2 GB disk | same |
 | Rights | `root` (sudo) | **Administrator** PowerShell |
-| Network | ports **80** and **443** free (protected sites), port **9443** (console) | same |
+| Network | ports **80** and **443** free (protected sites), port **9443** (console); opened for you in firewalld or ufw, see below | same (Windows Defender Firewall rules created by the installer) |
+| Location | a single home, `/var/toutwaf` (`bin`, `conf`, `data`, `logs`), changeable with `--home DIR` | `%ProgramFiles%\ToutWAF`, data in `%ProgramData%\ToutWAF` |
 
 ### Linux
 
@@ -113,15 +117,19 @@ One server is enough to install everything; you can also put several `toutwaf-dp
 curl -fsSL https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/install.sh | sudo bash
 ```
 
-An **interactive menu** is shown (install, update, uninstall, status, show links) with a description of every option. The installer downloads the binaries, **verifies their SHA-256 checksum**, creates a dedicated system user, installs hardened `systemd` services, configures the firewall if you agree, and finally prints the **summary** (see [First start](#first-start)).
+An **interactive menu** is shown (install, update, uninstall, status, show links) with a description of every option. The installer downloads the binaries, **verifies their SHA-256 checksum**, creates a dedicated system user, installs hardened `systemd` services, opens the firewall ports (see below), and finally prints the **summary** (see [First start](#first-start)).
 
 Unattended installation:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/install.sh | sudo bash -s -- --install --yes --public-host waf.example.com --open-firewall
+curl -fsSL https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/install.sh | sudo bash -s -- --install --yes --public-host waf.example.com --console-from 203.0.113.0/24
 ```
 
-Main options: `--component dp|cp|all`, `--channel stable|dev`, `--version X.Y.Z`, `--public-host`, `--open-firewall`, `--lang en`, `--tarball FILE` (offline), `--dry-run`. All options: `install.sh --help`.
+Main options: `--component dp|cp|all`, `--channel stable|dev`, `--version X.Y.Z`, `--public-host`, `--home DIR`, `--no-firewall`, `--console-from CIDR`, `--lang en`, `--tarball FILE` (offline), `--dry-run`. All options: `install.sh --help`.
+
+**Where things go.** A fresh Linux installation uses one home, `/var/toutwaf`, with `bin/`, `conf/`, `data/` and `logs/` below it (`--home DIR` or `TOUTWAF_HOME` to choose another one); the command-line tools (`toutwafctl`, `toutwaf-cp`, `toutwaf-dp`) are linked in `/usr/local/bin`. An installation made before this layout keeps its paths (`/etc/toutwaf`, `/var/lib/toutwaf`, `/var/log/toutwaf`, binaries in `/usr/local/bin`) and is **never moved**.
+
+**Firewall.** When firewalld or ufw is active, the installer opens what the installed components need by default: 80 and 443 for a data plane and the console port (9443) for a control plane. `--console-from CIDR` lets only that address or network reach the console (`0.0.0.0/0` is refused), and `--no-firewall` leaves the firewall alone. The agent port 9444 is **never** opened publicly: allow it only from your own servers. On hosts that use nftables or iptables only, the installer changes nothing and prints the exact commands. Later, **Settings → Firewall** in the console shows the ports and can open the missing ones.
 
 To attach an **additional server** (data plane only) to an existing console:
 
@@ -159,20 +167,20 @@ At the end of the installation the installer prints a box with everything you ne
 1. **The secure console link**, shaped like `https://<IP>:9443/<secret-path>/`, given for **every local address and for the public address**. The secret path is random: any other address on port 9443 returns a neutral 404 page.
 2. **The administrator user name and password**, generated and **shown only once**.
 3. **A one-time setup link** that opens a wizard to choose your own secret link, user name and password.
-4. **The ports to open** in the firewall, with the exact commands (`firewalld`, `ufw`, Windows). Don't forget your hosting provider's security group.
+4. **The ports** the installer opened, and the exact commands for the ones you must open yourself (nftables, iptables, `--no-firewall`). Don't forget your hosting provider's security group.
 
 The same summary is saved in `/var/toutwaf/conf/INSTALL-SUMMARY.txt` (readable by `root` only). The secret link, user name and password can then be **changed in Settings → Access** and **My account**.
 
 | Port | Use | Open it? |
 |---|---|---|
 | 80 and 443 / TCP | Traffic of the protected sites (`toutwaf-dp`) | Yes |
-| 9443 / TCP | Administration console (`toutwaf-cp`) | Yes, ideally restricted to your admin network |
-| 9444 / TCP | Enrolment of remote `toutwaf-dp` servers | Only if the data plane runs on another machine |
+| 9443 / TCP | Administration console (`toutwaf-cp`) | Opened by the installer; ideally restricted to your admin network (`--console-from`) |
+| 9444 / TCP | Enrolment of remote `toutwaf-dp` servers and host agents | Never opened publicly by the installer: allow it only from your own servers |
 
 **Protect your first site in 5 minutes:**
 
-1. Open the console and follow the wizard: enter the **domain** and the address of your **origin server**.
-2. ToutWAF offers a **free certificate** (Let's Encrypt) and a policy template suited to your stack.
+1. Open the console and follow the wizard (or skip it and add a site later from **Sites**): enter the **domain** and the address of your **origin server**; the help next to that field gives examples.
+2. ToutWAF detects your stack (layers, confidence, evidence), proposes a policy template suited to it, and offers a **free certificate** (Let's Encrypt).
 3. The site starts in **detection mode**: nothing is blocked, everything is observed.
 4. Point your DNS at ToutWAF, let it run for a few days, then read the **report** (what would have been blocked, likely false positives, proposed exceptions).
 5. Switch to **blocking mode** in one click, with a one-click rollback.
@@ -186,13 +194,23 @@ Useful commands: `toutwafctl doctor` (diagnostics), `toutwaf-cp admin reset-pass
 | **stable** | [`main`](https://github.com/qu3ntin01/toutwaf/tree/main) | production | `…/main/install.sh` |
 | **beta (dev)** | [`dev`](https://github.com/qu3ntin01/toutwaf/tree/dev) | testing, new features | `…/dev/install.sh` |
 
-The installer remembers the chosen channel (`/var/toutwaf/conf/installer.conf`); `--channel stable|dev` switches it. The console tells you when a newer version is available.
+The installer remembers the chosen channel (`<home>/conf/installer.conf`); `--channel stable|dev` switches it. The channel can also be chosen on the **Updates** page of the console.
+
+### Updating from the console
+
+The **Updates** page (Administration menu) shows the installed version, the latest version of the selected channel and its release notes. The control plane checks the channel about every 5 minutes and the console announces a new version at once. **Update now** downloads the release, verifies its checksum, installs it and restarts the services **of that server**, with a live progress; if the new version does not start, the previous one is restored automatically. Nothing is offered when the channel is older than the installed version (no silent downgrade). Other data-plane servers are updated through the rolling campaigns of the console or by re-running the installer on them.
+
+## Free edition
+
+Without a licence ToutWAF runs as the **free edition**: **5 protected sites, 1 node, 2 users, 1 organisation and 50 million requests per month**. Going over the monthly request quota is flagged as "over quota" in the console. Adding more is refused until a licence is installed. Everything else described here is the same product; for larger limits, contact your ToutWAF vendor.
+
 
 ## Known limitations
 
 Let's be transparent about what is not (yet) covered:
 
-- **Platforms**: installation validated end to end on AlmaLinux 10, Rocky Linux 9 and Debian 12 with the binaries of this release; AlmaLinux 9 and Ubuntu 24.04 passed earlier runs on a previous build. Other distributions are untested. **Windows**: the host agent (cluster) is tested on a real Windows Server 2025 (audit, telemetry, Microsoft Defender scan, terminal); the Windows installer script itself is not yet validated end to end on a real host. **No ARM64 package** for now.
+- **Platforms**: installation validated end to end on AlmaLinux 10, Rocky Linux 9 and Debian 12 with the binaries of this release; AlmaLinux 9 and Ubuntu 24.04 passed earlier runs on a previous build. Other distributions are untested. **Windows**: the host agent (cluster) is tested on a real Windows Server 2025 (audit, telemetry, Microsoft Defender scan, terminal); the Windows installer script itself is not yet validated end to end on a real host. **ARM64 (Raspberry Pi, Graviton, Ampere)**: the release carries a linux-arm64 package, cross-compiled and checked only under emulation (QEMU): start, health checks, proxied request, blocked SQL injection. It has **not been tested on real ARM hardware** and no performance figure is given. A Raspberry Pi needs a **64-bit** OS (Raspberry Pi OS 64-bit, Ubuntu or Debian arm64); 32-bit ARM (armv7, 32-bit Raspberry Pi OS) is not supported and the installer stops with a message. **Windows on ARM64**: the release carries a windows-arm64 package (cross-compiled; only the PE machine type 0xAA64 was checked), it has never been run on Windows on ARM.
+- **Updates from the console** install on the server that runs the console, on Linux with systemd only (elsewhere, for example on Windows, the page shows the command to run); other nodes follow through update campaigns or the installer. **Firewall automation** covers firewalld and ufw (and Windows Defender Firewall rules created by the installer); with nftables or iptables you get the commands to run.
 - **Not available yet**: HTTP/3, PostgreSQL (SQLite only), inspection of gRPC message contents.
 - **Lightly tested**: SAML SSO (OIDC tested), the automatic hourly download of the OWASP CRS releases from GitHub over several days (the full CRS 4.31 ruleset itself is tested in our test rig), DNS-01 certificates with Cloudflare/OVH/Route 53, third-party integrations (SIEM, ticketing).
 - **Detection**: measured with an independent tool (GoTestWAF: 673/673 attacks blocked, 0/141 false positives) and on a public payload set never seen during development (89.9 % raw; 99.95 % once non-attack fuzz fragments are removed, with the list of excluded fragments disclosed to our reviewers). No WAF catches everything: expect to tune exceptions for your applications. Known trade-offs: MongoDB-style operators (`$ne`, `$where`) in JSON/form fields and two or more `../` in a value are blocked.
@@ -200,26 +218,26 @@ Let's be transparent about what is not (yet) covered:
 - Console and error-message translations were written with the help of automated tools and have not yet been reviewed by native speakers.
 - No certification (ANSSI, PCI DSS, ISO 27001) is claimed.
 
-Targets not built for this release:
-- `linux-arm64`: rust target aarch64-unknown-linux-gnu not installed (rustup target add aarch64-unknown-linux-gnu)
 
 ## Versions and downloads
 
-**Version 0.2.0-dev.5**
+**Version 0.2.0-dev.6**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 39.2 MiB | `fd5e9d10a3c93dde1354d6d36e982fd4f6e55084d340efd8b6b0d91cb924cd62` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 40.0 MiB | `0565ef10bf9de831de3416e2ff3e0fd380f78c68e7cb9839e58e275aab4dadd7` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 42.5 MiB | `8bf04e2d4eb570610fb6a9061de6e1e840e94c09c5c535411279d3f2c654aa86` |
+| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 38.8 MiB | `b9f62c59caa52a3537bbd30541ffafb833ac1b804b52cd105cbee494b16b2e98` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 43.1 MiB | `06a68e893914017f6d155250f3f6c2f15e5bc8557e632c435f7d39b59249ffdc` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 39.0 MiB | `3e2b1326bb3d98a3a174c3c92298a6743a4b8cd4d0f46acd07d49a6daeb3b748` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.2.0-dev.5` | 2026-10-03T17:20:42Z | **current** | `releases/0.2.0-dev.5/` |
+| `0.2.0-dev.6` | 2026-10-04T18:03:29Z | **current** | `releases/0.2.0-dev.6/` |
+| `0.2.0-dev.5` | 2026-10-03T17:20:42Z | available | `releases/0.2.0-dev.5/` |
 | `0.2.0-dev.4` | 2026-10-03T13:59:43Z | available | `releases/0.2.0-dev.4/` |
 | `0.2.0-dev.3` | 2026-10-03T08:33:31Z | available | `releases/0.2.0-dev.3/` |
 | `0.2.0-dev.2` | 2026-10-02T16:25:39Z | available | `releases/0.2.0-dev.2/` |
-| `0.2.0-dev.1` | 2026-10-02T14:59:13Z | available | `releases/0.2.0-dev.1/` |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
@@ -228,7 +246,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.2.0-dev.5 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.6 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 This release is not signed with a key yet: rely on the SHA-256 checksums above.

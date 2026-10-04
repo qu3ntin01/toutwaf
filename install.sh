@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# ToutWAF installer for Linux (AlmaLinux 8-10, RHEL/Rocky 8-10, Debian 11+, Ubuntu 20.04+; amd64 + arm64).
+# ToutWAF installer for Linux x86_64 or arm64 with systemd: Red Hat family (Alma, Rocky, RHEL, CentOS Stream, Oracle, Fedora), Amazon Linux 2023, Debian family
+# (Debian 11+, Ubuntu 20.04+, Mint, ...; arm64 with a 64-bit OS, e.g. Raspberry Pi OS 64-bit, emulation-tested only), SUSE (Leap 15.6+/16, Tumbleweed, SLES), Arch family. Full list + status: docs/install/platforms.md
+# (generated from deploy/platforms.json). The system is checked BEFORE anything is changed: --check-compat, --skip-os-check.
 #
 #   curl -fsSL https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/install.sh | sudo bash
 #       -> interactive menu (reads the keyboard from /dev/tty, so it works when piped)
@@ -45,6 +47,7 @@ OPEN_FW=""                                      # "" = default: open what is nee
 CONSOLE_FROM=""                                 # restrict the console port to this address / CIDR ("" = reachable from anywhere)
 OPEN_CP_PORT=0; NO_SELINUX=0; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
 QUIET=0; NO_COLOR_FLAG=0; ACCEPT_DEFAULTS=0
+CHECK_COMPAT=0                                  # --check-compat: print the compatibility verdict, change nothing (exit 0 compatible, 3 not)
 ACTION=""; PURGE=0; LANG_CODE="${TOUTWAF_LANG:-}"; NARGS=$#
 
 # ------------------------------------------------------------------------------------------------ message catalog
@@ -1241,6 +1244,406 @@ nl|need_cp|Met een inschrijftoken is een control-plane-URL nodig.
 ru|need_cp|При указании токена регистрации нужен URL control plane.
 zh|need_cp|提供注册令牌时需要控制平面 URL。
 ar|need_cp|يلزم عنوان مستوى التحكم عند تقديم رمز التسجيل.
+en|cp_title|System compatibility
+fr|cp_title|Compatibilité du système
+es|cp_title|Compatibilidad del sistema
+de|cp_title|Systemkompatibilität
+it|cp_title|Compatibilità del sistema
+pt|cp_title|Compatibilidade do sistema
+nl|cp_title|Systeemcompatibiliteit
+ru|cp_title|Совместимость системы
+zh|cp_title|系统兼容性
+ar|cp_title|توافق النظام
+en|cp_detected|Detected: %s, arch %s, glibc %s, systemd %s, kernel %s
+fr|cp_detected|Détecté : %s, arch %s, glibc %s, systemd %s, noyau %s
+es|cp_detected|Detectado: %s, arq. %s, glibc %s, systemd %s, kernel %s
+de|cp_detected|Erkannt: %s, Arch %s, glibc %s, systemd %s, Kernel %s
+it|cp_detected|Rilevato: %s, arch %s, glibc %s, systemd %s, kernel %s
+pt|cp_detected|Detetado: %s, arq. %s, glibc %s, systemd %s, kernel %s
+nl|cp_detected|Gedetecteerd: %s, arch %s, glibc %s, systemd %s, kernel %s
+ru|cp_detected|Обнаружено: %s, арх. %s, glibc %s, systemd %s, ядро %s
+zh|cp_detected|检测到：%s，架构 %s，glibc %s，systemd %s，内核 %s
+ar|cp_detected|تم الكشف: %s، المعمارية %s، glibc %s، systemd %s، النواة %s
+en|cp_ok|Compatible: %s (%s)
+fr|cp_ok|Compatible : %s (%s)
+es|cp_ok|Compatible: %s (%s)
+de|cp_ok|Kompatibel: %s (%s)
+it|cp_ok|Compatibile: %s (%s)
+pt|cp_ok|Compatível: %s (%s)
+nl|cp_ok|Compatibel: %s (%s)
+ru|cp_ok|Совместимо: %s (%s)
+zh|cp_ok|兼容：%s（%s）
+ar|cp_ok|متوافق: %s (%s)
+en|cp_tested|tested
+fr|cp_tested|testé
+es|cp_tested|probado
+de|cp_tested|getestet
+it|cp_tested|testato
+pt|cp_tested|testado
+nl|cp_tested|getest
+ru|cp_tested|проверено
+zh|cp_tested|已测试
+ar|cp_tested|تم اختباره
+en|cp_expected|expected
+fr|cp_expected|attendu
+es|cp_expected|esperado
+de|cp_expected|erwartet
+it|cp_expected|previsto
+pt|cp_expected|esperado
+nl|cp_expected|verwacht
+ru|cp_expected|ожидается
+zh|cp_expected|预期兼容
+ar|cp_expected|متوقع
+en|cp_w_like|%s is not in the compatibility table: treated as the %s family (expected). Continuing.
+fr|cp_w_like|%s n'est pas dans la table de compatibilité : traité comme la famille %s (attendu). On continue.
+es|cp_w_like|%s no figura en la tabla de compatibilidad: se trata como la familia %s (esperado). Se continúa.
+de|cp_w_like|%s steht nicht in der Kompatibilitätstabelle: wird als Familie %s behandelt (erwartet). Es geht weiter.
+it|cp_w_like|%s non è nella tabella di compatibilità: trattato come famiglia %s (previsto). Si continua.
+pt|cp_w_like|%s não consta da tabela de compatibilidade: tratado como a família %s (esperado). Continuando.
+nl|cp_w_like|%s staat niet in de compatibiliteitstabel: behandeld als de familie %s (verwacht). Er wordt doorgegaan.
+ru|cp_w_like|%s нет в таблице совместимости: обрабатывается как семейство %s (ожидается). Продолжаем.
+zh|cp_w_like|%s 不在兼容性表中：按 %s 系列处理（预期兼容）。继续。
+ar|cp_w_like|%s غير موجود في جدول التوافق: يُعامل كعائلة %s (متوقع). المتابعة.
+en|cp_w_newer|%s %s is newer than the listed versions: not validated yet (expected). Continuing.
+fr|cp_w_newer|%s %s est plus récent que les versions listées : pas encore validé (attendu). On continue.
+es|cp_w_newer|%s %s es más reciente que las versiones listadas: aún no validado (esperado). Se continúa.
+de|cp_w_newer|%s %s ist neuer als die gelisteten Versionen: noch nicht validiert (erwartet). Es geht weiter.
+it|cp_w_newer|%s %s è più recente delle versioni elencate: non ancora validato (previsto). Si continua.
+pt|cp_w_newer|%s %s é mais recente do que as versões listadas: ainda não validado (esperado). Continuando.
+nl|cp_w_newer|%s %s is nieuwer dan de vermelde versies: nog niet gevalideerd (verwacht). Er wordt doorgegaan.
+ru|cp_w_newer|%s %s новее перечисленных версий: ещё не проверено (ожидается). Продолжаем.
+zh|cp_w_newer|%s %s 比列出的版本更新：尚未验证（预期兼容）。继续。
+ar|cp_w_newer|%s %s أحدث من الإصدارات المدرجة: لم يتم التحقق منه بعد (متوقع). المتابعة.
+en|cp_w_unlisted|%s %s is not listed in the table: treated as expected. Continuing.
+fr|cp_w_unlisted|%s %s n'est pas listé dans la table : traité comme attendu. On continue.
+es|cp_w_unlisted|%s %s no figura en la tabla: se trata como esperado. Se continúa.
+de|cp_w_unlisted|%s %s steht nicht in der Tabelle: wird als erwartet behandelt. Es geht weiter.
+it|cp_w_unlisted|%s %s non è elencato nella tabella: trattato come previsto. Si continua.
+pt|cp_w_unlisted|%s %s não consta da tabela: tratado como esperado. Continuando.
+nl|cp_w_unlisted|%s %s staat niet in de tabel: behandeld als verwacht. Er wordt doorgegaan.
+ru|cp_w_unlisted|%s %s нет в таблице: считается ожидаемо совместимой. Продолжаем.
+zh|cp_w_unlisted|%s %s 不在表中：按预期兼容处理。继续。
+ar|cp_w_unlisted|%s %s غير مدرج في الجدول: يُعامل كمتوقع. المتابعة.
+en|cp_w_nover|%s reports no version (rolling or testing release): treated as expected. Continuing.
+fr|cp_w_nover|%s ne déclare aucune version (distribution en continu ou testing) : traité comme attendu. On continue.
+es|cp_w_nover|%s no declara versión (rolling o testing): se trata como esperado. Se continúa.
+de|cp_w_nover|%s meldet keine Version (Rolling oder Testing): wird als erwartet behandelt. Es geht weiter.
+it|cp_w_nover|%s non dichiara una versione (rolling o testing): trattato come previsto. Si continua.
+pt|cp_w_nover|%s não declara versão (rolling ou testing): tratado como esperado. Continuando.
+nl|cp_w_nover|%s meldt geen versie (rolling of testing): behandeld als verwacht. Er wordt doorgegaan.
+ru|cp_w_nover|%s не сообщает версию (rolling или testing): считается ожидаемо совместимой. Продолжаем.
+zh|cp_w_nover|%s 未报告版本（滚动或测试版）：按预期兼容处理。继续。
+ar|cp_w_nover|%s لا يعلن عن إصدار (تحديث مستمر أو اختباري): يُعامل كمتوقع. المتابعة.
+en|cp_w_glibc|The glibc version could not be determined; continuing.
+fr|cp_w_glibc|La version de glibc n'a pas pu être déterminée ; on continue.
+es|cp_w_glibc|No se pudo determinar la versión de glibc; se continúa.
+de|cp_w_glibc|Die glibc-Version konnte nicht ermittelt werden; es geht weiter.
+it|cp_w_glibc|Impossibile determinare la versione di glibc; si continua.
+pt|cp_w_glibc|Não foi possível determinar a versão da glibc; continuando.
+nl|cp_w_glibc|De glibc-versie kon niet worden bepaald; er wordt doorgegaan.
+ru|cp_w_glibc|Не удалось определить версию glibc; продолжаем.
+zh|cp_w_glibc|无法确定 glibc 版本；继续。
+ar|cp_w_glibc|تعذر تحديد إصدار glibc؛ المتابعة.
+en|cp_w_skip|--skip-os-check: the compatibility check is bypassed. This system is NOT supported: continuing at your own risk.
+fr|cp_w_skip|--skip-os-check : le contrôle de compatibilité est ignoré. Ce système n'est PAS pris en charge : vous continuez à vos risques.
+es|cp_w_skip|--skip-os-check: se omite la comprobación de compatibilidad. Este sistema NO es compatible: continúa bajo su responsabilidad.
+de|cp_w_skip|--skip-os-check: die Kompatibilitätsprüfung wird übergangen. Dieses System wird NICHT unterstützt: Fortfahren auf eigenes Risiko.
+it|cp_w_skip|--skip-os-check: il controllo di compatibilità è ignorato. Questo sistema NON è supportato: si continua a proprio rischio.
+pt|cp_w_skip|--skip-os-check: a verificação de compatibilidade foi ignorada. Este sistema NÃO é suportado: continuando por sua conta e risco.
+nl|cp_w_skip|--skip-os-check: de compatibiliteitscontrole wordt overgeslagen. Dit systeem wordt NIET ondersteund: doorgaan op eigen risico.
+ru|cp_w_skip|--skip-os-check: проверка совместимости пропущена. Эта система НЕ поддерживается: продолжаем на ваш риск.
+zh|cp_w_skip|--skip-os-check：已跳过兼容性检查。此系统不受支持：风险自负，继续。
+ar|cp_w_skip|--skip-os-check: تم تجاوز فحص التوافق. هذا النظام غير مدعوم: المتابعة على مسؤوليتك.
+en|cp_w_stage|Staging (--destdir): the compatibility verdict is informational only, nothing is refused.
+fr|cp_w_stage|Préparation (--destdir) : le verdict de compatibilité est informatif, rien n'est refusé.
+es|cp_w_stage|Preparación (--destdir): el veredicto de compatibilidad es informativo, no se rechaza nada.
+de|cp_w_stage|Staging (--destdir): das Kompatibilitätsergebnis ist nur informativ, nichts wird abgelehnt.
+it|cp_w_stage|Staging (--destdir): il verdetto di compatibilità è solo informativo, nulla viene rifiutato.
+pt|cp_w_stage|Staging (--destdir): o veredito de compatibilidade é apenas informativo, nada é recusado.
+nl|cp_w_stage|Staging (--destdir): het compatibiliteitsoordeel is slechts informatief, er wordt niets geweigerd.
+ru|cp_w_stage|Staging (--destdir): вердикт совместимости носит информационный характер, ничего не отклоняется.
+zh|cp_w_stage|暂存模式（--destdir）：兼容性结论仅供参考，不会拒绝。
+ar|cp_w_stage|التجهيز (--destdir): نتيجة التوافق للعلم فقط ولا يُرفض شيء.
+en|cp_refused|This system is not compatible with ToutWAF:
+fr|cp_refused|Ce système n'est pas compatible avec ToutWAF :
+es|cp_refused|Este sistema no es compatible con ToutWAF:
+de|cp_refused|Dieses System ist nicht mit ToutWAF kompatibel:
+it|cp_refused|Questo sistema non è compatibile con ToutWAF:
+pt|cp_refused|Este sistema não é compatível com o ToutWAF:
+nl|cp_refused|Dit systeem is niet compatibel met ToutWAF:
+ru|cp_refused|Эта система несовместима с ToutWAF:
+zh|cp_refused|此系统与 ToutWAF 不兼容：
+ar|cp_refused|هذا النظام غير متوافق مع ToutWAF:
+en|cp_r_old|%s %s is older than the minimum supported version (%s).
+fr|cp_r_old|%s %s est plus ancien que la version minimale prise en charge (%s).
+es|cp_r_old|%s %s es anterior a la versión mínima compatible (%s).
+de|cp_r_old|%s %s ist älter als die minimal unterstützte Version (%s).
+it|cp_r_old|%s %s è più vecchio della versione minima supportata (%s).
+pt|cp_r_old|%s %s é mais antigo do que a versão mínima suportada (%s).
+nl|cp_r_old|%s %s is ouder dan de minimaal ondersteunde versie (%s).
+ru|cp_r_old|%s %s старше минимальной поддерживаемой версии (%s).
+zh|cp_r_old|%s %s 低于支持的最低版本（%s）。
+ar|cp_r_old|%s %s أقدم من الحد الأدنى للإصدار المدعوم (%s).
+en|cp_r_eol|%s %s is end of life, or its glibc / systemd is too old.
+fr|cp_r_eol|%s %s est en fin de vie, ou sa glibc / son systemd est trop ancien.
+es|cp_r_eol|%s %s ha llegado al fin de su vida útil, o su glibc / systemd es demasiado antiguo.
+de|cp_r_eol|%s %s ist am Ende seines Lebenszyklus oder seine glibc / systemd ist zu alt.
+it|cp_r_eol|%s %s è a fine vita, oppure la sua glibc / systemd è troppo vecchia.
+pt|cp_r_eol|%s %s chegou ao fim de vida, ou a sua glibc / systemd é demasiado antiga.
+nl|cp_r_eol|%s %s is end-of-life, of de glibc / systemd is te oud.
+ru|cp_r_eol|%s %s снята с поддержки, либо её glibc / systemd слишком стар.
+zh|cp_r_eol|%s %s 已停止维护，或其 glibc / systemd 过旧。
+ar|cp_r_eol|%s %s انتهى عمره أو أن glibc / systemd فيه قديم جدا.
+en|cp_r_glibc|glibc %s found: %s or newer is required.
+fr|cp_r_glibc|glibc %s trouvée : %s ou plus récente est requise.
+es|cp_r_glibc|glibc %s encontrada: se requiere %s o posterior.
+de|cp_r_glibc|glibc %s gefunden: %s oder neuer ist erforderlich.
+it|cp_r_glibc|glibc %s trovata: serve %s o successiva.
+pt|cp_r_glibc|glibc %s encontrada: é necessária a %s ou posterior.
+nl|cp_r_glibc|glibc %s gevonden: %s of nieuwer is vereist.
+ru|cp_r_glibc|Найдена glibc %s: требуется %s или новее.
+zh|cp_r_glibc|发现 glibc %s：需要 %s 或更新版本。
+ar|cp_r_glibc|تم العثور على glibc %s: مطلوب %s أو أحدث.
+en|cp_r_musl|musl libc found: glibc %s or newer is required.
+fr|cp_r_musl|musl libc trouvée : glibc %s ou plus récente est requise.
+es|cp_r_musl|musl libc encontrada: se requiere glibc %s o posterior.
+de|cp_r_musl|musl libc gefunden: glibc %s oder neuer ist erforderlich.
+it|cp_r_musl|musl libc trovata: serve glibc %s o successiva.
+pt|cp_r_musl|musl libc encontrada: é necessária a glibc %s ou posterior.
+nl|cp_r_musl|musl libc gevonden: glibc %s of nieuwer is vereist.
+ru|cp_r_musl|Найдена musl libc: требуется glibc %s или новее.
+zh|cp_r_musl|发现 musl libc：需要 glibc %s 或更新版本。
+ar|cp_r_musl|تم العثور على musl libc: مطلوب glibc %s أو أحدث.
+en|cp_r_init|%s %s does not use systemd, which ToutWAF requires.
+fr|cp_r_init|%s %s n'utilise pas systemd, requis par ToutWAF.
+es|cp_r_init|%s %s no usa systemd, que ToutWAF requiere.
+de|cp_r_init|%s %s verwendet kein systemd, das ToutWAF benötigt.
+it|cp_r_init|%s %s non usa systemd, richiesto da ToutWAF.
+pt|cp_r_init|%s %s não usa systemd, exigido pelo ToutWAF.
+nl|cp_r_init|%s %s gebruikt geen systemd, dat ToutWAF vereist.
+ru|cp_r_init|%s %s не использует systemd, который нужен ToutWAF.
+zh|cp_r_init|%s %s 不使用 systemd，而 ToutWAF 需要它。
+ar|cp_r_init|%s %s لا يستخدم systemd الذي يتطلبه ToutWAF.
+en|cp_r_immutable|%s %s has an immutable root filesystem (not supported).
+fr|cp_r_immutable|%s %s a un système de fichiers racine immuable (non pris en charge).
+es|cp_r_immutable|%s %s tiene un sistema de archivos raíz inmutable (no compatible).
+de|cp_r_immutable|%s %s hat ein unveränderliches Root-Dateisystem (nicht unterstützt).
+it|cp_r_immutable|%s %s ha un filesystem root immutabile (non supportato).
+pt|cp_r_immutable|%s %s tem um sistema de ficheiros raiz imutável (não suportado).
+nl|cp_r_immutable|%s %s heeft een onveranderlijk root-bestandssysteem (niet ondersteund).
+ru|cp_r_immutable|%s %s использует неизменяемую корневую ФС (не поддерживается).
+zh|cp_r_immutable|%s %s 使用不可变根文件系统（不支持）。
+ar|cp_r_immutable|%s %s يستخدم نظام ملفات جذر غير قابل للتعديل (غير مدعوم).
+en|cp_r_layout|%s %s does not follow the standard Linux filesystem layout (not supported).
+fr|cp_r_layout|%s %s ne suit pas l'arborescence Linux standard (non pris en charge).
+es|cp_r_layout|%s %s no sigue la estructura estándar de Linux (no compatible).
+de|cp_r_layout|%s %s folgt nicht der Linux-Standardverzeichnisstruktur (nicht unterstützt).
+it|cp_r_layout|%s %s non segue la struttura standard di Linux (non supportato).
+pt|cp_r_layout|%s %s não segue a estrutura padrão do Linux (não suportado).
+nl|cp_r_layout|%s %s volgt niet de standaard Linux-mapstructuur (niet ondersteund).
+ru|cp_r_layout|%s %s не следует стандартной структуре каталогов Linux (не поддерживается).
+zh|cp_r_layout|%s %s 不遵循标准 Linux 目录结构（不支持）。
+ar|cp_r_layout|%s %s لا يتبع بنية ملفات Linux القياسية (غير مدعوم).
+en|cp_r_arch|Architecture %s is not supported (supported: %s).
+fr|cp_r_arch|L'architecture %s n'est pas prise en charge (prise en charge : %s).
+es|cp_r_arch|La arquitectura %s no es compatible (compatible: %s).
+de|cp_r_arch|Die Architektur %s wird nicht unterstützt (unterstützt: %s).
+it|cp_r_arch|L'architettura %s non è supportata (supportata: %s).
+pt|cp_r_arch|A arquitetura %s não é suportada (suportada: %s).
+nl|cp_r_arch|Architectuur %s wordt niet ondersteund (ondersteund: %s).
+ru|cp_r_arch|Архитектура %s не поддерживается (поддерживается: %s).
+zh|cp_r_arch|不支持架构 %s（支持：%s）。
+ar|cp_r_arch|المعمارية %s غير مدعومة (المدعوم: %s).
+en|cp_r_distro_arch|%s %s runs on an architecture without a ToutWAF build.
+fr|cp_r_distro_arch|%s %s tourne sur une architecture sans build ToutWAF.
+es|cp_r_distro_arch|%s %s funciona en una arquitectura sin compilación de ToutWAF.
+de|cp_r_distro_arch|%s %s läuft auf einer Architektur ohne ToutWAF-Build.
+it|cp_r_distro_arch|%s %s gira su un'architettura senza build di ToutWAF.
+pt|cp_r_distro_arch|%s %s corre numa arquitetura sem build do ToutWAF.
+nl|cp_r_distro_arch|%s %s draait op een architectuur zonder ToutWAF-build.
+ru|cp_r_distro_arch|%s %s работает на архитектуре без сборки ToutWAF.
+zh|cp_r_distro_arch|%s %s 运行在没有 ToutWAF 构建的架构上。
+ar|cp_r_distro_arch|%s %s يعمل على معمارية بلا إصدار من ToutWAF.
+en|cp_r_systemd|systemd is not running as the init system (/run/systemd/system is missing): it is required for the services.
+fr|cp_r_systemd|systemd ne tourne pas comme système d'init (/run/systemd/system est absent) : il est requis pour les services.
+es|cp_r_systemd|systemd no se ejecuta como sistema init (falta /run/systemd/system): es necesario para los servicios.
+de|cp_r_systemd|systemd läuft nicht als Init-System (/run/systemd/system fehlt): es wird für die Dienste benötigt.
+it|cp_r_systemd|systemd non è in esecuzione come init (manca /run/systemd/system): è necessario per i servizi.
+pt|cp_r_systemd|o systemd não está em execução como init (falta /run/systemd/system): é necessário para os serviços.
+nl|cp_r_systemd|systemd draait niet als init-systeem (/run/systemd/system ontbreekt): het is vereist voor de diensten.
+ru|cp_r_systemd|systemd не запущен как init (нет /run/systemd/system): он нужен для служб.
+zh|cp_r_systemd|systemd 未作为 init 系统运行（缺少 /run/systemd/system）：服务需要它。
+ar|cp_r_systemd|systemd لا يعمل كنظام init (المجلد /run/systemd/system غير موجود): مطلوب للخدمات.
+en|cp_r_systemd_old|systemd %s found: %s or newer is required.
+fr|cp_r_systemd_old|systemd %s trouvé : %s ou plus récent est requis.
+es|cp_r_systemd_old|systemd %s encontrado: se requiere %s o posterior.
+de|cp_r_systemd_old|systemd %s gefunden: %s oder neuer ist erforderlich.
+it|cp_r_systemd_old|systemd %s trovato: serve %s o successivo.
+pt|cp_r_systemd_old|systemd %s encontrado: é necessário %s ou posterior.
+nl|cp_r_systemd_old|systemd %s gevonden: %s of nieuwer is vereist.
+ru|cp_r_systemd_old|Найден systemd %s: требуется %s или новее.
+zh|cp_r_systemd_old|发现 systemd %s：需要 %s 或更新版本。
+ar|cp_r_systemd_old|تم العثور على systemd %s: مطلوب %s أو أحدث.
+en|cp_r_kernel|Linux kernel %s found: %s or newer is required.
+fr|cp_r_kernel|Noyau Linux %s trouvé : %s ou plus récent est requis.
+es|cp_r_kernel|Kernel Linux %s encontrado: se requiere %s o posterior.
+de|cp_r_kernel|Linux-Kernel %s gefunden: %s oder neuer ist erforderlich.
+it|cp_r_kernel|Kernel Linux %s trovato: serve %s o successivo.
+pt|cp_r_kernel|Kernel Linux %s encontrado: é necessário %s ou posterior.
+nl|cp_r_kernel|Linux-kernel %s gevonden: %s of nieuwer is vereist.
+ru|cp_r_kernel|Найдено ядро Linux %s: требуется %s или новее.
+zh|cp_r_kernel|发现 Linux 内核 %s：需要 %s 或更新版本。
+ar|cp_r_kernel|تم العثور على نواة Linux %s: مطلوب %s أو أحدث.
+en|cp_r_unknown|Distribution '%s' is not recognised and declares no known family (ID_LIKE='%s').
+fr|cp_r_unknown|La distribution '%s' n'est pas reconnue et ne déclare aucune famille connue (ID_LIKE='%s').
+es|cp_r_unknown|La distribución '%s' no se reconoce y no declara ninguna familia conocida (ID_LIKE='%s').
+de|cp_r_unknown|Die Distribution '%s' ist unbekannt und nennt keine bekannte Familie (ID_LIKE='%s').
+it|cp_r_unknown|La distribuzione '%s' non è riconosciuta e non dichiara alcuna famiglia nota (ID_LIKE='%s').
+pt|cp_r_unknown|A distribuição '%s' não é reconhecida e não declara nenhuma família conhecida (ID_LIKE='%s').
+nl|cp_r_unknown|Distributie '%s' wordt niet herkend en vermeldt geen bekende familie (ID_LIKE='%s').
+ru|cp_r_unknown|Дистрибутив '%s' не распознан и не указывает известного семейства (ID_LIKE='%s').
+zh|cp_r_unknown|无法识别发行版 '%s'，且未声明已知系列（ID_LIKE='%s'）。
+ar|cp_r_unknown|التوزيعة '%s' غير معروفة ولا تعلن عن عائلة معروفة (ID_LIKE='%s').
+en|cp_r_noosr|/etc/os-release is missing: the distribution cannot be identified.
+fr|cp_r_noosr|/etc/os-release est absent : la distribution ne peut pas être identifiée.
+es|cp_r_noosr|Falta /etc/os-release: no se puede identificar la distribución.
+de|cp_r_noosr|/etc/os-release fehlt: die Distribution kann nicht erkannt werden.
+it|cp_r_noosr|Manca /etc/os-release: impossibile identificare la distribuzione.
+pt|cp_r_noosr|Falta /etc/os-release: não é possível identificar a distribuição.
+nl|cp_r_noosr|/etc/os-release ontbreekt: de distributie kan niet worden herkend.
+ru|cp_r_noosr|Нет /etc/os-release: дистрибутив определить невозможно.
+zh|cp_r_noosr|缺少 /etc/os-release：无法识别发行版。
+ar|cp_r_noosr|الملف /etc/os-release غير موجود: لا يمكن تحديد التوزيعة.
+en|cp_nochange|Nothing has been changed on this system.
+fr|cp_nochange|Rien n'a été modifié sur ce système.
+es|cp_nochange|No se ha modificado nada en este sistema.
+de|cp_nochange|An diesem System wurde nichts geändert.
+it|cp_nochange|Nessuna modifica è stata apportata a questo sistema.
+pt|cp_nochange|Nada foi alterado neste sistema.
+nl|cp_nochange|Er is niets gewijzigd op dit systeem.
+ru|cp_nochange|В системе ничего не изменено.
+zh|cp_nochange|未对此系统做任何更改。
+ar|cp_nochange|لم يتم تغيير أي شيء في هذا النظام.
+en|cp_list|Compatible systems (amd64 and arm64, glibc %s or newer, systemd %s or newer):
+fr|cp_list|Systèmes compatibles (amd64 et arm64, glibc %s ou plus récente, systemd %s ou plus récent) :
+es|cp_list|Sistemas compatibles (amd64 y arm64, glibc %s o posterior, systemd %s o posterior):
+de|cp_list|Kompatible Systeme (amd64 und arm64, glibc %s oder neuer, systemd %s oder neuer):
+it|cp_list|Sistemi compatibili (amd64 e arm64, glibc %s o successiva, systemd %s o successivo):
+pt|cp_list|Sistemas compatíveis (amd64 e arm64, glibc %s ou posterior, systemd %s ou posterior):
+nl|cp_list|Compatibele systemen (amd64 en arm64, glibc %s of nieuwer, systemd %s of nieuwer):
+ru|cp_list|Совместимые системы (amd64 и arm64, glibc %s или новее, systemd %s или новее):
+zh|cp_list|兼容的系统（amd64 和 arm64，glibc %s 或更新，systemd %s 或更新）：
+ar|cp_list|الأنظمة المتوافقة (amd64 وarm64، glibc %s أو أحدث، systemd %s أو أحدث):
+en|cp_rolling|rolling
+fr|cp_rolling|en continu
+es|cp_rolling|rolling
+de|cp_rolling|Rolling
+it|cp_rolling|rolling
+pt|cp_rolling|rolling
+nl|cp_rolling|rolling
+ru|cp_rolling|rolling
+zh|cp_rolling|滚动发行
+ar|cp_rolling|تحديث مستمر
+en|cp_any|any version
+fr|cp_any|toute version
+es|cp_any|cualquier versión
+de|cp_any|jede Version
+it|cp_any|qualsiasi versione
+pt|cp_any|qualquer versão
+nl|cp_any|elke versie
+ru|cp_any|любая версия
+zh|cp_any|任意版本
+ar|cp_any|أي إصدار
+en|cp_override|To install anyway, at your own risk: --skip-os-check. Details: docs/install/platforms.md
+fr|cp_override|Pour installer quand même, à vos risques : --skip-os-check. Détails : docs/install/platforms.md
+es|cp_override|Para instalar de todos modos, bajo su responsabilidad: --skip-os-check. Detalles: docs/install/platforms.md
+de|cp_override|Trotzdem installieren, auf eigenes Risiko: --skip-os-check. Details: docs/install/platforms.md
+it|cp_override|Per installare comunque, a proprio rischio: --skip-os-check. Dettagli: docs/install/platforms.md
+pt|cp_override|Para instalar mesmo assim, por sua conta e risco: --skip-os-check. Detalhes: docs/install/platforms.md
+nl|cp_override|Toch installeren, op eigen risico: --skip-os-check. Details: docs/install/platforms.md
+ru|cp_override|Установить всё равно, на свой риск: --skip-os-check. Подробности: docs/install/platforms.md
+zh|cp_override|仍要安装（风险自负）：--skip-os-check。详情：docs/install/platforms.md
+ar|cp_override|للتثبيت رغم ذلك على مسؤوليتك: --skip-os-check. التفاصيل: docs/install/platforms.md
+en|cp_not_root|Not running as root: use sudo to install (the check itself does not need root).
+fr|cp_not_root|Pas exécuté en root : utilisez sudo pour installer (le contrôle lui-même n'en a pas besoin).
+es|cp_not_root|No se ejecuta como root: use sudo para instalar (la comprobación no lo necesita).
+de|cp_not_root|Nicht als root ausgeführt: zum Installieren sudo verwenden (die Prüfung selbst braucht kein root).
+it|cp_not_root|Non eseguito come root: usare sudo per installare (il controllo non lo richiede).
+pt|cp_not_root|Não executado como root: use sudo para instalar (a verificação não precisa).
+nl|cp_not_root|Niet als root uitgevoerd: gebruik sudo om te installeren (de controle zelf heeft geen root nodig).
+ru|cp_not_root|Запущено не от root: для установки используйте sudo (сама проверка root не требует).
+zh|cp_not_root|未以 root 运行：安装请使用 sudo（检查本身不需要 root）。
+ar|cp_not_root|لا يعمل كمستخدم root: استخدم sudo للتثبيت (الفحص نفسه لا يحتاج root).
+en|sum_compat|Compatibility
+fr|sum_compat|Compatibilité
+es|sum_compat|Compatibilidad
+de|sum_compat|Kompatibilität
+it|sum_compat|Compatibilità
+pt|sum_compat|Compatibilidade
+nl|sum_compat|Compatibiliteit
+ru|sum_compat|Совместимость
+zh|sum_compat|兼容性
+ar|sum_compat|التوافق
+en|cp_prereq_arch|The package databases are not synchronised. Run 'pacman -Syu' first (a partial upgrade is not supported on Arch), then re-run the installer.
+fr|cp_prereq_arch|Les bases de paquets ne sont pas synchronisées. Lancez d'abord 'pacman -Syu' (une mise à jour partielle n'est pas prise en charge sur Arch), puis relancez l'installateur.
+es|cp_prereq_arch|Las bases de datos de paquetes no están sincronizadas. Ejecute primero 'pacman -Syu' (una actualización parcial no es compatible en Arch) y vuelva a ejecutar el instalador.
+de|cp_prereq_arch|Die Paketdatenbanken sind nicht synchronisiert. Führen Sie zuerst 'pacman -Syu' aus (ein Teil-Update wird unter Arch nicht unterstützt) und starten Sie den Installer erneut.
+it|cp_prereq_arch|I database dei pacchetti non sono sincronizzati. Eseguire prima 'pacman -Syu' (un aggiornamento parziale non è supportato su Arch), poi rilanciare l'installer.
+pt|cp_prereq_arch|As bases de dados de pacotes não estão sincronizadas. Execute primeiro 'pacman -Syu' (uma atualização parcial não é suportada no Arch) e volte a executar o instalador.
+nl|cp_prereq_arch|De pakketdatabases zijn niet gesynchroniseerd. Voer eerst 'pacman -Syu' uit (een gedeeltelijke update wordt op Arch niet ondersteund) en start het installatieprogramma opnieuw.
+ru|cp_prereq_arch|Базы пакетов не синхронизированы. Сначала выполните 'pacman -Syu' (частичное обновление в Arch не поддерживается), затем запустите установщик снова.
+zh|cp_prereq_arch|软件包数据库未同步。请先运行 'pacman -Syu'（Arch 不支持部分升级），然后重新运行安装程序。
+ar|cp_prereq_arch|قواعد بيانات الحزم غير متزامنة. شغّل 'pacman -Syu' أولا (التحديث الجزئي غير مدعوم في Arch) ثم أعد تشغيل المثبت.
+en|cp_wdetected|Detected: %s (build %s), arch %s
+fr|cp_wdetected|Détecté : %s (build %s), arch %s
+es|cp_wdetected|Detectado: %s (build %s), arq. %s
+de|cp_wdetected|Erkannt: %s (Build %s), Arch %s
+it|cp_wdetected|Rilevato: %s (build %s), arch %s
+pt|cp_wdetected|Detetado: %s (build %s), arq. %s
+nl|cp_wdetected|Gedetecteerd: %s (build %s), arch %s
+ru|cp_wdetected|Обнаружено: %s (сборка %s), арх. %s
+zh|cp_wdetected|检测到：%s（内部版本 %s），架构 %s
+ar|cp_wdetected|تم الكشف: %s (البنية %s)، المعمارية %s
+en|cp_wlist|Compatible Windows versions (amd64 and arm64; arm64 untested on real hardware):
+fr|cp_wlist|Versions de Windows compatibles (amd64 et arm64 ; arm64 non testé sur du matériel réel) :
+es|cp_wlist|Versiones de Windows compatibles (amd64 y arm64; arm64 sin probar en hardware real):
+de|cp_wlist|Kompatible Windows-Versionen (amd64 und arm64; arm64 nicht auf echter Hardware getestet):
+it|cp_wlist|Versioni di Windows compatibili (amd64 e arm64; arm64 non testato su hardware reale):
+pt|cp_wlist|Versões do Windows compatíveis (amd64 e arm64; arm64 não testado em hardware real):
+nl|cp_wlist|Compatibele Windows-versies (amd64 en arm64; arm64 niet getest op echte hardware):
+ru|cp_wlist|Совместимые версии Windows (amd64 и arm64; arm64 не проверялась на реальном оборудовании):
+zh|cp_wlist|兼容的 Windows 版本（amd64 和 arm64；arm64 未在真实硬件上测试）：
+ar|cp_wlist|إصدارات Windows المتوافقة (amd64 وarm64؛ arm64 لم يُختبر على أجهزة حقيقية):
+en|cp_r_arm32|32-bit ARM (armv7) is not supported by ToutWAF. Install a 64-bit OS (Raspberry Pi OS 64-bit, Ubuntu or Debian arm64; Raspberry Pi 3, 4, 5 or Zero 2 W), then run the installer again.
+fr|cp_r_arm32|L'ARM 32 bits (armv7) n'est pas pris en charge par ToutWAF. Installez un système 64 bits (Raspberry Pi OS 64 bits, Ubuntu ou Debian arm64 ; Raspberry Pi 3, 4, 5 ou Zero 2 W), puis relancez l'installateur.
+es|cp_r_arm32|ARM de 32 bits (armv7) no es compatible con ToutWAF. Instale un sistema de 64 bits (Raspberry Pi OS 64 bits, Ubuntu o Debian arm64; Raspberry Pi 3, 4, 5 o Zero 2 W) y vuelva a ejecutar el instalador.
+de|cp_r_arm32|32-Bit-ARM (armv7) wird von ToutWAF nicht unterstützt. Installieren Sie ein 64-Bit-System (Raspberry Pi OS 64 Bit, Ubuntu oder Debian arm64; Raspberry Pi 3, 4, 5 oder Zero 2 W) und starten Sie den Installer erneut.
+it|cp_r_arm32|ARM a 32 bit (armv7) non è supportato da ToutWAF. Installare un sistema a 64 bit (Raspberry Pi OS 64 bit, Ubuntu o Debian arm64; Raspberry Pi 3, 4, 5 o Zero 2 W) e rilanciare l'installer.
+pt|cp_r_arm32|ARM de 32 bits (armv7) não é suportado pelo ToutWAF. Instale um sistema de 64 bits (Raspberry Pi OS 64 bits, Ubuntu ou Debian arm64; Raspberry Pi 3, 4, 5 ou Zero 2 W) e execute o instalador novamente.
+nl|cp_r_arm32|32-bits ARM (armv7) wordt niet ondersteund door ToutWAF. Installeer een 64-bits besturingssysteem (Raspberry Pi OS 64-bit, Ubuntu of Debian arm64; Raspberry Pi 3, 4, 5 of Zero 2 W) en start het installatieprogramma opnieuw.
+ru|cp_r_arm32|32-разрядный ARM (armv7) не поддерживается ToutWAF. Установите 64-разрядную ОС (Raspberry Pi OS 64-bit, Ubuntu или Debian arm64; Raspberry Pi 3, 4, 5 или Zero 2 W) и запустите установщик снова.
+zh|cp_r_arm32|ToutWAF 不支持 32 位 ARM（armv7）。请安装 64 位系统（64 位 Raspberry Pi OS、Ubuntu 或 Debian arm64；Raspberry Pi 3、4、5 或 Zero 2 W），然后重新运行安装程序。
+ar|cp_r_arm32|ToutWAF لا يدعم ARM بنظام 32 بت (armv7). ثبّت نظاما بنظام 64 بت (Raspberry Pi OS 64 بت أو Ubuntu أو Debian arm64؛ Raspberry Pi 3 أو 4 أو 5 أو Zero 2 W) ثم أعد تشغيل المثبت.
+en|cp_r_arm_userland32|The kernel is 64-bit but the system (userland) is 32-bit. ToutWAF needs a 64-bit OS: reinstall with Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) or Ubuntu / Debian arm64.
+fr|cp_r_arm_userland32|Le noyau est 64 bits mais le système (userland) est en 32 bits. ToutWAF exige un système 64 bits : réinstallez avec Raspberry Pi OS 64 bits (Raspberry Pi Imager : Raspberry Pi OS (64-bit)) ou Ubuntu / Debian arm64.
+es|cp_r_arm_userland32|El kernel es de 64 bits pero el sistema (userland) es de 32 bits. ToutWAF necesita un sistema de 64 bits: reinstale con Raspberry Pi OS 64 bits (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) o Ubuntu / Debian arm64.
+de|cp_r_arm_userland32|Der Kernel ist 64-Bit, das System (Userland) aber 32-Bit. ToutWAF benötigt ein 64-Bit-System: Installieren Sie Raspberry Pi OS 64 Bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) oder Ubuntu / Debian arm64 neu.
+it|cp_r_arm_userland32|Il kernel è a 64 bit ma il sistema (userland) è a 32 bit. ToutWAF richiede un sistema a 64 bit: reinstallare con Raspberry Pi OS 64 bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) o Ubuntu / Debian arm64.
+pt|cp_r_arm_userland32|O kernel é de 64 bits mas o sistema (userland) é de 32 bits. O ToutWAF precisa de um sistema de 64 bits: reinstale com Raspberry Pi OS 64 bits (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) ou Ubuntu / Debian arm64.
+nl|cp_r_arm_userland32|De kernel is 64-bits maar het systeem (userland) is 32-bits. ToutWAF vereist een 64-bits besturingssysteem: installeer opnieuw met Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) of Ubuntu / Debian arm64.
+ru|cp_r_arm_userland32|Ядро 64-разрядное, но система (userland) 32-разрядная. ToutWAF нужна 64-разрядная ОС: переустановите с Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) или Ubuntu / Debian arm64.
+zh|cp_r_arm_userland32|内核是 64 位，但系统（用户空间）是 32 位。ToutWAF 需要 64 位系统：请重新安装 64 位 Raspberry Pi OS（Raspberry Pi Imager：Raspberry Pi OS (64-bit)）或 Ubuntu / Debian arm64。
+ar|cp_r_arm_userland32|النواة 64 بت لكن النظام (userland) 32 بت. يحتاج ToutWAF إلى نظام 64 بت: أعد التثبيت باستخدام Raspberry Pi OS 64 بت (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) أو Ubuntu / Debian arm64.
+en|cp_w_pi|Raspberry Pi detected: arm64 is only smoke-tested under emulation, not on real hardware. Put the data and logs on an SSD / USB drive rather than the SD card, and avoid the all-in-one install below 2 GB of RAM (see docs/install/raspberry-pi.md).
+fr|cp_w_pi|Raspberry Pi détecté : l'arm64 n'a été éprouvé que sous émulation, pas sur du matériel réel. Placez données et journaux sur un SSD / disque USB plutôt que sur la carte SD, et évitez l'installation tout-en-un sous 2 Go de RAM (voir docs/install/raspberry-pi.md).
+es|cp_w_pi|Raspberry Pi detectada: arm64 solo se ha probado bajo emulación, no en hardware real. Ponga datos y registros en un SSD / disco USB en lugar de la tarjeta SD y evite la instalación todo en uno con menos de 2 GB de RAM (vea docs/install/raspberry-pi.md).
+de|cp_w_pi|Raspberry Pi erkannt: arm64 wurde nur unter Emulation getestet, nicht auf echter Hardware. Legen Sie Daten und Logs auf eine SSD / ein USB-Laufwerk statt auf die SD-Karte und vermeiden Sie die All-in-one-Installation unter 2 GB RAM (siehe docs/install/raspberry-pi.md).
+it|cp_w_pi|Raspberry Pi rilevato: arm64 è stato provato solo in emulazione, non su hardware reale. Mettere dati e log su un SSD / disco USB invece che sulla scheda SD ed evitare l'installazione tutto-in-uno sotto 2 GB di RAM (vedere docs/install/raspberry-pi.md).
+pt|cp_w_pi|Raspberry Pi detetado: o arm64 só foi testado em emulação, não em hardware real. Coloque dados e registos num SSD / disco USB em vez do cartão SD e evite a instalação tudo-em-um com menos de 2 GB de RAM (ver docs/install/raspberry-pi.md).
+nl|cp_w_pi|Raspberry Pi gedetecteerd: arm64 is alleen onder emulatie getest, niet op echte hardware. Zet data en logs op een SSD / USB-schijf in plaats van op de SD-kaart en vermijd de alles-in-één-installatie onder 2 GB RAM (zie docs/install/raspberry-pi.md).
+ru|cp_w_pi|Обнаружен Raspberry Pi: arm64 проверялась только в эмуляции, не на реальном оборудовании. Храните данные и журналы на SSD / USB-диске, а не на SD-карте, и избегайте установки «всё в одном» при менее чем 2 ГБ ОЗУ (см. docs/install/raspberry-pi.md).
+zh|cp_w_pi|检测到 Raspberry Pi：arm64 仅在仿真下做过冒烟测试，未在真实硬件上测试。请把数据和日志放在 SSD / USB 盘而不是 SD 卡上，内存低于 2 GB 时避免一体化安装（见 docs/install/raspberry-pi.md）。
+ar|cp_w_pi|تم اكتشاف Raspberry Pi: لم تُختبر arm64 إلا تحت المحاكاة وليس على أجهزة حقيقية. ضع البيانات والسجلات على SSD / قرص USB بدلا من بطاقة SD وتجنب التثبيت الشامل بأقل من 2 جيجابايت من الذاكرة (راجع docs/install/raspberry-pi.md).
 # END CATALOG
 TW_CATALOG
 }
@@ -1255,6 +1658,177 @@ t() {
   # shellcheck disable=SC2059
   printf -- "$fmt" "$@"
 }
+
+# ------------------------------------------------------------------------------------------------ platform data
+# Distributions, versions and their status come from deploy/platforms.json (single source of truth, also rendered to
+# docs/install/platforms.md). Generated: edit deploy/platforms.json and run deploy/tools/gen-platforms.py, not these lines.
+# BEGIN PLATFORMS (generated by tools/gen-platforms.py)
+read_platforms() { cat <<'TW_PLATFORMS'
+req|glibc|2.28
+req|systemd|239
+req|kernel|4.18
+arch|amd64|supported|-|x86_64 amd64
+arch|arm64|supported|-|aarch64 arm64
+arch|arm32|unsupported|arch|armv7l armv6l armhf arm
+family|rhel|Red Hat family|dnf|firewalld|selinux
+like|rhel|rhel
+like|rhel|fedora
+like|rhel|centos
+pkg|rhel|curl|curl
+pkg|rhel|tar|tar
+pkg|rhel|gzip|gzip
+pkg|rhel|coreutils|coreutils
+pkg|rhel|awk|gawk
+pkg|rhel|openssl|openssl
+pkg|rhel|ca|ca-certificates
+pkg|rhel|libcap|libcap
+pkg|rhel|selinux|policycoreutils-python-utils
+pkg|rhel|logrotate|logrotate
+family|amazon|Amazon Linux|dnf|firewalld|selinux
+pkg|amazon|curl|curl
+pkg|amazon|tar|tar
+pkg|amazon|gzip|gzip
+pkg|amazon|coreutils|coreutils
+pkg|amazon|awk|gawk
+pkg|amazon|openssl|openssl
+pkg|amazon|ca|ca-certificates
+pkg|amazon|libcap|libcap
+pkg|amazon|selinux|policycoreutils-python-utils
+pkg|amazon|logrotate|logrotate
+family|debian|Debian family|apt|ufw|apparmor
+like|debian|debian
+like|debian|ubuntu
+pkg|debian|curl|curl
+pkg|debian|tar|tar
+pkg|debian|gzip|gzip
+pkg|debian|coreutils|coreutils
+pkg|debian|awk|mawk
+pkg|debian|openssl|openssl
+pkg|debian|ca|ca-certificates
+pkg|debian|libcap|libcap2-bin
+pkg|debian|selinux|policycoreutils-python-utils
+pkg|debian|logrotate|logrotate
+family|suse|SUSE family|zypper|firewalld|apparmor
+like|suse|suse
+like|suse|opensuse
+pkg|suse|curl|curl
+pkg|suse|tar|tar
+pkg|suse|gzip|gzip
+pkg|suse|coreutils|coreutils
+pkg|suse|awk|gawk
+pkg|suse|openssl|openssl
+pkg|suse|ca|ca-certificates-mozilla
+pkg|suse|libcap|libcap-progs
+pkg|suse|selinux|policycoreutils-python-utils
+pkg|suse|logrotate|logrotate
+family|arch|Arch family|pacman|none|none
+like|arch|arch
+pkg|arch|curl|curl
+pkg|arch|tar|tar
+pkg|arch|gzip|gzip
+pkg|arch|coreutils|coreutils
+pkg|arch|awk|gawk
+pkg|arch|openssl|openssl
+pkg|arch|ca|ca-certificates
+pkg|arch|libcap|libcap
+pkg|arch|selinux|-
+pkg|arch|logrotate|logrotate
+distro|almalinux|rhel|AlmaLinux|8|major|-
+ver|almalinux|10|tested|-
+ver|almalinux|9|tested|-
+ver|almalinux|8|tested|-
+distro|rocky|rhel|Rocky Linux|8|major|-
+ver|rocky|10|tested|-
+ver|rocky|9|tested|-
+ver|rocky|8|tested|-
+distro|rhel|rhel|Red Hat Enterprise Linux|8|major|-
+ver|rhel|10|tested|-
+ver|rhel|9|tested|-
+ver|rhel|8|tested|-
+ver|rhel|7|unsupported|eol
+distro|centos|rhel|CentOS Stream|9|major|-
+ver|centos|10|tested|-
+ver|centos|9|tested|-
+ver|centos|8|unsupported|eol
+ver|centos|7|unsupported|eol
+distro|ol|rhel|Oracle Linux|8|major|-
+ver|ol|10|tested|-
+ver|ol|9|tested|-
+ver|ol|8|tested|-
+ver|ol|7|unsupported|eol
+distro|fedora|rhel|Fedora|41|major|-
+ver|fedora|44|tested|-
+ver|fedora|43|tested|-
+ver|fedora|42|tested|-
+ver|fedora|41|tested|-
+distro|amzn|amazon|Amazon Linux|2023|major|-
+ver|amzn|2023|tested|-
+ver|amzn|2|unsupported|eol
+distro|debian|debian|Debian|11|major|-
+ver|debian|13|tested|-
+ver|debian|12|tested|-
+ver|debian|11|tested|-
+ver|debian|10|unsupported|eol
+distro|ubuntu|debian|Ubuntu|20.04|minor|-
+ver|ubuntu|26.04|tested|-
+ver|ubuntu|25.10|tested|-
+ver|ubuntu|24.04|tested|-
+ver|ubuntu|22.04|tested|-
+ver|ubuntu|20.04|tested|-
+ver|ubuntu|18.04|unsupported|glibc
+distro|linuxmint|debian|Linux Mint / LMDE|-|major|derived
+ver|linuxmint|*|expected|-
+distro|pop|debian|Pop!_OS|-|major|derived
+ver|pop|*|expected|-
+distro|zorin|debian|Zorin OS|-|major|derived
+ver|zorin|*|expected|-
+distro|elementary|debian|elementary OS|-|major|derived
+ver|elementary|*|expected|-
+distro|kali|debian|Kali Linux|-|major|rolling
+ver|kali|*|expected|-
+distro|raspbian|debian|Raspberry Pi OS (32-bit, Raspbian)|-|major|-
+ver|raspbian|*|unsupported|arm32
+distro|devuan|debian|Devuan|-|major|-
+ver|devuan|*|unsupported|init
+distro|opensuse-leap|suse|openSUSE Leap|15.6|minor|-
+ver|opensuse-leap|16.0|tested|-
+ver|opensuse-leap|15.6|tested|-
+distro|opensuse-tumbleweed|suse|openSUSE Tumbleweed|-|major|rolling
+ver|opensuse-tumbleweed|*|tested|-
+distro|opensuse-slowroll|suse|openSUSE Slowroll|-|major|rolling
+ver|opensuse-slowroll|*|expected|-
+distro|sles|suse|SUSE Linux Enterprise Server|15.6|minor|-
+ver|sles|16.0|expected|-
+ver|sles|15.7|expected|-
+ver|sles|15.6|expected|-
+distro|sle-micro|suse|SUSE Linux Micro / MicroOS / Aeon|-|major|-
+ver|sle-micro|*|unsupported|immutable
+distro|opensuse-microos|suse|openSUSE MicroOS / Aeon / Kalpa|-|major|-
+alias|opensuse-aeon|opensuse-microos
+alias|opensuse-kalpa|opensuse-microos
+ver|opensuse-microos|*|unsupported|immutable
+distro|arch|arch|Arch Linux|-|major|rolling
+ver|arch|*|tested|-
+distro|manjaro|arch|Manjaro|-|major|rolling
+ver|manjaro|*|expected|-
+distro|endeavouros|arch|EndeavourOS|-|major|rolling
+ver|endeavouros|*|expected|-
+distro|garuda|arch|Garuda Linux|-|major|rolling
+ver|garuda|*|expected|-
+distro|cachyos|arch|CachyOS|-|major|rolling
+ver|cachyos|*|expected|-
+distro|artix|arch|Artix Linux|-|major|-
+ver|artix|*|unsupported|init
+distro|alpine|-|Alpine Linux|-|major|-
+ver|alpine|*|unsupported|musl
+distro|void|-|Void Linux|-|major|-
+ver|void|*|unsupported|init
+distro|nixos|-|NixOS|-|major|-
+ver|nixos|*|unsupported|layout
+TW_PLATFORMS
+}
+# END PLATFORMS
+PLATFORMS="$(read_platforms)"
 
 # ------------------------------------------------------------------------------------------------ UI helpers
 UI_COLOR=0; UI_UTF=0; UI_TRUECOLOR=0; BANNER_DONE=0
@@ -1397,10 +1971,235 @@ step() {
 
 run()  { if [ "$DRY_RUN" = 1 ]; then local IFS=' '; printf '%s[dry-run]%s %s\n' "$D" "$R" "$*"; else "$@" </dev/null; fi; }
 have() { command -v "$1" >/dev/null 2>&1; }
+# firewalld_running: true only when the daemon is really up. "firewall-cmd --state" alone is not a safe probe: with firewalld installed but stopped it
+# triggers D-Bus activation (starts the daemon as a side effect, or blocks ~50 s when it cannot start, e.g. in a container)
+firewalld_running() {
+  have firewall-cmd || return 1
+  if [ -d /run/systemd/system ] && have systemctl; then systemctl is-active --quiet firewalld 2>/dev/null || return 1
+  elif have pgrep; then pgrep -x firewalld >/dev/null 2>&1 || return 1; fi
+  if have timeout; then timeout 20 firewall-cmd --state >/dev/null 2>&1; else firewall-cmd --state >/dev/null 2>&1; fi
+}
 p()    { printf '%s%s' "$DESTDIR" "$1"; }       # path inside DESTDIR
 same_file() { [ -f "$1" ] && [ -f "$2" ] && [ "$(sha256sum <"$1" | cut -d' ' -f1)" = "$(sha256sum <"$2" | cut -d' ' -f1)" ]; }   # cmp(1) (diffutils) is absent on minimal images
 fqdn() { hostname -f 2>/dev/null || hostname 2>/dev/null || uname -n 2>/dev/null || echo localhost; }   # hostname(1) is absent on minimal images
 port_listening() { (exec 4<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
+# ------------------------------------------------------------------------------------------------ compatibility check
+# Pre-flight verdict, computed before anything is changed (install / update / --dry-run / --check-compat).
+# The pre-flight runs BEFORE the prerequisites are installed and must work on a bare image: bash + coreutils + grep + sed only (no awk).
+pf_lines() { local l; while IFS= read -r l; do case "$l" in "$1|"*) printf '%s\n' "$l";; esac; done <<<"$PLATFORMS"; }   # every line of one kind
+# pf_get KIND MATCHCOL MATCHVALUE OUTCOL: field OUTCOL of the first KIND line whose field MATCHCOL equals MATCHVALUE ("kind" is field 0)
+pf_get() {
+  local l pa
+  while IFS= read -r l; do
+    case "$l" in "$1|"*) IFS='|' read -r -a pa <<<"$l"; if [ "${pa[$2]:-}" = "$3" ]; then printf '%s' "${pa[$4]:-}"; return 0; fi;; esac
+  done <<<"$PLATFORMS"
+  return 0
+}
+pf_req() { pf_get req 1 "$1" 2; }
+pf_fam() { pf_get family 1 "$1" "$2"; }                                       # pf_fam FAMILY COL: 2 name, 3 package manager, 4 firewall, 5 MAC (fields counted from 0 = "family")
+pf_pkg() {                                                                    # pf_pkg FAMILY LOGICAL-NAME -> package name ("-" = none)
+  local l pa
+  while IFS= read -r l; do
+    case "$l" in "pkg|$1|$2|"*) IFS='|' read -r -a pa <<<"$l"; printf '%s' "${pa[3]}"; return 0;; esac
+  done <<<"$PLATFORMS"
+  return 0
+}
+# vcmp A B: -1 / 0 / 1 for dotted numeric versions (non-numeric characters are ignored)
+vcmp() {
+  local IFS=. va=() vb=() i x y
+  read -ra va <<<"$1"; read -ra vb <<<"$2"
+  for i in 0 1 2 3; do
+    x="${va[i]:-0}"; y="${vb[i]:-0}"; x="${x//[!0-9]/}"; y="${y//[!0-9]/}"; x=$((10#${x:-0})); y=$((10#${y:-0}))
+    if [ "$x" -lt "$y" ]; then echo -1; return 0; fi
+    if [ "$x" -gt "$y" ]; then echo 1; return 0; fi
+  done
+  echo 0
+}
+vlt() { [ "$(vcmp "$1" "$2")" = -1 ]; }
+
+CP_NAME=""; CP_LABEL=""; CP_STATUS="expected"; CP_FAMILY=""; CP_REASONS=(); CP_NOTES=()
+CP_HARD=0; COMPAT_OK=0; CP_GLIBC="?"; CP_SYSTEMD="?"; CP_KERNEL="?"; CP_ARCHRAW=""; COMPAT_LINE=""; SKIP_OS_CHECK="${SKIP_OS_CHECK:-0}"
+cp_reason() { CP_REASONS+=("$(t "$@")"); }
+cp_note()   { CP_NOTES+=("$(t "$@")"); }
+
+compat_eval() {
+  local IFS=' ' line l id al fam name min key flags ver wild entry k max st code tok v1 s1 c1
+  local aid ast archok un m gl sv kv ub pim
+  CP_REASONS=(); CP_NOTES=(); CP_STATUS=expected; CP_FAMILY=""; CP_NAME="${OS_NAME:-$OS_ID}"; CP_LABEL="$CP_NAME"
+  # ---- distribution and version
+  if [ "$OS_RELEASE_MISSING" = 1 ]; then
+    CP_STATUS=unsupported; cp_reason cp_r_noosr
+  else
+    id="$OS_ID"; al="$(pf_get alias 1 "$id" 2)"; [ -z "$al" ] || id="$al"
+    line=""
+    while IFS= read -r l; do case "$l" in "distro|$id|"*) line="$l"; break;; esac; done <<<"$PLATFORMS"
+    if [ -n "$line" ]; then
+      IFS='|' read -r _ _ fam name min key flags <<<"$line"
+      [ "$fam" != "-" ] || fam=""
+      CP_FAMILY="$fam"; CP_NAME="$name"; ver="$OS_VER"; CP_LABEL="$name${ver:+ $ver}"
+      case ",$flags," in *,derived,*) CP_LABEL="${OS_NAME:-$name}";; *,rolling,*) CP_LABEL="$name";; esac
+      st=""; code="-"; wild=0; entry=0; max=""; k=""
+      case "$key" in minor) k="$(printf '%s' "$ver" | cut -d. -f1-2)";; *) k="${ver%%.*}";; esac
+      while IFS= read -r l; do                                  # the version lines of this distribution
+        case "$l" in "ver|$id|"*) ;; *) continue;; esac
+        IFS='|' read -r _ _ v1 s1 c1 <<<"$l"
+        if [ "$v1" = "*" ]; then st="$s1"; code="$c1"; wild=1
+        elif [ -n "$ver" ] && [ "$v1" = "$k" ]; then st="$s1"; code="$c1"; entry=1; fi
+        if [ "$s1" != unsupported ] && [ "$v1" != "*" ] && { [ -z "$max" ] || vlt "$max" "$v1"; }; then max="$v1"; fi
+      done <<<"$PLATFORMS"
+      if [ "$wild" = 1 ]; then :                                 # derived / rolling / one status for every version
+      elif [ -z "$ver" ]; then st=expected; cp_note cp_w_nover "$name"
+      elif [ "$entry" = 1 ]; then :
+      elif [ "$min" != "-" ] && vlt "$k" "$min"; then st=unsupported; code=old
+      else
+        st=expected
+        if [ -n "$max" ] && vlt "$max" "$k"; then cp_note cp_w_newer "$name" "$ver"; else cp_note cp_w_unlisted "$name" "$ver"; fi
+      fi
+      if [ "$st" = unsupported ]; then
+        CP_STATUS=unsupported
+        case "$code" in
+          old) cp_reason cp_r_old "$name" "$ver" "$min";;
+          init) cp_reason cp_r_init "$name" "$ver";;
+          immutable) cp_reason cp_r_immutable "$name" "$ver";;
+          layout) cp_reason cp_r_layout "$name" "$ver";;
+          musl) cp_reason cp_r_musl "$(pf_req glibc)";;
+          arm32) cp_reason cp_r_arm32; CP_HARD=1;;
+          arch) cp_reason cp_r_distro_arch "$name" "$ver";;
+          *) cp_reason cp_r_eol "$name" "$ver";;
+        esac
+      else CP_STATUS="$st"; fi
+    else
+      # unknown identifier: a known family in ID_LIKE is enough (derivative), otherwise refuse
+      fam=""
+      for tok in $OS_LIKE; do
+        fam="$(pf_get like 2 "$tok" 1)"; [ -z "$fam" ] || break
+      done
+      if [ -n "$fam" ]; then CP_FAMILY="$fam"; cp_note cp_w_like "$CP_NAME" "$(pf_fam "$fam" 2)"
+      else CP_STATUS=unsupported; cp_reason cp_r_unknown "$OS_ID" "$OS_LIKE"; fi
+    fi
+  fi
+  # ---- architecture
+  m="${TEST_ARCH:-$(uname -m)}"; CP_ARCHRAW="$m"; ARCH="$m"
+  ast=unknown; archok=""
+  while IFS= read -r l; do
+    case "$l" in "arch|"*) ;; *) continue;; esac
+    IFS='|' read -r _ aid s1 _ un <<<"$l"
+    [ "$s1" != supported ] || archok="$archok${archok:+ }$aid"
+    case " $un " in *" $m "*) ARCH="$aid"; ast="$s1";; esac
+  done <<<"$PLATFORMS"
+  if [ "$ARCH" = arm32 ]; then cp_reason cp_r_arm32; CP_HARD=1                       # no binary exists: --skip-os-check cannot help
+  elif [ "$ast" != supported ]; then cp_reason cp_r_arch "$m" "$archok"
+  elif [ "$ARCH" = arm64 ]; then                                                  # a 64-bit kernel can run a 32-bit userland (32-bit Raspberry Pi OS on a Pi 4 / 5)
+    ub="${TEST_USERLAND_BITS:-$(getconf LONG_BIT 2>/dev/null || true)}"
+    if [ -z "$ub" ] && have dpkg; then case "$(dpkg --print-architecture 2>/dev/null || true)" in armhf|armel) ub=32;; esac; fi
+    if [ "$ub" = 32 ]; then cp_reason cp_r_arm_userland32; CP_HARD=1; fi
+    pim=""; if [ -r "${TEST_DT_MODEL:-/proc/device-tree/model}" ]; then pim="$(tr -d '\0' <"${TEST_DT_MODEL:-/proc/device-tree/model}" 2>/dev/null || true)"; fi
+    [ "$CP_STATUS" != tested ] || CP_STATUS=expected        # arm64 is only emulation-tested: never "tested"
+    case "$pim" in "Raspberry Pi"*) cp_note cp_w_pi;; esac
+  fi
+  # ---- glibc
+  gl="${TEST_GLIBC:-}"
+  if [ -z "$gl" ]; then
+    gl="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"; case "$gl" in glibc\ *) gl="${gl#glibc }";; *) gl="";; esac
+    if [ -z "$gl" ]; then
+      gl="$(ldd --version 2>&1 | head -n1 || true)"
+      case "$gl" in *[Mm][Uu][Ss][Ll]*) gl=musl;; *) gl="$(printf '%s' "$gl" | grep -Eo '[0-9]+\.[0-9]+$' || true)";; esac
+    fi
+  fi
+  if [ "$gl" = musl ]; then CP_GLIBC=musl; cp_reason cp_r_musl "$(pf_req glibc)"
+  elif [ -n "$gl" ]; then
+    CP_GLIBC="$gl"
+    if vlt "$gl" "$(pf_req glibc)"; then cp_reason cp_r_glibc "$gl" "$(pf_req glibc)"; fi
+  else cp_note cp_w_glibc; fi
+  # ---- systemd (running as init, version)
+  sv="${TEST_SYSTEMD:-}"
+  if [ "$STAGING" = 1 ] && [ -z "$sv" ]; then sv="?"            # staging (--destdir) does not use the running systemd
+  elif [ -z "$sv" ]; then
+    if [ -d /run/systemd/system ] && have systemctl; then sv="$(systemctl --version 2>/dev/null | head -n1 || true)"; sv="${sv#systemd }"; sv="${sv%%[!0-9]*}"; [ -n "$sv" ] || sv="?"
+    else sv=none; fi
+  fi
+  if [ "$sv" = none ]; then CP_SYSTEMD=none; cp_reason cp_r_systemd
+  else
+    CP_SYSTEMD="$sv"
+    if [ "$sv" != "?" ] && vlt "$sv" "$(pf_req systemd)"; then cp_reason cp_r_systemd_old "$sv" "$(pf_req systemd)"; fi
+  fi
+  # ---- kernel
+  kv="${TEST_KERNEL:-$(uname -r)}"; kv="$(printf '%s' "$kv" | grep -Eo '^[0-9]+(\.[0-9]+)*' || true)"
+  if [ -n "$kv" ]; then
+    CP_KERNEL="$kv"
+    if vlt "$kv" "$(pf_req kernel)"; then cp_reason cp_r_kernel "$kv" "$(pf_req kernel)"; fi
+  fi
+  [ "${#CP_REASONS[@]}" -eq 0 ] || CP_STATUS=unsupported
+  return 0
+}
+
+# compact table of the compatible systems (generated from the platform data)
+compat_table() {
+  local IFS=' ' l id fam name min key flags tested exp any v s lab seen
+  printf '  %s\n' "$(t cp_list "$(pf_req glibc)" "$(pf_req systemd)")"
+  while IFS= read -r l; do
+    case "$l" in "distro|"*) ;; *) continue;; esac
+    IFS='|' read -r _ id fam name min key flags <<<"$l"
+    tested=""; exp=""; any=""; seen=0
+    while IFS= read -r l; do
+      case "$l" in "ver|$id|"*) ;; *) continue;; esac
+      IFS='|' read -r _ _ v s _ <<<"$l"
+      [ "$s" != unsupported ] || continue
+      seen=1
+      if [ "$v" = "*" ]; then
+        case ",$flags," in *,rolling,*) lab="$(t cp_rolling)";; *) lab="$(t cp_any)";; esac
+        any="$lab ($(t "cp_$s"))"
+      elif [ "$s" = tested ]; then tested="$tested $v"
+      else exp="$exp $v"; fi
+    done <<<"$PLATFORMS"
+    [ "$seen" = 1 ] || continue
+    s="$any"
+    [ -z "$tested" ] || s="$s${s:+; }$(t cp_tested):${tested}"
+    [ -z "$exp" ] || s="$s${s:+; }$(t cp_expected):${exp}"
+    printf '    %-34s %s\n' "$name" "$s"
+  done <<<"$PLATFORMS"
+}
+
+# compat_print: verdict + table on stdout (or stderr with a refusal when called as compat_print err)
+compat_print() {
+  local r w
+  printf '\n  %s\n' "$(t cp_title)"
+  printf '  %s\n' "$(t cp_detected "$CP_LABEL" "$CP_ARCHRAW" "$CP_GLIBC" "$CP_SYSTEMD" "$CP_KERNEL")"
+  if [ "$CP_STATUS" = unsupported ]; then
+    printf '  %s\n' "$(t cp_refused)"
+    for r in "${CP_REASONS[@]}"; do printf '    - %s\n' "$r"; done
+  else
+    printf '  %s\n' "$(t cp_ok "$CP_LABEL" "$(t "cp_$CP_STATUS")")"
+    for w in ${CP_NOTES[@]+"${CP_NOTES[@]}"}; do printf '  [warn] %s\n' "$w"; done
+  fi
+  echo
+  compat_table
+  echo
+}
+
+# compat_gate: called once the action is known (never for --uninstall / --status / --links): refuse before any change
+compat_gate() {
+  local r
+  if [ "$ACTION" = update ] && [ "$(conf_get SKIP_OS_CHECK)" = 1 ]; then SKIP_OS_CHECK=1; fi   # an installation made with --skip-os-check stays updatable
+  if [ "$CP_STATUS" = unsupported ]; then
+    if [ "$SKIP_OS_CHECK" = 1 ] && [ "$CP_HARD" = 0 ]; then
+      warn "$(t cp_w_skip)"; for r in "${CP_REASONS[@]}"; do warn "  - $r"; done
+      COMPAT_LINE="$(t cp_w_skip) ${CP_REASONS[*]}"
+    elif [ "$STAGING" = 1 ]; then
+      warn "$(t cp_w_stage)"; for r in "${CP_REASONS[@]}"; do warn "  - $r"; done
+      COMPAT_LINE="$(t cp_w_stage) ${CP_REASONS[*]}"
+    else
+      { compat_print; printf '  %s\n' "$(t cp_nochange)"; [ "$CP_HARD" = 1 ] || printf '  %s\n' "$(t cp_override)"; echo; } >&2
+      exit 3
+    fi
+  else
+    COMPAT_LINE="$(t cp_ok "$CP_LABEL" "$(t "cp_$CP_STATUS")")"
+    COMPAT_OK=1
+  fi
+  case "$ARCH" in amd64|arm64) ;; *) die "unsupported architecture: $CP_ARCHRAW";; esac
+  return 0
+}
 
 # ------------------------------------------------------------------------------------------------ interactive input
 TTY_DEV=""
@@ -1457,6 +2256,9 @@ Options:
   --console-from CIDR        only allow this address / network to reach the console port (e.g. 203.0.113.0/24); default: anywhere
   --no-firewall              never touch the firewall (nftables / iptables hosts are never modified either: the commands are printed)
   --no-selinux --no-sysctl --no-start --no-enable
+  --check-compat             print whether this system is compatible (and the list of compatible distributions), change nothing;
+                             exit 0 when compatible, 3 when not
+  --skip-os-check            install although the system is unsupported / unrecognised (warns loudly; at your own risk)
   --home DIR                 installation home (default /var/toutwaf, or TOUTWAF_HOME): bin/ conf/ data/ logs/ below it; CLIs are linked in
                              /usr/local/bin. An existing installation keeps its paths and is never moved unless you pass --home.
   --bin-dir DIR | --install-dir DIR   where the binaries go (default HOME/bin; /usr/local/bin for an installation made before HOME existed)
@@ -1500,6 +2302,8 @@ while [ $# -gt 0 ]; do
     --no-sysctl) NO_SYSCTL=1; shift;;
     --no-start) NO_START=1; shift;;
     --no-enable) NO_ENABLE=1; shift;;
+    --check-compat) CHECK_COMPAT=1; shift;;
+    --skip-os-check) SKIP_OS_CHECK=1; shift;;
     --home) HOME_DIR="$2"; HOME_EXPLICIT=1; shift 2;;
     --bin-dir|--install-dir) BIN_DIR="$2"; BIN_EXPLICIT=1; shift 2;;
     --force) FORCE=1; shift;;
@@ -1528,38 +2332,58 @@ check_ports
 if [ -n "$CONSOLE_FROM" ]; then
   if ! [[ "$CONSOLE_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$CONSOLE_FROM" == */0 ]]; then die "--console-from must be an address or a CIDR such as 203.0.113.0/24 (not 0.0.0.0/0)"; fi
 fi
-STAGING=0; [ -n "$DESTDIR" ] && STAGING=1
-
 # ------------------------------------------------------------------------------------------------ environment
 [ "$(uname -s)" = "Linux" ] || die "this installer is for Linux; on Windows use install.ps1"
+# test hooks (fake os-release / architecture / glibc / systemd / kernel): honoured ONLY when nothing can be changed (--dry-run, --check-compat)
+OS_RELEASE_FILE=/etc/os-release; TEST_ARCH=""; TEST_GLIBC=""; TEST_SYSTEMD=""; TEST_KERNEL=""; TEST_USERLAND_BITS=""; TEST_DT_MODEL=""
+if [ -n "${TOUTWAF_TEST_OS_RELEASE:-}${TOUTWAF_TEST_ARCH:-}${TOUTWAF_TEST_GLIBC:-}${TOUTWAF_TEST_SYSTEMD:-}${TOUTWAF_TEST_KERNEL:-}${TOUTWAF_TEST_USERLAND_BITS:-}${TOUTWAF_TEST_DT_MODEL:-}" ]; then
+  if [ "$DRY_RUN" = 1 ] || [ "$CHECK_COMPAT" = 1 ]; then
+    [ -z "${TOUTWAF_TEST_OS_RELEASE:-}" ] || OS_RELEASE_FILE="$TOUTWAF_TEST_OS_RELEASE"
+    TEST_ARCH="${TOUTWAF_TEST_ARCH:-}"; TEST_GLIBC="${TOUTWAF_TEST_GLIBC:-}"; TEST_SYSTEMD="${TOUTWAF_TEST_SYSTEMD:-}"; TEST_KERNEL="${TOUTWAF_TEST_KERNEL:-}"
+    TEST_USERLAND_BITS="${TOUTWAF_TEST_USERLAND_BITS:-}"; TEST_DT_MODEL="${TOUTWAF_TEST_DT_MODEL:-}"
+    printf '[test] TOUTWAF_TEST_* hooks active: the compatibility check reads simulated values\n' >&2
+  else
+    printf '[warn] TOUTWAF_TEST_* variables are ignored: they only work with --dry-run or --check-compat\n' >&2
+  fi
+fi
+
+OS_ID="unknown"; OS_VER=""; OS_LIKE=""; OS_NAME=""; OS_RELEASE_MISSING=0
+if [ -r "$OS_RELEASE_FILE" ]; then
+  # read it in a subshell: os-release defines VERSION, NAME, ID ... which would clobber our own variables
+  # shellcheck disable=SC1090
+  _osr="$( . "$OS_RELEASE_FILE" >/dev/null 2>&1; printf '%s\n%s\n%s\n%s\n' "${ID:-unknown}" "${VERSION_ID:-}" "${ID_LIKE:-}" "${PRETTY_NAME:-${NAME:-}}" )" || _osr=""
+  { IFS= read -r OS_ID || true; IFS= read -r OS_VER || true; IFS= read -r OS_LIKE || true; IFS= read -r OS_NAME || true; } <<<"$_osr"   # (a trailing empty field is stripped by $(...))
+  OS_ID="${OS_ID,,}"; OS_LIKE="${OS_LIKE,,}"; [ -n "$OS_ID" ] || OS_ID=unknown
+else OS_RELEASE_MISSING=1; fi
+STAGING=0; [ -n "$DESTDIR" ] && STAGING=1
+compat_eval
+FAMILY="$CP_FAMILY"
+if [ "$CHECK_COMPAT" = 1 ]; then
+  compat_print
+  if [ "$(id -u)" -ne 0 ]; then printf '  %s\n\n' "$(t cp_not_root)"; fi
+  [ "$CP_STATUS" != unsupported ] || exit 3
+  exit 0
+fi
 if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ "$(id -u)" -ne 0 ]; then die "$(t root_required)"; fi
 TMP="$(mktemp -d)"; LOG="$TMP/install.log"
-if [ "$STAGING" = 0 ] && [ "$(id -u)" -eq 0 ]; then
-  if { : >>/var/log/toutwaf-install.log; } 2>/dev/null; then chmod 0600 /var/log/toutwaf-install.log; LOG=/var/log/toutwaf-install.log; fi
-fi
-printf '\n#### %s toutwaf install.sh v%s %s\n' "$(date -u +%FT%TZ)" "$INSTALLER_VERSION" "${ACTION:-menu}" >>"$LOG"
+# persist_log: from now on the log goes to /var/log/toutwaf-install.log (called once the compatibility gate has passed, so that a refused
+# run leaves nothing behind)
+persist_log() {
+  local f=/var/log/toutwaf-install.log
+  if [ "$STAGING" = 0 ] && [ "$(id -u)" -eq 0 ] && [ "$LOG" != "$f" ]; then
+    if { : >>"$f"; } 2>/dev/null; then chmod 0600 "$f"; cat "$LOG" >>"$f" 2>/dev/null || true; LOG="$f"; fi
+  fi
+  printf '\n#### %s toutwaf install.sh v%s %s\n' "$(date -u +%FT%TZ)" "$INSTALLER_VERSION" "${ACTION:-menu}" >>"$LOG"
+  return 0
+}
 
-OS_ID="unknown"; OS_VER=""; OS_LIKE=""
-if [ -r /etc/os-release ]; then
-  # read it in a subshell: os-release defines VERSION, NAME, ID ... which would clobber our own variables
-  OS_ID="$(. /etc/os-release; printf '%s' "${ID:-unknown}")"
-  OS_VER="$(. /etc/os-release; printf '%s' "${VERSION_ID:-}")"
-  OS_LIKE="$(. /etc/os-release; printf '%s' "${ID_LIKE:-}")"
+# package manager when the distribution family is unknown (--skip-os-check on an unlisted system)
+if [ -z "$FAMILY" ]; then
+  for _pm in "dnf:rhel" "yum:rhel" "apt-get:debian" "zypper:suse" "pacman:arch"; do
+    if have "${_pm%%:*}"; then FAMILY_GUESS="${_pm##*:}"; break; fi
+  done
+  FAMILY_GUESS="${FAMILY_GUESS:-}"
 fi
-FAMILY=""
-case "$OS_ID $OS_LIKE" in
-  *rhel*|*fedora*|*almalinux*|*rocky*|*centos*|*ol\ *) FAMILY="rhel";;
-  *debian*|*ubuntu*) FAMILY="debian";;
-esac
-[ -n "$FAMILY" ] || log "unrecognised distribution ($OS_ID); continuing with generic Linux defaults"
-if [ "$FAMILY" = "rhel" ]; then
-  major="${OS_VER%%.*}"; { [ -z "$major" ] || [ "$major" -ge 8 ]; } || die "RHEL-family 8+ required (found $OS_VER)"
-fi
-case "$(uname -m)" in
-  x86_64|amd64) ARCH="amd64";;
-  aarch64|arm64) ARCH="arm64";;
-  *) die "unsupported architecture: $(uname -m)";;
-esac
 HAS_SYSTEMD=0; { [ -d /run/systemd/system ] && have systemctl; } && HAS_SYSTEMD=1
 [ "$STAGING" = 1 ] && HAS_SYSTEMD=0
 
@@ -1684,7 +2508,8 @@ write_installer_conf() {
   [ -d "$(dirname "$INSTALLER_CONF")" ] || return 0
   # CHANNEL: used by --update and by the control plane's "update available" check; BASE_URL only when a mirror was given
   { printf '# written by install.sh: release channel used by --update and by the console "update available" check (stable = branch main, dev = branch dev)\nCHANNEL=%s\n' "$CHANNEL"
-    case "$BASE_URL" in http://*|https://*) printf 'BASE_URL=%s\n' "$BASE_URL";; esac; } >"$INSTALLER_CONF" && chmod 0644 "$INSTALLER_CONF"
+    case "$BASE_URL" in http://*|https://*) printf 'BASE_URL=%s\n' "$BASE_URL";; esac
+    [ "$SKIP_OS_CHECK" = 0 ] || printf '# the installation was made with --skip-os-check (unsupported system): updates keep skipping the compatibility check\nSKIP_OS_CHECK=1\n'; } >"$INSTALLER_CONF" && chmod 0644 "$INSTALLER_CONF"
   return 0
 }
 # semver_lt A B: true when A < B (pre-release < release; "-dev.N" compared numerically)
@@ -1843,7 +2668,7 @@ panel_urls() {   # one "label|url" per line: the control plane's links[] when kn
 }
 setup_urls() {   # one "label|url" per line: the one-time setup link on every local IPv4 and on the public address
   [ -n "$BS_SETUP_TOKEN" ] || return 0      # no token = setup already completed, the link would be dead
-  local h sp="$BS_SETUP_PATH" hosts=""
+  local h sp="$BS_SETUP_PATH"
   if [ -z "$sp" ]; then sp="/${BS_PATH:+$BS_PATH/}setup"; fi
   case "$sp" in /*) ;; *) sp="/$sp";; esac
   if [[ "$sp" != *"$BS_SETUP_TOKEN"* ]]; then case "$sp" in *\?*) sp="$sp&token=$BS_SETUP_TOKEN";; *) sp="$sp?token=$BS_SETUP_TOKEN";; esac; fi
@@ -1882,6 +2707,7 @@ render_summary() {
       endb
     fi
   fi
+  if [ -n "$COMPAT_LINE" ]; then hdr "$(t sum_compat)"; row "$COMPAT_LINE"; endb; fi
   build_ports
   hdr "$(t sum_ports)"
   while IFS='|' read -r pt pr pu; do if [ -n "$pt" ]; then row "$hb$pt/$pr$he  $pu"; fi; done <<<"$SUMMARY_PORTS"
@@ -1983,7 +2809,7 @@ cmd_uninstall() {
     l="$(p /usr/local/bin/$b)"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
   done
   run rm -f "$(p "$CONF_DIR/firewall.conf")" "$(p "$CONF_DIR/firewall.managed")"
-  if [ "$STAGING" = 0 ] && [ "${FW_CLOSED:-0}" = 0 ] && have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then   # installation without the helper (older versions)
+  if [ "$STAGING" = 0 ] && [ "${FW_CLOSED:-0}" = 0 ] && firewalld_running; then   # installation without the helper (older versions)
     run firewall-cmd --permanent --remove-service=toutwaf-dp >/dev/null 2>&1 || true
     run firewall-cmd --permanent --remove-port="$CP_PORT/tcp" >/dev/null 2>&1 || true
     run firewall-cmd --reload >/dev/null 2>&1 || true
@@ -2002,19 +2828,63 @@ cmd_uninstall() {
 }
 
 # ------------------------------------------------------------------------------------------------ prerequisites
+# pkg_install PM pkg...: non-interactive install with the native package manager (never a partial system upgrade)
+pkg_install() {
+  local pm="$1" out; shift
+  case "$pm" in
+    dnf) run dnf install -y "$@";;
+    yum) run yum install -y "$@";;
+    apt) run apt-get update -qq; DEBIAN_FRONTEND=noninteractive run apt-get install -y --no-install-recommends "$@";;
+    zypper) run zypper --non-interactive install --no-recommends "$@";;
+    pacman)
+      # never "pacman -Sy <pkg>": a partial upgrade breaks Arch. The package databases must already be synchronised.
+      if [ "$DRY_RUN" = 1 ]; then run pacman -S --needed --noconfirm "$@"; return 0; fi
+      if out="$(pacman -S --needed --noconfirm "$@" 2>&1 </dev/null)"; then printf '%s\n' "$out"; return 0; fi
+      printf '%s\n' "$out"
+      case "$out" in
+        *[Ll]andlock*|*"restricting filesystem access"*)   # kernel / container without Landlock: pacman 7 cannot sandbox its downloads
+          log "pacman sandbox (Landlock) unavailable here: retrying with --disable-sandbox"; pacman -S --needed --noconfirm --disable-sandbox "$@" </dev/null;;
+        *"target not found"*|*"failed retrieving file"*|*"could not resolve"*) warn "$(t cp_prereq_arch)"; return 1;;
+        *) return 1;;
+      esac;;
+    *) return 1;;
+  esac
+}
+
 install_pkgs() {
   [ "$STAGING" = 1 ] && return 0
-  local missing=()
-  have curl || missing+=(curl); have tar || missing+=(tar); have sha256sum || missing+=(coreutils)
-  if [ -n "${TOUTWAF_RELEASE_PUBKEY:-}${RELEASE_PUB_FILE:-}" ] || [ -r "$(p "$CONF_DIR/release.pub")" ]; then have openssl || missing+=(openssl); fi
-  have setcap || { [ "$FAMILY" = rhel ] && missing+=(libcap) || missing+=(libcap2-bin); }
-  [ -d /etc/ssl/certs ] || [ -d /etc/pki/tls/certs ] || missing+=(ca-certificates)
-  if [ "$FAMILY" = rhel ] && [ "$NO_SELINUX" = 0 ] && have getenforce && [ "$(getenforce 2>/dev/null)" != "Disabled" ] && ! have semanage; then missing+=(policycoreutils-python-utils); fi
-  [ ${#missing[@]} -eq 0 ] && return 0
-  log "Installing prerequisites: ${missing[*]}"
-  if have dnf; then run dnf install -y "${missing[@]}"; elif have yum; then run yum install -y "${missing[@]}";
-  elif have apt-get; then run apt-get update -qq; DEBIAN_FRONTEND=noninteractive run apt-get install -y --no-install-recommends "${missing[@]}";
-  else die "cannot install prerequisites automatically (${missing[*]}); install them and re-run"; fi
+  local fam="${FAMILY:-${FAMILY_GUESS:-}}" pm="" missing=() optional=() n
+  [ -n "$fam" ] || die "cannot install prerequisites automatically: no known package manager (dnf, yum, apt-get, zypper, pacman); install curl, tar, coreutils and libcap tools, then re-run"
+  need() { n="$(pf_pkg "$fam" "$1")"; if [ -n "$n" ] && [ "$n" != "-" ]; then missing+=("$n"); fi; return 0; }
+  have curl || need curl; have tar || need tar; have gzip || need gzip; have sha256sum || need coreutils; have awk || need awk
+  if [ -n "${TOUTWAF_RELEASE_PUBKEY:-}${RELEASE_PUB_FILE:-}" ] || [ -r "$(p "$CONF_DIR/release.pub")" ]; then have openssl || need openssl; fi
+  have setcap || need libcap
+  [ -d /etc/ssl/certs ] || [ -d /etc/pki/tls/certs ] || need ca
+  # SELinux python utilities (semanage), only when SELinux is on and the family has them
+  if [ "$NO_SELINUX" = 0 ] && have getenforce && [ "$(getenforce 2>/dev/null)" != "Disabled" ] && ! have semanage; then need selinux; fi
+  # logrotate is optional: without it the log files simply are not rotated
+  if ! have logrotate; then n="$(pf_pkg "$fam" logrotate)"; if [ -n "$n" ] && [ "$n" != "-" ]; then optional+=("$n"); fi; fi
+  [ ${#missing[@]} -gt 0 ] || [ ${#optional[@]} -gt 0 ] || return 0
+  # package manager: the family's, falling back to whatever is installed
+  case "$(pf_fam "$fam" 3)" in
+    dnf) if have dnf; then pm=dnf; elif have yum; then pm=yum; fi;;
+    apt) have apt-get && pm=apt;;
+    zypper) have zypper && pm=zypper;;
+    pacman) have pacman && pm=pacman;;
+  esac
+  if [ -z "$pm" ]; then
+    if have dnf; then pm=dnf; elif have yum; then pm=yum; elif have apt-get; then pm=apt; elif have zypper; then pm=zypper; elif have pacman; then pm=pacman; fi
+  fi
+  if [ ${#missing[@]} -gt 0 ]; then
+    [ -n "$pm" ] || die "cannot install prerequisites automatically (${missing[*]}); install them and re-run"
+    log "Installing prerequisites with $pm: ${missing[*]}"
+    pkg_install "$pm" "${missing[@]}" || die "installing the prerequisites failed (${missing[*]}); install them and re-run"
+  fi
+  if [ ${#optional[@]} -gt 0 ] && [ -n "$pm" ]; then
+    log "Installing optional packages with $pm: ${optional[*]}"
+    pkg_install "$pm" "${optional[@]}" || warn "optional package(s) not installed (${optional[*]}): log rotation will not run"
+  fi
+  return 0
 }
 
 # ------------------------------------------------------------------------------------------------ fetch
@@ -2522,6 +3392,14 @@ set -uo pipefail
 DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; SVC_USER='@SVC_USER@'
 REQ="$DATA_DIR/firewall-request"; STATUS="$DATA_DIR/firewall-status"; CONF="$CONF_DIR/firewall.conf"; MANAGED="$CONF_DIR/firewall.managed"
 have() { command -v "$1" >/dev/null 2>&1; }
+# firewalld_running: true only when the daemon is really up. "firewall-cmd --state" alone is not a safe probe: with firewalld installed but stopped it
+# triggers D-Bus activation (starts the daemon as a side effect, or blocks ~50 s when it cannot start, e.g. in a container)
+firewalld_running() {
+  have firewall-cmd || return 1
+  if [ -d /run/systemd/system ] && have systemctl; then systemctl is-active --quiet firewalld 2>/dev/null || return 1
+  elif have pgrep; then pgrep -x firewalld >/dev/null 2>&1 || return 1; fi
+  if have timeout; then timeout 20 firewall-cmd --state >/dev/null 2>&1; else firewall-cmd --state >/dev/null 2>&1; fi
+}
 
 # ---- validation (the request file is writable by the service account: never trust it) ------------------------------------
 valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
@@ -2549,7 +3427,7 @@ detect() {
   BACKEND=none; ACTIVE=0; TOOLS=""
   have firewall-cmd && TOOLS="$TOOLS,firewall-cmd"; have ufw && TOOLS="$TOOLS,ufw"; have nft && TOOLS="$TOOLS,nft"; have iptables && TOOLS="$TOOLS,iptables"
   TOOLS="${TOOLS#,}"
-  if have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then BACKEND=firewalld; ACTIVE=1
+  if firewalld_running; then BACKEND=firewalld; ACTIVE=1
   elif have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then BACKEND=ufw; ACTIVE=1
   elif have nft && nft list ruleset 2>/dev/null | awk '/hook input/{h=1} h && (/policy drop/ || /(^|[ \t])(drop|reject)($|[ \t])/){f=1} END{exit !f}'; then BACKEND=nftables; ACTIVE=1
   elif have iptables && iptables -S INPUT 2>/dev/null | grep -qE '^-P INPUT (DROP|REJECT)|^-A INPUT .*-j (DROP|REJECT)'; then BACKEND=iptables; ACTIVE=1
@@ -2848,9 +3726,11 @@ EOF
 
 setup_selinux() {
   if [ "$STAGING" = 1 ] || [ "$NO_SELINUX" = 1 ]; then return 0; fi
+  # AppArmor (Debian / Ubuntu / SUSE): ToutWAF ships no profile, so nothing is confined by it; the systemd sandbox of the units applies
+  if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true)" = Y ]; then info "AppArmor is active: ToutWAF ships no AppArmor profile, the services are confined by their systemd sandbox only"; fi
   have getenforce || return 0
   [ "$(getenforce 2>/dev/null)" = "Disabled" ] && return 0
-  have semanage || { warn "SELinux is enabled but semanage is missing; skipping file contexts"; return 0; }
+  have semanage || { warn "SELinux is enabled but semanage is missing; skipping file contexts. By hand, once the SELinux policy utilities are installed: semanage fcontext -a -t var_lib_t '$DATA_DIR(/.*)?' && semanage fcontext -a -t var_log_t '$LOG_DIR(/.*)?' && restorecon -RF '$DATA_DIR' '$LOG_DIR'"; return 0; }
   log "Configuring SELinux contexts ($(getenforce))"
   semanage fcontext -a -t etc_t "$CONF_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t etc_t "$CONF_DIR(/.*)?" || true
   semanage fcontext -a -t var_lib_t "$DATA_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t var_lib_t "$DATA_DIR(/.*)?" || true
@@ -3043,7 +3923,12 @@ start_services() {
 
 do_install_flow() {
   step "$(t s_prereq)" install_pkgs
-  if [ "$DRY_RUN" = 1 ] && ! have curl; then say "  $BUL (dry-run) curl is not installed yet: download, verification and the steps after it are skipped"; return 0; fi
+  if [ "$DRY_RUN" = 1 ]; then   # the prerequisites were only listed, not installed: what needs them cannot be shown
+    local _tool
+    for _tool in curl tar gzip awk sha256sum; do
+      if ! have "$_tool"; then say "  $BUL (dry-run) $_tool is not installed yet: download, verification and the steps after it are skipped"; return 0; fi
+    done
+  fi
   SRC_DIR=""
   RESOLVED_VERSION="${TARBALL:+local}"
   if [ -z "$TARBALL" ]; then resolve_release; fi
@@ -3150,10 +4035,12 @@ if [ -z "$ACTION" ]; then
 fi
 
 case "$ACTION" in
-  status) rc=0; cmd_status || rc=$?; exit "$rc";;      # (a plain call would fire the ERR trap on a non-zero status)
-  links) rc=0; cmd_links || rc=$?; exit "$rc";;
-  uninstall) cmd_uninstall; exit 0;;
+  status) persist_log; rc=0; cmd_status || rc=$?; exit "$rc";;      # (a plain call would fire the ERR trap on a non-zero status)
+  links) persist_log; rc=0; cmd_links || rc=$?; exit "$rc";;
+  uninstall) persist_log; cmd_uninstall; exit 0;;
 esac
+compat_gate          # unsupported system: stops here (exit 3) before anything is changed
+persist_log
 
 detect_installed
 if [ "$ACTION" = update ]; then
@@ -3168,8 +4055,12 @@ else
 fi
 if [ -n "$ENROLL_TOKEN$NODE_TOKEN" ] && [ -z "$CP_URL" ]; then die "$(t need_cp)"; fi
 banner
-say "  ${D}os=$OS_ID $OS_VER arch=$ARCH component=$COMPONENT channel=$CHANNEL${DESTDIR:+ staging=$DESTDIR}$R"
+say "  ${D}os=$OS_ID $OS_VER family=${FAMILY:-${FAMILY_GUESS:-?}} arch=$ARCH component=$COMPONENT channel=$CHANNEL${DESTDIR:+ staging=$DESTDIR}$R"
 [ -z "$LAYOUT_NOTE" ] || say "  ${D}$LAYOUT_NOTE$R"
+if [ "$COMPAT_OK" = 1 ]; then
+  say "  $(paint "$GRN" "$OKM") $COMPAT_LINE"
+  for _n in ${CP_NOTES[@]+"${CP_NOTES[@]}"}; do warn "$_n"; done
+fi
 if want_cp && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; then detect_public_ip; fi
 do_install_flow
 

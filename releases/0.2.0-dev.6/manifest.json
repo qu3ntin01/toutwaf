@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "version": "0.2.0-dev.6",
+  "channel": "dev",
+  "released_at": "2026-10-04T18:03:29Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 44553758,
+      "sha256": "8bf04e2d4eb570610fb6a9061de6e1e840e94c09c5c535411279d3f2c654aa86"
+    },
+    {
+      "name": "toutwaf-linux-arm64.tar.gz",
+      "os": "linux",
+      "arch": "arm64",
+      "size": 40668764,
+      "sha256": "b9f62c59caa52a3537bbd30541ffafb833ac1b804b52cd105cbee494b16b2e98"
+    },
+    {
+      "name": "toutwaf-windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "size": 45147913,
+      "sha256": "06a68e893914017f6d155250f3f6c2f15e5bc8557e632c435f7d39b59249ffdc"
+    },
+    {
+      "name": "toutwaf-windows-arm64.zip",
+      "os": "windows",
+      "arch": "arm64",
+      "size": 40890451,
+      "sha256": "3e2b1326bb3d98a3a174c3c92298a6743a4b8cd4d0f46acd07d49a6daeb3b748"
+    }
+  ],
+  "notes": "## 0.2.0-dev.6\n\n- **Linux compatibility**: the installer checks the system before changing anything (`--check-compat`, `--skip-os-check`) and lists compatible versions. Full install test passed on 30 container images: AlmaLinux/Rocky/Oracle 8-10, CentOS Stream 9-10, Fedora 41-44, Amazon Linux 2023, Debian 11-13, Ubuntu 20.04-26.04, openSUSE Leap 15.6/16.0, Tumbleweed, Arch; RHEL 8-10 validated on Red Hat UBI images. New families: SUSE, Arch, Amazon.\n- **ARM64** (Raspberry Pi 64-bit, Graviton, Ampere) and **Windows ARM64**: binaries included. Emulation-tested only (Linux), never run on real ARM hardware; 32-bit ARM is refused.\n- **Docker image** (amd64/arm64) with compose files for Mac (Apple Silicon and Intel) and any Docker host; native macOS is not provided.\n- **ToutPanel integration**: Cluster \u003e Web servers (install through command or SSH, dedicated token, TLS pin endpoint, heartbeat and status).\n- Free edition documented: 5 sites, 1 node, 2 users, 1 organisation, 50 million requests per month."
+}
