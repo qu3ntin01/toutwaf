@@ -2,6 +2,13 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.2.0-dev.7 - 2026-10-05
+
+## 0.2.0-dev.7
+
+- **Signed releases**: `SHA256SUMS` is now signed (Ed25519) and the installers verify the signature with a built-in public key before installing or updating. A bad signature always aborts; a missing signature aborts for 0.2.0-dev.7 and later. Releases before dev.7 are unsigned. On systems whose OpenSSL cannot verify Ed25519 (RHEL-family 8) the installer uses a built-in Python verifier.
+- Same binaries and features as 0.2.0-dev.6 (Linux and Windows, Intel/AMD and ARM64; Docker image; ToutPanel web servers; installer compatibility check).
+
 ## 0.2.0-dev.6 - 2026-10-04
 
 ## 0.2.0-dev.6

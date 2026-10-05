@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.2.0-dev.6** · channel **dev (pre-release)** · 2026-10-04
+**Version 0.2.0-dev.7** · channel **dev (pre-release)** · 2026-10-05
 
 </div>
 
@@ -221,23 +221,23 @@ Let's be transparent about what is not (yet) covered:
 
 ## Versions and downloads
 
-**Version 0.2.0-dev.6**
+**Version 0.2.0-dev.7**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 42.5 MiB | `8bf04e2d4eb570610fb6a9061de6e1e840e94c09c5c535411279d3f2c654aa86` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 38.8 MiB | `b9f62c59caa52a3537bbd30541ffafb833ac1b804b52cd105cbee494b16b2e98` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 43.1 MiB | `06a68e893914017f6d155250f3f6c2f15e5bc8557e632c435f7d39b59249ffdc` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 39.0 MiB | `3e2b1326bb3d98a3a174c3c92298a6743a4b8cd4d0f46acd07d49a6daeb3b748` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 42.4 MiB | `7a92338b0fdb748566ab4ef40a58b119a66c631225678e7b4e573aefd925f18b` |
+| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 38.7 MiB | `9aa1c5cab0217601b6c701c67ade1adb6ab8b032aa117cdcbc34cacfa52f80c4` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 43.1 MiB | `11ca947d2c28b2839b77f1f225d73b888cf42616d21356be0ea7de7e8f5131a5` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 39.0 MiB | `1d8a11019c6c4d817cc9d98bcc38cdc77ffd8d5d673a558e09b93cd8f4427046` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.2.0-dev.6` | 2026-10-04T18:03:29Z | **current** | `releases/0.2.0-dev.6/` |
+| `0.2.0-dev.7` | 2026-10-05T14:28:05Z | **current** | `releases/0.2.0-dev.7/` |
+| `0.2.0-dev.6` | 2026-10-04T18:03:29Z | available | `releases/0.2.0-dev.6/` |
 | `0.2.0-dev.5` | 2026-10-03T17:20:42Z | available | `releases/0.2.0-dev.5/` |
 | `0.2.0-dev.4` | 2026-10-03T13:59:43Z | available | `releases/0.2.0-dev.4/` |
 | `0.2.0-dev.3` | 2026-10-03T08:33:31Z | available | `releases/0.2.0-dev.3/` |
-| `0.2.0-dev.2` | 2026-10-02T16:25:39Z | available | `releases/0.2.0-dev.2/` |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
@@ -246,10 +246,23 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.2.0-dev.6 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.7 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-This release is not signed with a key yet: rely on the SHA-256 checksums above.
+### Verify a release
+
+From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `f8fc98e4c6e364fa`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. To verify by hand (OpenSSL 3 or later):
+
+```sh
+V=0.2.0-dev.7; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
+curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
+{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
+base64 -d SHA256SUMS.sig > sig.bin
+openssl pkeyutl -verify -pubin -inkey release.pem -rawin -in SHA256SUMS -sigfile sig.bin   # "Signature Verified Successfully"
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+A release signed with another key, or modified after signing, fails with "Signature Verification Failure". To trust another key (private mirror), set `TOUTWAF_RELEASE_PUBKEY` or create `<home>/conf/release.pub` before installing.
 
 ## License and support
 
