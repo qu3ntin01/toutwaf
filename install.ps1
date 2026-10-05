@@ -194,8 +194,9 @@ $script:Catalog = @{
         'e_yanked' = 'Version {0} was withdrawn (yanked) and must not be installed. Run --update for the current release, or --force to override.'
         'e_installer_old' = 'This installer is too old for this release (needs version {0}): download it again from the channel URL.'
         'e_downgrade' = 'The latest release {0} of channel {1} is older than the installed {2}: use --force to downgrade.'
-        'w_nosig' = 'release signature not verified: no public key configured (set TOUTWAF_RELEASE_PUBKEY or create {0})'
-        's_sigok' = 'Ed25519 release signature verified'
+        's_sigok' = 'release signature verified, key {0}'
+        'w_sigold' = 'release {0} was published without a signature (releases before 0.2.0-dev.7 are unsigned): only SHA-256 was verified, the signature could not be checked'
+        'w_sigskip' = 'release signature NOT verified: openssl.exe was not found in PATH (Windows has no built-in Ed25519 verification), only SHA-256 was checked. Install OpenSSL 3 and run again to verify against key {0}'
         'done' = 'Done.'
         'failed' = 'Failed'
         'log_hint' = 'Full log: {0}'
@@ -355,8 +356,9 @@ $script:Catalog = @{
         'e_yanked' = 'La version {0} a \u00e9t\u00e9 retir\u00e9e (yanked) et ne doit pas \u00eatre install\u00e9e. Lancez --update pour la version courante, ou --force pour passer outre.'
         'e_installer_old' = 'Cet installeur est trop ancien pour cette version (version {0} requise) : ret\u00e9l\u00e9chargez-le depuis l''URL du canal.'
         'e_downgrade' = 'La derni\u00e8re version {0} du canal {1} est plus ancienne que la version install\u00e9e {2} : utilisez --force pour r\u00e9trograder.'
-        'w_nosig' = 'signature de la version non v\u00e9rifi\u00e9e : aucune cl\u00e9 publique configur\u00e9e (d\u00e9finissez TOUTWAF_RELEASE_PUBKEY ou cr\u00e9ez {0})'
-        's_sigok' = 'Signature Ed25519 de la version v\u00e9rifi\u00e9e'
+        's_sigok' = 'signature de la version v\u00e9rifi\u00e9e, cl\u00e9 {0}'
+        'w_sigold' = 'la version {0} a \u00e9t\u00e9 publi\u00e9e sans signature (les versions ant\u00e9rieures \u00e0 0.2.0-dev.7 ne sont pas sign\u00e9es) : seul le SHA-256 a \u00e9t\u00e9 v\u00e9rifi\u00e9, la signature n''a pas pu l''\u00eatre'
+        'w_sigskip' = 'signature de la version NON v\u00e9rifi\u00e9e : openssl.exe est introuvable dans le PATH (Windows n''a pas de v\u00e9rification Ed25519 int\u00e9gr\u00e9e), seul le SHA-256 a \u00e9t\u00e9 contr\u00f4l\u00e9. Installez OpenSSL 3 et relancez pour v\u00e9rifier avec la cl\u00e9 {0}'
         'done' = 'Termin\u00e9.'
         'failed' = '\u00c9chec'
         'log_hint' = 'Journal complet : {0}'
@@ -516,8 +518,9 @@ $script:Catalog = @{
         'e_yanked' = 'La versi\u00f3n {0} fue retirada (yanked) y no debe instalarse. Ejecute --update para la versi\u00f3n actual, o --force para ignorarlo.'
         'e_installer_old' = 'Este instalador es demasiado antiguo para esta versi\u00f3n (requiere la versi\u00f3n {0}): desc\u00e1rguelo de nuevo desde la URL del canal.'
         'e_downgrade' = 'La \u00faltima versi\u00f3n {0} del canal {1} es anterior a la instalada {2}: use --force para degradar.'
-        'w_nosig' = 'firma de la versi\u00f3n sin verificar: no hay clave p\u00fablica configurada (defina TOUTWAF_RELEASE_PUBKEY o cree {0})'
-        's_sigok' = 'Firma Ed25519 de la versi\u00f3n verificada'
+        's_sigok' = 'firma de la versi\u00f3n verificada, clave {0}'
+        'w_sigold' = 'la versi\u00f3n {0} se public\u00f3 sin firma (las anteriores a 0.2.0-dev.7 no est\u00e1n firmadas): solo se verific\u00f3 el SHA-256, no se pudo comprobar la firma'
+        'w_sigskip' = 'firma de la versi\u00f3n NO verificada: no se encontr\u00f3 openssl.exe en el PATH (Windows no incluye verificaci\u00f3n Ed25519), solo se comprob\u00f3 el SHA-256. Instale OpenSSL 3 y vuelva a ejecutar para verificar con la clave {0}'
         'done' = 'Hecho.'
         'failed' = 'Error'
         'log_hint' = 'Registro completo: {0}'
@@ -677,8 +680,9 @@ $script:Catalog = @{
         'e_yanked' = 'Version {0} wurde zur\u00fcckgezogen (yanked) und darf nicht installiert werden. Mit --update die aktuelle Version holen, oder --force zum \u00dcbergehen.'
         'e_installer_old' = 'Dieses Installationsprogramm ist f\u00fcr diese Version zu alt (ben\u00f6tigt Version {0}): erneut von der Kanal-URL laden.'
         'e_downgrade' = 'Die neueste Version {0} des Kanals {1} ist \u00e4lter als die installierte {2}: --force zum Downgrade.'
-        'w_nosig' = 'Release-Signatur nicht gepr\u00fcft: kein \u00f6ffentlicher Schl\u00fcssel konfiguriert (TOUTWAF_RELEASE_PUBKEY setzen oder {0} anlegen)'
-        's_sigok' = 'Ed25519-Release-Signatur gepr\u00fcft'
+        's_sigok' = 'Release-Signatur gepr\u00fcft, Schl\u00fcssel {0}'
+        'w_sigold' = 'Version {0} wurde ohne Signatur ver\u00f6ffentlicht (Versionen vor 0.2.0-dev.7 sind unsigniert): nur SHA-256 wurde gepr\u00fcft, die Signatur konnte nicht gepr\u00fcft werden'
+        'w_sigskip' = 'Release-Signatur NICHT gepr\u00fcft: openssl.exe wurde im PATH nicht gefunden (Windows hat keine eingebaute Ed25519-Pr\u00fcfung), nur SHA-256 wurde gepr\u00fcft. OpenSSL 3 installieren und erneut ausf\u00fchren, um mit Schl\u00fcssel {0} zu pr\u00fcfen'
         'done' = 'Fertig.'
         'failed' = 'Fehlgeschlagen'
         'log_hint' = 'Vollst\u00e4ndiges Protokoll: {0}'
@@ -838,8 +842,9 @@ $script:Catalog = @{
         'e_yanked' = 'La versione {0} \u00e8 stata ritirata (yanked) e non va installata. Esegui --update per la versione corrente, o --force per forzare.'
         'e_installer_old' = 'Questo installer \u00e8 troppo vecchio per questa versione (richiede la versione {0}): scaricalo di nuovo dall''URL del canale.'
         'e_downgrade' = 'L''ultima versione {0} del canale {1} \u00e8 pi\u00f9 vecchia di quella installata {2}: usa --force per il downgrade.'
-        'w_nosig' = 'firma della release non verificata: nessuna chiave pubblica configurata (imposta TOUTWAF_RELEASE_PUBKEY o crea {0})'
-        's_sigok' = 'Firma Ed25519 della release verificata'
+        's_sigok' = 'firma della release verificata, chiave {0}'
+        'w_sigold' = 'la versione {0} \u00e8 stata pubblicata senza firma (le versioni precedenti a 0.2.0-dev.7 non sono firmate): \u00e8 stato verificato solo lo SHA-256, la firma non ha potuto essere controllata'
+        'w_sigskip' = 'firma della release NON verificata: openssl.exe non trovato nel PATH (Windows non ha una verifica Ed25519 integrata), \u00e8 stato controllato solo lo SHA-256. Installa OpenSSL 3 ed esegui di nuovo per verificare con la chiave {0}'
         'done' = 'Fatto.'
         'failed' = 'Fallito'
         'log_hint' = 'Log completo: {0}'
@@ -999,8 +1004,9 @@ $script:Catalog = @{
         'e_yanked' = 'A vers\u00e3o {0} foi retirada (yanked) e n\u00e3o deve ser instalada. Execute --update para a vers\u00e3o atual, ou --force para ignorar.'
         'e_installer_old' = 'Este instalador \u00e9 demasiado antigo para esta vers\u00e3o (requer a vers\u00e3o {0}): transfira-o novamente a partir do URL do canal.'
         'e_downgrade' = 'A \u00faltima vers\u00e3o {0} do canal {1} \u00e9 mais antiga do que a instalada {2}: use --force para reverter.'
-        'w_nosig' = 'assinatura da vers\u00e3o n\u00e3o verificada: nenhuma chave p\u00fablica configurada (defina TOUTWAF_RELEASE_PUBKEY ou crie {0})'
-        's_sigok' = 'Assinatura Ed25519 da vers\u00e3o verificada'
+        's_sigok' = 'assinatura da vers\u00e3o verificada, chave {0}'
+        'w_sigold' = 'a vers\u00e3o {0} foi publicada sem assinatura (as anteriores a 0.2.0-dev.7 n\u00e3o s\u00e3o assinadas): s\u00f3 o SHA-256 foi verificado, a assinatura n\u00e3o p\u00f4de ser conferida'
+        'w_sigskip' = 'assinatura da vers\u00e3o N\u00c3O verificada: openssl.exe n\u00e3o foi encontrado no PATH (o Windows n\u00e3o tem verifica\u00e7\u00e3o Ed25519 integrada), s\u00f3 o SHA-256 foi conferido. Instale o OpenSSL 3 e execute de novo para verificar com a chave {0}'
         'done' = 'Conclu\u00eddo.'
         'failed' = 'Falhou'
         'log_hint' = 'Registo completo: {0}'
@@ -1160,8 +1166,9 @@ $script:Catalog = @{
         'e_yanked' = 'Versie {0} is ingetrokken (yanked) en mag niet worden ge\u00efnstalleerd. Gebruik --update voor de huidige versie, of --force om te negeren.'
         'e_installer_old' = 'Dit installatieprogramma is te oud voor deze versie (vereist versie {0}): download het opnieuw van de kanaal-URL.'
         'e_downgrade' = 'De nieuwste versie {0} van kanaal {1} is ouder dan de ge\u00efnstalleerde {2}: gebruik --force om terug te gaan.'
-        'w_nosig' = 'release-handtekening niet gecontroleerd: geen publieke sleutel geconfigureerd (stel TOUTWAF_RELEASE_PUBKEY in of maak {0})'
-        's_sigok' = 'Ed25519-handtekening van de release gecontroleerd'
+        's_sigok' = 'release-handtekening gecontroleerd, sleutel {0}'
+        'w_sigold' = 'versie {0} is zonder handtekening gepubliceerd (versies v\u00f3\u00f3r 0.2.0-dev.7 zijn niet ondertekend): alleen SHA-256 is gecontroleerd, de handtekening kon niet worden gecontroleerd'
+        'w_sigskip' = 'release-handtekening NIET gecontroleerd: openssl.exe niet gevonden in PATH (Windows heeft geen ingebouwde Ed25519-controle), alleen SHA-256 is gecontroleerd. Installeer OpenSSL 3 en voer opnieuw uit om te controleren met sleutel {0}'
         'done' = 'Klaar.'
         'failed' = 'Mislukt'
         'log_hint' = 'Volledig logboek: {0}'
@@ -1321,8 +1328,9 @@ $script:Catalog = @{
         'e_yanked' = '\u0412\u0435\u0440\u0441\u0438\u044f {0} \u043e\u0442\u043e\u0437\u0432\u0430\u043d\u0430 (yanked) \u0438 \u043d\u0435 \u0434\u043e\u043b\u0436\u043d\u0430 \u0443\u0441\u0442\u0430\u043d\u0430\u0432\u043b\u0438\u0432\u0430\u0442\u044c\u0441\u044f. \u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 --update \u0434\u043b\u044f \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u043e\u0439 \u0432\u0435\u0440\u0441\u0438\u0438 \u0438\u043b\u0438 --force, \u0447\u0442\u043e\u0431\u044b \u043e\u0431\u043e\u0439\u0442\u0438.'
         'e_installer_old' = '\u042d\u0442\u043e\u0442 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u0441\u0442\u0430\u0440\u044b\u0439 \u0434\u043b\u044f \u044d\u0442\u043e\u0433\u043e \u0440\u0435\u043b\u0438\u0437\u0430 (\u043d\u0443\u0436\u043d\u0430 \u0432\u0435\u0440\u0441\u0438\u044f {0}): \u0441\u043a\u0430\u0447\u0430\u0439\u0442\u0435 \u0435\u0433\u043e \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e URL \u043a\u0430\u043d\u0430\u043b\u0430.'
         'e_downgrade' = '\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 \u0440\u0435\u043b\u0438\u0437 {0} \u043a\u0430\u043d\u0430\u043b\u0430 {1} \u0441\u0442\u0430\u0440\u0448\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u043e\u0433\u043e {2}: \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 --force \u0434\u043b\u044f \u043f\u043e\u043d\u0438\u0436\u0435\u043d\u0438\u044f \u0432\u0435\u0440\u0441\u0438\u0438.'
-        'w_nosig' = '\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u0440\u0435\u043b\u0438\u0437\u0430 \u043d\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430: \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043a\u043b\u044e\u0447 \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d (\u0437\u0430\u0434\u0430\u0439\u0442\u0435 TOUTWAF_RELEASE_PUBKEY \u0438\u043b\u0438 \u0441\u043e\u0437\u0434\u0430\u0439\u0442\u0435 {0})'
-        's_sigok' = '\u041f\u043e\u0434\u043f\u0438\u0441\u044c Ed25519 \u0440\u0435\u043b\u0438\u0437\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430'
+        's_sigok' = '\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u0440\u0435\u043b\u0438\u0437\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430, \u043a\u043b\u044e\u0447 {0}'
+        'w_sigold' = '\u0432\u0435\u0440\u0441\u0438\u044f {0} \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u0430 \u0431\u0435\u0437 \u043f\u043e\u0434\u043f\u0438\u0441\u0438 (\u0432\u0435\u0440\u0441\u0438\u0438 \u0434\u043e 0.2.0-dev.7 \u043d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u044b): \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e SHA-256, \u043f\u043e\u0434\u043f\u0438\u0441\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c'
+        'w_sigskip' = '\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u0440\u0435\u043b\u0438\u0437\u0430 \u041d\u0415 \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430: openssl.exe \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0432 PATH (\u0432 Windows \u043d\u0435\u0442 \u0432\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u043e\u0439 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 Ed25519), \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e SHA-256. \u0423\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 OpenSSL 3 \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u043d\u043e\u0432\u0430, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043f\u043e \u043a\u043b\u044e\u0447\u0443 {0}'
         'done' = '\u0413\u043e\u0442\u043e\u0432\u043e.'
         'failed' = '\u041e\u0448\u0438\u0431\u043a\u0430'
         'log_hint' = '\u041f\u043e\u043b\u043d\u044b\u0439 \u0436\u0443\u0440\u043d\u0430\u043b: {0}'
@@ -1482,8 +1490,9 @@ $script:Catalog = @{
         'e_yanked' = '\u7248\u672c {0} \u5df2\u88ab\u64a4\u56de\uff08yanked\uff09\uff0c\u4e0d\u5e94\u5b89\u88c5\u3002\u8bf7\u8fd0\u884c --update \u83b7\u53d6\u5f53\u524d\u7248\u672c\uff0c\u6216\u4f7f\u7528 --force \u5f3a\u5236\u3002'
         'e_installer_old' = '\u6b64\u5b89\u88c5\u7a0b\u5e8f\u5bf9\u8be5\u7248\u672c\u800c\u8a00\u592a\u65e7\uff08\u9700\u8981\u7248\u672c {0}\uff09\uff1a\u8bf7\u4ece\u901a\u9053 URL \u91cd\u65b0\u4e0b\u8f7d\u3002'
         'e_downgrade' = '\u6700\u65b0\u7248\u672c {0}\uff08\u901a\u9053 {1}\uff09\u6bd4\u5df2\u5b89\u88c5\u7684 {2} \u65e7\uff1a\u4f7f\u7528 --force \u964d\u7ea7\u3002'
-        'w_nosig' = '\u672a\u6821\u9a8c\u53d1\u5e03\u7b7e\u540d\uff1a\u672a\u914d\u7f6e\u516c\u94a5\uff08\u8bbe\u7f6e TOUTWAF_RELEASE_PUBKEY \u6216\u521b\u5efa {0}\uff09'
-        's_sigok' = 'Ed25519 \u53d1\u5e03\u7b7e\u540d\u6821\u9a8c\u901a\u8fc7'
+        's_sigok' = '\u53d1\u5e03\u7b7e\u540d\u6821\u9a8c\u901a\u8fc7\uff0c\u5bc6\u94a5 {0}'
+        'w_sigold' = '\u7248\u672c {0} \u53d1\u5e03\u65f6\u6ca1\u6709\u7b7e\u540d\uff080.2.0-dev.7 \u4e4b\u524d\u7684\u7248\u672c\u5747\u672a\u7b7e\u540d\uff09\uff1a\u4ec5\u6821\u9a8c\u4e86 SHA-256\uff0c\u65e0\u6cd5\u6821\u9a8c\u7b7e\u540d'
+        'w_sigskip' = '\u672a\u6821\u9a8c\u53d1\u5e03\u7b7e\u540d\uff1aPATH \u4e2d\u627e\u4e0d\u5230 openssl.exe\uff08Windows \u6ca1\u6709\u5185\u7f6e Ed25519 \u6821\u9a8c\uff09\uff0c\u4ec5\u6821\u9a8c\u4e86 SHA-256\u3002\u8bf7\u5b89\u88c5 OpenSSL 3 \u5e76\u91cd\u65b0\u8fd0\u884c\uff0c\u4ee5\u4f7f\u7528\u5bc6\u94a5 {0} \u6821\u9a8c'
         'done' = '\u5b8c\u6210\u3002'
         'failed' = '\u5931\u8d25'
         'log_hint' = '\u5b8c\u6574\u65e5\u5fd7\uff1a{0}'
@@ -1643,8 +1652,9 @@ $script:Catalog = @{
         'e_yanked' = '\u062a\u0645 \u0633\u062d\u0628 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0} (yanked) \u0648\u0644\u0627 \u064a\u062c\u0628 \u062a\u062b\u0628\u064a\u062a\u0647. \u0634\u063a\u0651\u0644 --update \u0644\u0644\u0625\u0635\u062f\u0627\u0631 \u0627\u0644\u062d\u0627\u0644\u064a \u0623\u0648 --force \u0644\u0644\u062a\u062c\u0627\u0648\u0632.'
         'e_installer_old' = '\u0647\u0630\u0627 \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0642\u062f\u064a\u0645 \u062c\u062f\u0627 \u0644\u0647\u0630\u0627 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 (\u064a\u062a\u0637\u0644\u0628 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0}): \u0646\u0632\u0651\u0644\u0647 \u0645\u0646 \u062c\u062f\u064a\u062f \u0645\u0646 \u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0642\u0646\u0627\u0629.'
         'e_downgrade' = '\u0623\u062d\u062f\u062b \u0625\u0635\u062f\u0627\u0631 {0} \u0641\u064a \u0627\u0644\u0642\u0646\u0627\u0629 {1} \u0623\u0642\u062f\u0645 \u0645\u0646 \u0627\u0644\u0645\u062b\u0628\u0651\u062a {2}: \u0627\u0633\u062a\u062e\u062f\u0645 --force \u0644\u0644\u0631\u062c\u0648\u0639.'
-        'w_nosig' = '\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u0625\u0635\u062f\u0627\u0631: \u0644\u0627 \u064a\u0648\u062c\u062f \u0645\u0641\u062a\u0627\u062d \u0639\u0627\u0645 (\u0627\u0636\u0628\u0637 TOUTWAF_RELEASE_PUBKEY \u0623\u0648 \u0623\u0646\u0634\u0626 {0})'
-        's_sigok' = '\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u062a\u0648\u0642\u064a\u0639 Ed25519 \u0644\u0644\u0625\u0635\u062f\u0627\u0631'
+        's_sigok' = '\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u0625\u0635\u062f\u0627\u0631\u060c \u0627\u0644\u0645\u0641\u062a\u0627\u062d {0}'
+        'w_sigold' = '\u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0} \u0646\u064f\u0634\u0631 \u0628\u062f\u0648\u0646 \u062a\u0648\u0642\u064a\u0639 (\u0627\u0644\u0625\u0635\u062f\u0627\u0631\u0627\u062a \u0642\u0628\u0644 0.2.0-dev.7 \u063a\u064a\u0631 \u0645\u0648\u0642\u0651\u0639\u0629): \u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 SHA-256 \u0641\u0642\u0637 \u0648\u0644\u0645 \u064a\u0645\u0643\u0646 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u062a\u0648\u0642\u064a\u0639'
+        'w_sigskip' = '\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u0625\u0635\u062f\u0627\u0631: \u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u0639\u062b\u0648\u0631 \u0639\u0644\u0649 openssl.exe \u0641\u064a PATH (\u0644\u0627 \u064a\u0648\u0641\u0631 Windows \u062a\u062d\u0642\u0642\u0627 \u0645\u062f\u0645\u062c\u0627 \u0645\u0646 Ed25519) \u0648\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 SHA-256 \u0641\u0642\u0637. \u062b\u0628\u0651\u062a OpenSSL 3 \u0648\u0623\u0639\u062f \u0627\u0644\u062a\u0634\u063a\u064a\u0644 \u0644\u0644\u062a\u062d\u0642\u0642 \u0628\u0627\u0644\u0645\u0641\u062a\u0627\u062d {0}'
         'done' = '\u062a\u0645.'
         'failed' = '\u0641\u0634\u0644'
         'log_hint' = '\u0627\u0644\u0633\u062c\u0644 \u0627\u0644\u0643\u0627\u0645\u0644: {0}'
@@ -2410,10 +2420,18 @@ function Get-ChannelJson {
     } catch { Write-InstallLog "channel.json: $($_.Exception.Message)" }
     return $null
 }
+# Release signature trust anchor. It lives HERE (in the installer you run), never in channel.json: the copy of the public key that
+# channel.json advertises is informational and must not be trusted. Overridden by TOUTWAF_RELEASE_PUBKEY, then by <ConfDir>\release.pub.
+# RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
+$script:ReleasePubKeyDefault = 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo='
+$script:ReleasePubKeyId = 'f8fc98e4c6e364fa'
+$script:SigRequiredFrom = '0.2.0-dev.7'   # releases before this one were published unsigned
+function Test-CustomPubKey { return [bool]($env:TOUTWAF_RELEASE_PUBKEY -or (Test-Path (Join-Path $ConfDir 'release.pub'))) }
 function Get-PubKeyPem([string]$tmp) {
+    # TOUTWAF_RELEASE_PUBKEY, else <ConfDir>\release.pub, else the built-in key
     $k = $env:TOUTWAF_RELEASE_PUBKEY
     if (-not $k) { $f = Join-Path $ConfDir 'release.pub'; if (Test-Path $f) { $k = $f } }
-    if (-not $k) { return '' }
+    if (-not $k) { $k = $script:ReleasePubKeyDefault }
     $raw = if (Test-Path -LiteralPath $k -ErrorAction SilentlyContinue) { (Get-Content -Raw $k).Trim() } else { $k.Trim() }
     $pem = Join-Path $tmp 'release-pub.pem'
     if ($raw -like '*BEGIN PUBLIC KEY*') { Set-Content -Path $pem -Value $raw -Encoding ASCII }
@@ -2424,14 +2442,39 @@ function Get-PubKeyPem([string]$tmp) {
     }
     return $pem
 }
+function Get-PubKeyId([string]$pem) {
+    # key id of the PEM (last 32 bytes of the SPKI DER = the raw Ed25519 key), no openssl needed
+    $b64 = ((Get-Content -Raw $pem) -replace '-----[A-Z ]+-----', '') -replace '\s', ''
+    $der = [Convert]::FromBase64String($b64)
+    if ($der.Length -lt 32) { return '' }
+    $raw = $der[($der.Length - 32)..($der.Length - 1)]
+    $h = [Security.Cryptography.SHA256]::Create().ComputeHash([byte[]]$raw)
+    return (($h[0..7] | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+# Policy: a bad signature ALWAYS aborts; a missing one aborts for releases >= SigRequiredFrom and only warns for older (unsigned) ones.
+# Windows (.NET, PowerShell 5.1 and 7) has no Ed25519: the check needs openssl.exe. Without it the built-in key cannot be applied: a loud
+# warning says so and nothing is reported as verified (SHA-256 was still checked). A key the admin configured explicitly stays fail-closed.
 function Confirm-ReleaseSignature([string]$relUrl, [string]$tmp) {
     $pem = Get-PubKeyPem $tmp
-    if (-not $pem) { Write-Warn (T 'w_nosig' @((Join-Path $ConfDir 'release.pub'))); return }
-    # .NET has no Ed25519: openssl.exe (Git for Windows, WSL-free installs, choco) is required; with a key configured we fail closed
+    $kid = Get-PubKeyId $pem
+    $custom = Test-CustomPubKey
+    if (-not $custom -and $kid -ne $script:ReleasePubKeyId) { throw "internal error: the built-in release public key has id $kid, expected $($script:ReleasePubKeyId)" }
+    $sigPath = Join-Path $tmp 'SHA256SUMS.sig'
+    try { Invoke-WebRequest -UseBasicParsing -Uri "$relUrl/SHA256SUMS.sig" -OutFile $sigPath }
+    catch {
+        $sc = 0; try { $sc = [int]$_.Exception.Response.StatusCode } catch { $sc = 0 }
+        if ($sc -eq 404) {   # not published
+            if (Test-SemverLess $script:ResolvedVersion $script:SigRequiredFrom) { Write-Warn (T 'w_sigold' @($script:ResolvedVersion)); return }
+            throw "release signature missing ($relUrl/SHA256SUMS.sig): releases >= $($script:SigRequiredFrom) are signed, installation refused"
+        }
+        throw "cannot download the release signature ($relUrl/SHA256SUMS.sig)"
+    }
     $ossl = Get-Command openssl -ErrorAction SilentlyContinue
-    if (-not $ossl) { throw 'a release public key is configured but openssl.exe is not in PATH: cannot verify the Ed25519 signature' }
-    try { Invoke-WebRequest -UseBasicParsing -Uri "$relUrl/SHA256SUMS.sig" -OutFile (Join-Path $tmp 'SHA256SUMS.sig') } catch { throw "release signature missing ($relUrl/SHA256SUMS.sig) but a public key is configured" }
-    $sig = [Convert]::FromBase64String(((Get-Content -Raw (Join-Path $tmp 'SHA256SUMS.sig')) -replace '\s', ''))
+    if (-not $ossl) {
+        if ($custom) { throw 'a release public key is configured but openssl.exe is not in PATH: cannot verify the Ed25519 signature' }
+        Write-Warn (T 'w_sigskip' @($script:ReleasePubKeyId)); return
+    }
+    $sig = [Convert]::FromBase64String(((Get-Content -Raw $sigPath) -replace '\s', ''))
     $sigFile = Join-Path $tmp 'sums.sig.bin'
     [IO.File]::WriteAllBytes($sigFile, $sig)
     $sums = Join-Path $tmp 'SHA256SUMS'
@@ -2440,7 +2483,7 @@ function Confirm-ReleaseSignature([string]$relUrl, [string]$tmp) {
         & $ossl.Source pkeyutl -verify -pubin -inkey $pem -in $sums -sigfile $sigFile 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'release signature verification FAILED' }
     }
-    Write-Info (T 's_sigok')
+    Write-Info (T 's_sigok' @($kid))
 }
 $script:ChJson = $null
 function Resolve-Release {

@@ -10,7 +10,7 @@
 #
 # What it does (idempotent: re-run to upgrade, existing configuration is never overwritten):
 #   * installs toutwaf-dp (data plane) and/or toutwaf-cp + toutwafctl (control plane) from a signed release
-#     verifying SHA-256 (and the Ed25519 signature when a release public key is configured)
+#     verifying SHA-256 and the Ed25519 signature (built-in trust anchor)
 #   * creates the unprivileged `toutwaf` system user and one installation home, /var/toutwaf by default (bin/ conf/ data/ logs/; --home DIR);
 #     an installation made before this layout keeps /etc/toutwaf, /var/lib/toutwaf, /var/log/toutwaf and is never moved
 #   * installs hardened systemd units (NoNewPrivileges, ProtectSystem=strict, seccomp SystemCallFilter, ...)
@@ -804,26 +804,36 @@ nl|e_downgrade|De nieuwste versie %s van kanaal %s is ouder dan de geïnstalleer
 ru|e_downgrade|Последний релиз %s канала %s старше установленного %s: используйте --force для понижения версии.
 zh|e_downgrade|最新版本 %s（通道 %s）比已安装的 %s 旧：使用 --force 降级。
 ar|e_downgrade|أحدث إصدار %s في القناة %s أقدم من المثبّت %s: استخدم --force للرجوع.
-en|w_nosig|release signature not verified: no public key configured (set TOUTWAF_RELEASE_PUBKEY or create %s)
-fr|w_nosig|signature de la version non vérifiée : aucune clé publique configurée (définissez TOUTWAF_RELEASE_PUBKEY ou créez %s)
-es|w_nosig|firma de la versión sin verificar: no hay clave pública configurada (defina TOUTWAF_RELEASE_PUBKEY o cree %s)
-de|w_nosig|Release-Signatur nicht geprüft: kein öffentlicher Schlüssel konfiguriert (TOUTWAF_RELEASE_PUBKEY setzen oder %s anlegen)
-it|w_nosig|firma della release non verificata: nessuna chiave pubblica configurata (imposta TOUTWAF_RELEASE_PUBKEY o crea %s)
-pt|w_nosig|assinatura da versão não verificada: nenhuma chave pública configurada (defina TOUTWAF_RELEASE_PUBKEY ou crie %s)
-nl|w_nosig|release-handtekening niet gecontroleerd: geen publieke sleutel geconfigureerd (stel TOUTWAF_RELEASE_PUBKEY in of maak %s)
-ru|w_nosig|подпись релиза не проверена: открытый ключ не настроен (задайте TOUTWAF_RELEASE_PUBKEY или создайте %s)
-zh|w_nosig|未校验发布签名：未配置公钥（设置 TOUTWAF_RELEASE_PUBKEY 或创建 %s）
-ar|w_nosig|لم يتم التحقق من توقيع الإصدار: لا يوجد مفتاح عام (اضبط TOUTWAF_RELEASE_PUBKEY أو أنشئ %s)
-en|s_sigok|Ed25519 release signature verified
-fr|s_sigok|Signature Ed25519 de la version vérifiée
-es|s_sigok|Firma Ed25519 de la versión verificada
-de|s_sigok|Ed25519-Release-Signatur geprüft
-it|s_sigok|Firma Ed25519 della release verificata
-pt|s_sigok|Assinatura Ed25519 da versão verificada
-nl|s_sigok|Ed25519-handtekening van de release gecontroleerd
-ru|s_sigok|Подпись Ed25519 релиза проверена
-zh|s_sigok|Ed25519 发布签名校验通过
-ar|s_sigok|تم التحقق من توقيع Ed25519 للإصدار
+en|s_sigok|release signature verified, key %s
+fr|s_sigok|signature de la version vérifiée, clé %s
+es|s_sigok|firma de la versión verificada, clave %s
+de|s_sigok|Release-Signatur geprüft, Schlüssel %s
+it|s_sigok|firma della release verificata, chiave %s
+pt|s_sigok|assinatura da versão verificada, chave %s
+nl|s_sigok|release-handtekening gecontroleerd, sleutel %s
+ru|s_sigok|подпись релиза проверена, ключ %s
+zh|s_sigok|发布签名校验通过，密钥 %s
+ar|s_sigok|تم التحقق من توقيع الإصدار، المفتاح %s
+en|w_sigold|release %s was published without a signature (releases before 0.2.0-dev.7 are unsigned): only SHA-256 was verified, the signature could not be checked
+fr|w_sigold|la version %s a été publiée sans signature (les versions antérieures à 0.2.0-dev.7 ne sont pas signées) : seul le SHA-256 a été vérifié, la signature n'a pas pu l'être
+es|w_sigold|la versión %s se publicó sin firma (las anteriores a 0.2.0-dev.7 no están firmadas): solo se verificó el SHA-256, no se pudo comprobar la firma
+de|w_sigold|Version %s wurde ohne Signatur veröffentlicht (Versionen vor 0.2.0-dev.7 sind unsigniert): nur SHA-256 wurde geprüft, die Signatur konnte nicht geprüft werden
+it|w_sigold|la versione %s è stata pubblicata senza firma (le versioni precedenti a 0.2.0-dev.7 non sono firmate): è stato verificato solo lo SHA-256, la firma non ha potuto essere controllata
+pt|w_sigold|a versão %s foi publicada sem assinatura (as anteriores a 0.2.0-dev.7 não são assinadas): só o SHA-256 foi verificado, a assinatura não pôde ser conferida
+nl|w_sigold|versie %s is zonder handtekening gepubliceerd (versies vóór 0.2.0-dev.7 zijn niet ondertekend): alleen SHA-256 is gecontroleerd, de handtekening kon niet worden gecontroleerd
+ru|w_sigold|версия %s опубликована без подписи (версии до 0.2.0-dev.7 не подписаны): проверена только SHA-256, подпись проверить не удалось
+zh|w_sigold|版本 %s 发布时没有签名（0.2.0-dev.7 之前的版本均未签名）：仅校验了 SHA-256，无法校验签名
+ar|w_sigold|الإصدار %s نُشر بدون توقيع (الإصدارات قبل 0.2.0-dev.7 غير موقّعة): تم التحقق من SHA-256 فقط ولم يمكن التحقق من التوقيع
+en|w_sigskip|release signature NOT verified: openssl.exe was not found in PATH (Windows has no built-in Ed25519 verification), only SHA-256 was checked. Install OpenSSL 3 and run again to verify against key %s
+fr|w_sigskip|signature de la version NON vérifiée : openssl.exe est introuvable dans le PATH (Windows n'a pas de vérification Ed25519 intégrée), seul le SHA-256 a été contrôlé. Installez OpenSSL 3 et relancez pour vérifier avec la clé %s
+es|w_sigskip|firma de la versión NO verificada: no se encontró openssl.exe en el PATH (Windows no incluye verificación Ed25519), solo se comprobó el SHA-256. Instale OpenSSL 3 y vuelva a ejecutar para verificar con la clave %s
+de|w_sigskip|Release-Signatur NICHT geprüft: openssl.exe wurde im PATH nicht gefunden (Windows hat keine eingebaute Ed25519-Prüfung), nur SHA-256 wurde geprüft. OpenSSL 3 installieren und erneut ausführen, um mit Schlüssel %s zu prüfen
+it|w_sigskip|firma della release NON verificata: openssl.exe non trovato nel PATH (Windows non ha una verifica Ed25519 integrata), è stato controllato solo lo SHA-256. Installa OpenSSL 3 ed esegui di nuovo per verificare con la chiave %s
+pt|w_sigskip|assinatura da versão NÃO verificada: openssl.exe não foi encontrado no PATH (o Windows não tem verificação Ed25519 integrada), só o SHA-256 foi conferido. Instale o OpenSSL 3 e execute de novo para verificar com a chave %s
+nl|w_sigskip|release-handtekening NIET gecontroleerd: openssl.exe niet gevonden in PATH (Windows heeft geen ingebouwde Ed25519-controle), alleen SHA-256 is gecontroleerd. Installeer OpenSSL 3 en voer opnieuw uit om te controleren met sleutel %s
+ru|w_sigskip|подпись релиза НЕ проверена: openssl.exe не найден в PATH (в Windows нет встроенной проверки Ed25519), проверена только SHA-256. Установите OpenSSL 3 и запустите снова, чтобы проверить по ключу %s
+zh|w_sigskip|未校验发布签名：PATH 中找不到 openssl.exe（Windows 没有内置 Ed25519 校验），仅校验了 SHA-256。请安装 OpenSSL 3 并重新运行，以使用密钥 %s 校验
+ar|w_sigskip|لم يتم التحقق من توقيع الإصدار: لم يتم العثور على openssl.exe في PATH (لا يوفر Windows تحققا مدمجا من Ed25519) وتم التحقق من SHA-256 فقط. ثبّت OpenSSL 3 وأعد التشغيل للتحقق بالمفتاح %s
 en|done|Done.
 fr|done|Terminé.
 es|done|Hecho.
@@ -2857,7 +2867,7 @@ install_pkgs() {
   [ -n "$fam" ] || die "cannot install prerequisites automatically: no known package manager (dnf, yum, apt-get, zypper, pacman); install curl, tar, coreutils and libcap tools, then re-run"
   need() { n="$(pf_pkg "$fam" "$1")"; if [ -n "$n" ] && [ "$n" != "-" ]; then missing+=("$n"); fi; return 0; }
   have curl || need curl; have tar || need tar; have gzip || need gzip; have sha256sum || need coreutils; have awk || need awk
-  if [ -n "${TOUTWAF_RELEASE_PUBKEY:-}${RELEASE_PUB_FILE:-}" ] || [ -r "$(p "$CONF_DIR/release.pub")" ]; then have openssl || need openssl; fi
+  if [ -z "$TARBALL" ]; then have openssl || need openssl; fi   # release signature (Ed25519)
   have setcap || need libcap
   [ -d /etc/ssl/certs ] || [ -d /etc/pki/tls/certs ] || need ca
   # SELinux python utilities (semanage), only when SELinux is on and the family has them
@@ -2890,11 +2900,18 @@ install_pkgs() {
 # ------------------------------------------------------------------------------------------------ fetch
 fetch() { curl -fsSL --retry 3 --connect-timeout 15 -o "$2" "$1"; }
 
-# release_pubkey: prints the path of a PEM public key (Ed25519) when one is configured, nothing otherwise
+# Release signature trust anchor. It lives HERE (in the installer you run), never in channel.json: the copy of the public key that
+# channel.json advertises is informational and must not be trusted. Overridden by TOUTWAF_RELEASE_PUBKEY, then by $CONF_DIR/release.pub.
+# RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
+RELEASE_PUBKEY_DEFAULT='PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo='
+RELEASE_PUBKEY_ID='f8fc98e4c6e364fa'
+SIG_REQUIRED_FROM='0.2.0-dev.7'   # releases before this one were published unsigned
+
+# release_pubkey: prints the path of a PEM public key (Ed25519): TOUTWAF_RELEASE_PUBKEY, else $CONF_DIR/release.pub, else the built-in key
 release_pubkey() {
   local k="${TOUTWAF_RELEASE_PUBKEY:-}" raw pem="$TMP/release-pub.pem"
   if [ -z "$k" ] && [ -r "$(p "$CONF_DIR/release.pub")" ]; then k="$(p "$CONF_DIR/release.pub")"; fi
-  [ -n "$k" ] || return 0
+  if [ -z "$k" ]; then k="$RELEASE_PUBKEY_DEFAULT"; fi
   if [ -f "$k" ]; then raw="$(cat "$k")"; else raw="$k"; fi
   case "$raw" in
     *"BEGIN PUBLIC KEY"*) printf '%s\n' "$raw" >"$pem";;
@@ -2902,6 +2919,101 @@ release_pubkey() {
   esac
   printf '%s' "$pem"
 }
+# ed25519_py FILE: writes the fallback verifier (pure Python, RFC 8032 section 5.1.7, Python >= 3.6, only hashlib) used when openssl cannot verify
+# Ed25519 (OpenSSL 1.1.1 on RHEL / Alma / Rocky / Oracle 8). Usage: python ed25519.py PUBLIC_KEY_BASE64 SIGNATURE_FILE MESSAGE_FILE
+# Exit 0 = valid, 1 = invalid (also: wrong lengths, S >= L, point not on the curve), 2 = usage / internal error. deploy/tests/compat-test.sh runs
+# this very text against the five RFC 8032 vectors (plus tampered / malformed variants) and a signature made by the Go signer.
+ed25519_py() {
+  cat >"$1" <<'TW_ED25519_PY'
+import sys, hashlib, base64
+P = 2**255 - 19
+L = 2**252 + 27742317777372353535851937790883648493
+D = -121665 * pow(121666, P - 2, P) % P
+SQRT_M1 = pow(2, (P - 1) // 4, P)
+
+def recover_x(y, sign):
+    if y >= P:
+        return None
+    x2 = (y * y - 1) * pow(D * y * y + 1, P - 2, P) % P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (P + 3) // 8, P)
+    if (x * x - x2) % P:
+        x = x * SQRT_M1 % P
+    if (x * x - x2) % P:
+        return None
+    return x if (x & 1) == sign else P - x
+
+def add(p, q):
+    a = (p[1] - p[0]) * (q[1] - q[0]) % P
+    b = (p[1] + p[0]) * (q[1] + q[0]) % P
+    c = 2 * p[3] * q[3] * D % P
+    d = 2 * p[2] * q[2] % P
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return (e * f % P, g * h % P, f * g % P, e * h % P)
+
+def mul(k, p):
+    r = (0, 1, 1, 0)
+    while k:
+        if k & 1:
+            r = add(r, p)
+        p = add(p, p)
+        k >>= 1
+    return r
+
+def decode(b):
+    n = int.from_bytes(b, "little")
+    y = n & ((1 << 255) - 1)
+    x = recover_x(y, n >> 255)
+    return None if x is None else (x, y, 1, x * y % P)
+
+BY = 4 * pow(5, P - 2, P) % P
+BASE = (recover_x(BY, 0), BY, 1, recover_x(BY, 0) * BY % P)
+
+def verify(pub, sig, msg):
+    if len(pub) != 32 or len(sig) != 64:
+        return False
+    s = int.from_bytes(sig[32:], "little")
+    if s >= L:
+        return False
+    a, r = decode(pub), decode(sig[:32])
+    if a is None or r is None:
+        return False
+    h = int.from_bytes(hashlib.sha512(sig[:32] + pub + msg).digest(), "little") % L
+    lhs, rhs = mul(s, BASE), add(r, mul(h, a))
+    return (lhs[0] * rhs[2] - rhs[0] * lhs[2]) % P == 0 and (lhs[1] * rhs[2] - rhs[1] * lhs[2]) % P == 0
+
+try:
+    pub = base64.b64decode(sys.argv[1], validate=True)
+    sig = open(sys.argv[2], "rb").read()
+    msg = open(sys.argv[3], "rb").read()
+except Exception:
+    sys.exit(2)
+sys.exit(0 if verify(pub, sig, msg) else 1)
+TW_ED25519_PY
+}
+# openssl_ed25519_ok: true when this openssl really verifies Ed25519 (probe: RFC 8032 test vector 1, empty message)
+openssl_ed25519_ok() {
+  have openssl || return 1
+  local pk="d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+  local sg="e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+  hx() { printf "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+  { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; hx "$pk"; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$TMP/probe.pem"
+  hx "$sg" >"$TMP/probe.sig"; : >"$TMP/probe.msg"
+  openssl pkeyutl -verify -pubin -inkey "$TMP/probe.pem" -rawin -in "$TMP/probe.msg" -sigfile "$TMP/probe.sig" >>"$LOG" 2>&1
+}
+# python3_bin: prints a Python 3 interpreter (python3, el8's platform-python, or python when it is version 3), nothing when there is none
+python3_bin() {
+  local c
+  for c in python3 /usr/libexec/platform-python python; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then command -v "$c"; return 0; fi
+  done
+  return 0
+}
+# pubkey_raw PEM: raw 32-byte public key, base64 (the last 32 bytes of the SPKI DER)
+pubkey_raw() { sed '/-----/d' "$1" | tr -d '[:space:]' | base64 -d 2>/dev/null | tail -c 32 | base64 -w0; }
+# pubkey_id PEM: key id (first 16 hex chars of sha256 of the raw 32-byte public key)
+pubkey_id() { pubkey_raw "$1" | base64 -d | sha256sum | cut -c1-16; }
 
 # resolve the release to install: sets RESOLVED_VERSION (and CH_* from channel.json when reachable)
 resolve_release() {
@@ -2916,21 +3028,42 @@ resolve_release() {
   return 0
 }
 
-# verify_ed25519: SHA256SUMS.sig (base64 of the raw signature over SHA256SUMS) against the configured public key
+# verify_signature: SHA256SUMS.sig (base64 of the raw signature over SHA256SUMS) against the trust anchor. Used by the installer and,
+# because toutwaf-upgrade downloads and runs this very script with --update, by the in-console update too.
+# Policy: a bad signature ALWAYS aborts; a missing one aborts for releases >= $SIG_REQUIRED_FROM and only warns for older (unsigned) ones.
+# Engine: openssl when it can verify Ed25519 (>= 3.0), else the embedded pure-Python verifier; neither available: refused (fail closed).
 verify_signature() {   # $1 = base URL of the release directory
-  local pem; pem="$(release_pubkey)"
-  if [ -z "$pem" ]; then warn "$(t w_nosig "$CONF_DIR/release.pub")"; return 0; fi
-  have openssl || die "openssl is required to verify the release signature (a public key is configured)"
-  fetch "$1/SHA256SUMS.sig" "$TMP/SHA256SUMS.sig" 2>>"$LOG" || die "release signature missing ($1/SHA256SUMS.sig) but a public key is configured"
-  tr -d '[:space:]' <"$TMP/SHA256SUMS.sig" | base64 -d >"$TMP/sums.sig.bin" 2>/dev/null || die "release signature is not valid base64"
-  if openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in "$TMP/SHA256SUMS" -sigfile "$TMP/sums.sig.bin" >>"$LOG" 2>&1 \
-     || openssl pkeyutl -verify -pubin -inkey "$pem" -in "$TMP/SHA256SUMS" -sigfile "$TMP/sums.sig.bin" >>"$LOG" 2>&1; then info "$(t s_sigok)"
-  else
-    # OpenSSL 1.1.1 (RHEL / Rocky / Alma 8) cannot verify Ed25519 from the command line at all: say so instead of blaming the file
-    local ov; ov="$(openssl version 2>/dev/null | awk '{print $2}')"
-    case "$ov" in 0.*|1.*) die "cannot verify the Ed25519 release signature: OpenSSL $ov has no Ed25519 verification (OpenSSL >= 3.0 is needed). A public key is configured, so the installation is refused (fail closed): install OpenSSL 3, or remove the key only if you verify SHA256SUMS yourself";; esac
-    die "release signature verification FAILED"
+  local pem code rc=0 kid mode="" py="" okv=0
+  pem="$(release_pubkey)"
+  if [ "$DRY_RUN" = 1 ] && [ -n "${TOUTWAF_TEST_NO_OPENSSL_ED25519:-}" ]; then
+    printf '[test] TOUTWAF_TEST_NO_OPENSSL_ED25519: the Python fallback verifier is forced\n' >&2
+  elif openssl_ed25519_ok; then mode=openssl; fi
+  if [ -z "$mode" ]; then
+    py="$(python3_bin)"
+    [ -n "$py" ] || die "cannot verify the Ed25519 release signature: this system's OpenSSL ($(openssl version 2>/dev/null | awk '{print $2}')) has no Ed25519 verification (OpenSSL >= 3.0 is needed) and no Python 3 was found for the built-in fallback verifier. The installation is refused (fail closed): install OpenSSL 3 or python3, or verify SHA256SUMS(.sig) yourself (see deploy/README.md, Release signature) and install from the archive with --tarball"
+    mode=python
   fi
+  code="$(curl -fsSL --retry 3 --connect-timeout 15 -o "$TMP/SHA256SUMS.sig" -w '%{http_code}' "$1/SHA256SUMS.sig" 2>>"$LOG")" || rc=$?
+  if [ "$rc" != 0 ]; then
+    if [ "$code" = 404 ] || [ "$rc" = 37 ]; then   # not published (37: file:// mirror without the file)
+      if semver_lt "$RESOLVED_VERSION" "$SIG_REQUIRED_FROM"; then warn "$(t w_sigold "$RESOLVED_VERSION")"; return 0; fi
+      die "release signature missing ($1/SHA256SUMS.sig): releases >= $SIG_REQUIRED_FROM are signed, installation refused"
+    fi
+    die "cannot download the release signature ($1/SHA256SUMS.sig)"
+  fi
+  tr -d '[:space:]' <"$TMP/SHA256SUMS.sig" | base64 -d >"$TMP/sums.sig.bin" 2>/dev/null || die "release signature is not valid base64"
+  if [ "$mode" = openssl ]; then
+    openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in "$TMP/SHA256SUMS" -sigfile "$TMP/sums.sig.bin" >>"$LOG" 2>&1 && okv=1
+  else
+    ed25519_py "$TMP/ed25519.py"
+    "$py" "$TMP/ed25519.py" "$(pubkey_raw "$pem")" "$TMP/sums.sig.bin" "$TMP/SHA256SUMS" >>"$LOG" 2>&1 && okv=1
+  fi
+  [ "$okv" = 1 ] || die "release signature verification FAILED"
+  kid="$(pubkey_id "$pem")"
+  if [ -z "${TOUTWAF_RELEASE_PUBKEY:-}" ] && [ ! -r "$(p "$CONF_DIR/release.pub")" ] && [ "$kid" != "$RELEASE_PUBKEY_ID" ]; then
+    die "internal error: the built-in release public key has id ${kid:-?}, expected $RELEASE_PUBKEY_ID"
+  fi
+  info "$(t s_sigok "${kid:-?}")"
 }
 
 SRC_DIR=""; RESOLVED_VERSION=""

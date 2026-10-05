@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "version": "0.2.0-dev.7",
+  "channel": "stable",
+  "released_at": "2026-10-05T14:28:05Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 44506191,
+      "sha256": "7a92338b0fdb748566ab4ef40a58b119a66c631225678e7b4e573aefd925f18b"
+    },
+    {
+      "name": "toutwaf-linux-arm64.tar.gz",
+      "os": "linux",
+      "arch": "arm64",
+      "size": 40623868,
+      "sha256": "9aa1c5cab0217601b6c701c67ade1adb6ab8b032aa117cdcbc34cacfa52f80c4"
+    },
+    {
+      "name": "toutwaf-windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "size": 45155189,
+      "sha256": "11ca947d2c28b2839b77f1f225d73b888cf42616d21356be0ea7de7e8f5131a5"
+    },
+    {
+      "name": "toutwaf-windows-arm64.zip",
+      "os": "windows",
+      "arch": "arm64",
+      "size": 40883488,
+      "sha256": "1d8a11019c6c4d817cc9d98bcc38cdc77ffd8d5d673a558e09b93cd8f4427046"
+    }
+  ],
+  "notes": "## 0.2.0-dev.7\n\n- **Signed releases**: `SHA256SUMS` is now signed (Ed25519) and the installers verify the signature with a built-in public key before installing or updating. A bad signature always aborts; a missing signature aborts for 0.2.0-dev.7 and later. Releases before dev.7 are unsigned. On systems whose OpenSSL cannot verify Ed25519 (RHEL-family 8) the installer uses a built-in Python verifier.\n- Same binaries and features as 0.2.0-dev.6 (Linux and Windows, Intel/AMD and ARM64; Docker image; ToutPanel web servers; installer compatibility check)."
+}

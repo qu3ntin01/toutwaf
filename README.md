@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.2.0-dev.6** · canal **stable** · 2026-10-04
+**Version 0.2.0-dev.7** · canal **stable** · 2026-10-05
 
 </div>
 
@@ -220,19 +220,20 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 
 ## Versions et téléchargements
 
-**Version 0.2.0-dev.6**
+**Version 0.2.0-dev.7**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 42.5 MiB | `8bf04e2d4eb570610fb6a9061de6e1e840e94c09c5c535411279d3f2c654aa86` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 38.8 MiB | `b9f62c59caa52a3537bbd30541ffafb833ac1b804b52cd105cbee494b16b2e98` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 43.1 MiB | `06a68e893914017f6d155250f3f6c2f15e5bc8557e632c435f7d39b59249ffdc` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 39.0 MiB | `3e2b1326bb3d98a3a174c3c92298a6743a4b8cd4d0f46acd07d49a6daeb3b748` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 42.4 MiB | `7a92338b0fdb748566ab4ef40a58b119a66c631225678e7b4e573aefd925f18b` |
+| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 38.7 MiB | `9aa1c5cab0217601b6c701c67ade1adb6ab8b032aa117cdcbc34cacfa52f80c4` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 43.1 MiB | `11ca947d2c28b2839b77f1f225d73b888cf42616d21356be0ea7de7e8f5131a5` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 39.0 MiB | `1d8a11019c6c4d817cc9d98bcc38cdc77ffd8d5d673a558e09b93cd8f4427046` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.2.0-dev.6` | 2026-10-04T18:03:29Z | **actuelle** | `releases/0.2.0-dev.6/` |
+| `0.2.0-dev.7` | 2026-10-05T14:28:05Z | **actuelle** | `releases/0.2.0-dev.7/` |
+| `0.2.0-dev.6` | 2026-10-04T18:03:29Z | disponible | `releases/0.2.0-dev.6/` |
 | `0.2.0-dev.5` | 2026-10-03T17:20:42Z | disponible | `releases/0.2.0-dev.5/` |
 | `0.2.0-dev.4` | 2026-10-03T13:59:43Z | disponible | `releases/0.2.0-dev.4/` |
 | `0.2.0-dev.1` | 2026-10-02T14:59:13Z | disponible | `releases/0.2.0-dev.1/` |
@@ -244,10 +245,23 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.2.0-dev.6 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.7 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Cette version n'est pas encore signée par clé : fiez-vous aux empreintes SHA-256 ci-dessus.
+### Vérifier une version
+
+À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `f8fc98e4c6e364fa`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
+
+```sh
+V=0.2.0-dev.7; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
+{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
+base64 -d SHA256SUMS.sig > sig.bin
+openssl pkeyutl -verify -pubin -inkey release.pem -rawin -in SHA256SUMS -sigfile sig.bin   # « Signature Verified Successfully »
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+Une version signée avec une autre clé, ou modifiée après la signature, échoue avec « Signature Verification Failure ». Pour faire confiance à une autre clé (miroir privé), définissez `TOUTWAF_RELEASE_PUBKEY` ou créez `<home>/conf/release.pub` avant l'installation.
 
 ## Licence et support
 
