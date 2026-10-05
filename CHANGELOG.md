@@ -2,6 +2,17 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.2.0-dev.8 - 2026-10-05
+
+## 0.2.0-dev.8
+
+- **ToutPanel installed from ToutWAF always uses ToutWAF**: the other WAF engines (BunkerWeb, SafeLine) are no longer offered in the Add server wizard.
+- **Web servers wizard**: "This machine" (same server as ToutWAF) is proposed first, "Another server" is the alternative.
+- **Fix: agent installation over SSH failed with "Could not resolve host"** when the console was opened through a name only the administrator's computer could resolve. New field "ToutWAF address as seen from the server", a pre-flight check before anything is installed (name resolution and TLS connection, with clear instructions), a safer default address, and new console certificates that also list the machine's IP addresses (existing certificates are not regenerated).
+- **Fix: the version badge in the menu** showed a fixed 1.0.2; it now shows the version that is really running.
+- **Top bar**: shows the running distribution, its version and a logo (for example AlmaLinux 10, amd64) instead of just the system and architecture. Logos are simplified marks.
+- Same binaries otherwise as 0.2.0-dev.7 (signed release, Linux and Windows on Intel/AMD and ARM64).
+
 ## 0.2.0-dev.7 - 2026-10-05
 
 ## 0.2.0-dev.7

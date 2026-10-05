@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "version": "0.2.0-dev.8",
+  "channel": "dev",
+  "released_at": "2026-10-05T17:24:59Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 44609154,
+      "sha256": "a9429bd7036ec2f045eacc33448153971c941c964691a4b8a668a64cbc52ffe2"
+    },
+    {
+      "name": "toutwaf-linux-arm64.tar.gz",
+      "os": "linux",
+      "arch": "arm64",
+      "size": 40716995,
+      "sha256": "a08b89a34cc25e3df1830d07251a2b0f2a2667a9af646c817f93b89871c9905e"
+    },
+    {
+      "name": "toutwaf-windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "size": 45139523,
+      "sha256": "258b13ba5fc491637202932874c3167a0dbf1671cb4d8e212f01ac1b43c6074c"
+    },
+    {
+      "name": "toutwaf-windows-arm64.zip",
+      "os": "windows",
+      "arch": "arm64",
+      "size": 40949289,
+      "sha256": "d41bfce2fe64f3645d7cd7a1e07e4d0c3ddba07b90b73992e8f030ae42361a4c"
+    }
+  ],
+  "notes": "## 0.2.0-dev.8\n\n- **ToutPanel installed from ToutWAF always uses ToutWAF**: the other WAF engines (BunkerWeb, SafeLine) are no longer offered in the Add server wizard.\n- **Web servers wizard**: \"This machine\" (same server as ToutWAF) is proposed first, \"Another server\" is the alternative.\n- **Fix: agent installation over SSH failed with \"Could not resolve host\"** when the console was opened through a name only the administrator's computer could resolve. New field \"ToutWAF address as seen from the server\", a pre-flight check before anything is installed (name resolution and TLS connection, with clear instructions), a safer default address, and new console certificates that also list the machine's IP addresses (existing certificates are not regenerated).\n- **Fix: the version badge in the menu** showed a fixed 1.0.2; it now shows the version that is really running.\n- **Top bar**: shows the running distribution, its version and a logo (for example AlmaLinux 10, amd64) instead of just the system and architecture. Logos are simplified marks.\n- Same binaries otherwise as 0.2.0-dev.7 (signed release, Linux and Windows on Intel/AMD and ARM64)."
+}

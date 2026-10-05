@@ -1,7 +1,7 @@
 {
   "channel": "dev",
-  "version": "0.2.0-dev.7",
-  "released_at": "2026-10-05T14:28:05Z",
+  "version": "0.2.0-dev.8",
+  "released_at": "2026-10-05T17:24:59Z",
   "min_installer": "2",
   "notes_url": "CHANGELOG.md",
   "assets": [
@@ -9,38 +9,33 @@
       "name": "toutwaf-linux-amd64.tar.gz",
       "os": "linux",
       "arch": "amd64",
-      "size": 44506191,
-      "sha256": "7a92338b0fdb748566ab4ef40a58b119a66c631225678e7b4e573aefd925f18b"
+      "size": 44609154,
+      "sha256": "a9429bd7036ec2f045eacc33448153971c941c964691a4b8a668a64cbc52ffe2"
     },
     {
       "name": "toutwaf-linux-arm64.tar.gz",
       "os": "linux",
       "arch": "arm64",
-      "size": 40623868,
-      "sha256": "9aa1c5cab0217601b6c701c67ade1adb6ab8b032aa117cdcbc34cacfa52f80c4"
+      "size": 40716995,
+      "sha256": "a08b89a34cc25e3df1830d07251a2b0f2a2667a9af646c817f93b89871c9905e"
     },
     {
       "name": "toutwaf-windows-amd64.zip",
       "os": "windows",
       "arch": "amd64",
-      "size": 45155189,
-      "sha256": "11ca947d2c28b2839b77f1f225d73b888cf42616d21356be0ea7de7e8f5131a5"
+      "size": 45139523,
+      "sha256": "258b13ba5fc491637202932874c3167a0dbf1671cb4d8e212f01ac1b43c6074c"
     },
     {
       "name": "toutwaf-windows-arm64.zip",
       "os": "windows",
       "arch": "arm64",
-      "size": 40883488,
-      "sha256": "1d8a11019c6c4d817cc9d98bcc38cdc77ffd8d5d673a558e09b93cd8f4427046"
+      "size": 40949289,
+      "sha256": "d41bfce2fe64f3645d7cd7a1e07e4d0c3ddba07b90b73992e8f030ae42361a4c"
     }
   ],
   "yanked": [],
   "releases": [
-    {
-      "version": "0.2.0-dev.3",
-      "released_at": "2026-10-03T08:33:31Z",
-      "path": "releases/0.2.0-dev.3/"
-    },
     {
       "version": "0.2.0-dev.4",
       "released_at": "2026-10-03T13:59:43Z",
@@ -60,6 +55,11 @@
       "version": "0.2.0-dev.7",
       "released_at": "2026-10-05T14:28:05Z",
       "path": "releases/0.2.0-dev.7/"
+    },
+    {
+      "version": "0.2.0-dev.8",
+      "released_at": "2026-10-05T17:24:59Z",
+      "path": "releases/0.2.0-dev.8/"
     }
   ],
   "public_key": "PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=",
