@@ -2,6 +2,22 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.2.0-dev.9 - 2026-10-06
+
+## 0.2.0-dev.9
+
+- **Live attack map** (Map page and a widget on the home dashboard): 3D globe or flat 2D map, live feed or any period, animated attack arcs, top origins and attack types, full-screen and TV mode. Origins are placed at country level.
+- **Fuller home dashboard**: threat level, platform health, latest incidents, top ASNs and user agents.
+- **Analytics** (new section): visitors online, sessions, pages, sources and campaigns, countries, browsers and devices, behaviour, performance, security traffic, events and goals, comparison with the previous period, CSV export. Cookieless; a first-party tracker injected by ToutWAF measures screen size, scroll depth, engaged time, Core Web Vitals and custom events, switchable per site, with an allowed-origins list and a manual snippet mode.
+- **Customisable pages**: block, rate-limit, browser check, captcha, access denied, maintenance and error pages with a gallery of designs, a no-code editor, an advanced HTML editor, live preview, versions and per-site overrides. Configurable captcha: proof of work, built-in image captcha, Turnstile, hCaptcha, reCAPTCHA.
+- **Network check** in the Add server and Web servers wizards: required ports in both directions, live verification, ready-to-copy firewall rules, one-click fixes where possible.
+- **ToutPanel**: "Also create this site in ToutPanel" in Add site (panel API token), "This machine" proposed first in the Web servers wizard, ToutWAF is the only WAF offered.
+- **Agent and data plane verify the control plane by its certificate fingerprint** instead of the host name, so enrolment works by IP address or NAT address; new `toutwaf-cp tls regenerate` keeps the key.
+- Sidebar shows only the section of the current page; the version badge shows the running version; the top bar shows the distribution with a logo; translations reviewed (not by native speakers).
+- **ToutPanel 0.5.1 integration**: installing ToutPanel from ToutWAF with every installer option (loaded from the published options file), strict link mode, automatic certificate pinning from the panel heartbeat, official uninstall, honours rate-limit delays, clear message when the panel refuses the WAF address, "Behind ToutWAF" check, deep link to a site's SSL tab, notice when the panel drops the access token.
+- **Web server section** (when linked to ToutPanel): sites, FTP, PHP, backups, DNS zones through the panel API; certificates held by ToutWAF and drivable from ToutPanel; ToutPanel integration on/off switch in Cluster.
+- Fixes: site creation in ToutPanel (required domains field), a second server created when the agent was reinstalled, long single-line SSH output truncated, AI assistant drawer unreadable on glass themes.
+
 ## 0.2.0-dev.8 - 2026-10-05
 
 ## 0.2.0-dev.8

@@ -79,7 +79,7 @@ fr|opt_install|Installer (plan de contrôle + plan de données + console)
 es|opt_install|Instalar (plano de control + plano de datos + consola)
 de|opt_install|Installieren (Control Plane + Data Plane + Konsole)
 it|opt_install|Installa (control plane + data plane + console)
-pt|opt_install|Instalar (plano de controle + plano de dados + console)
+pt|opt_install|Instalar (plano de controlo + plano de dados + console)
 nl|opt_install|Installeren (control plane + data plane + console)
 ru|opt_install|Установить (control plane + data plane + консоль)
 zh|opt_install|安装（控制平面 + 数据平面 + 控制台）
@@ -99,7 +99,7 @@ fr|opt_cp|Installer le plan de contrôle seul
 es|opt_cp|Instalar solo el plano de control
 de|opt_cp|Nur die Control Plane installieren
 it|opt_cp|Installa solo il control plane
-pt|opt_cp|Instalar apenas o plano de controle
+pt|opt_cp|Instalar apenas o plano de controlo
 nl|opt_cp|Alleen de control plane installeren
 ru|opt_cp|Установить только control plane
 zh|opt_cp|仅安装控制平面
@@ -129,7 +129,7 @@ fr|opt_dp_d|Nœud reverse proxy / WAF qui rejoint un plan de contrôle existant 
 es|opt_dp_d|Nodo de proxy inverso / WAF que se une a un plano de control existente (pide su URL y un token de alta).
 de|opt_dp_d|Reverse-Proxy- / WAF-Knoten, der einer bestehenden Control Plane beitritt (fragt URL und Registrierungstoken ab).
 it|opt_dp_d|Nodo reverse proxy / WAF che si unisce a un control plane esistente (chiede URL e token di registrazione).
-pt|opt_dp_d|Nó de proxy reverso / WAF que se junta a um plano de controle existente (pede a URL e um token de inscrição).
+pt|opt_dp_d|Nó de proxy reverso / WAF que se junta a um plano de controlo existente (pede a URL e um token de inscrição).
 nl|opt_dp_d|Reverse-proxy- / WAF-node die zich bij een bestaande control plane voegt (vraagt om URL en inschrijftoken).
 ru|opt_dp_d|Узел reverse proxy / WAF, подключаемый к существующему control plane (запросит URL и токен регистрации).
 zh|opt_dp_d|加入现有控制平面的反向代理 / WAF 节点（需要其 URL 和注册令牌）。
@@ -279,7 +279,7 @@ fr|q_cp_url|URL du plan de contrôle (ex. https://cp.example.com:9444)
 es|q_cp_url|URL del plano de control (p. ej. https://cp.example.com:9444)
 de|q_cp_url|URL der Control Plane (z. B. https://cp.example.com:9444)
 it|q_cp_url|URL del control plane (es. https://cp.example.com:9444)
-pt|q_cp_url|URL do plano de controle (ex. https://cp.example.com:9444)
+pt|q_cp_url|URL do plano de controlo (ex. https://cp.example.com:9444)
 nl|q_cp_url|URL van de control plane (bv. https://cp.example.com:9444)
 ru|q_cp_url|URL control plane (напр. https://cp.example.com:9444)
 zh|q_cp_url|控制平面 URL（例如 https://cp.example.com:9444）
@@ -299,7 +299,7 @@ fr|q_cp_ca|Fichier PEM de la CA / du certificat du plan de contrôle (vide = mag
 es|q_cp_ca|Archivo PEM de la CA / certificado del plano de control (vacío = almacén del sistema)
 de|q_cp_ca|PEM-Datei der CA / des Zertifikats der Control Plane (leer = Systemspeicher)
 it|q_cp_ca|File PEM della CA / certificato del control plane (vuoto = archivio di sistema)
-pt|q_cp_ca|Arquivo PEM da CA / certificado do plano de controle (vazio = repositório do sistema)
+pt|q_cp_ca|Arquivo PEM da CA / certificado do plano de controlo (vazio = repositório do sistema)
 nl|q_cp_ca|PEM-bestand van de CA / het certificaat van de control plane (leeg = systeemopslag)
 ru|q_cp_ca|PEM-файл CA / сертификата control plane (пусто = системное хранилище)
 zh|q_cp_ca|控制平面 CA / 证书 PEM 文件（留空 = 系统信任库）
@@ -717,9 +717,9 @@ ar|s_backup|نسخ احتياطي للإعدادات والبيانات
 en|w_rollback|The new version is not healthy: rolling back to the previous one
 fr|w_rollback|La nouvelle version n'est pas saine : retour à la précédente
 es|w_rollback|La nueva versión no está sana: volviendo a la anterior
-de|w_rollback|Die neue Version ist nicht gesund: Rückkehr zur vorherigen
-it|w_rollback|La nuova versione non è sana: ritorno alla precedente
-pt|w_rollback|A nova versão não está saudável: voltando à anterior
+de|w_rollback|Die neue Version arbeitet nicht fehlerfrei: Rückkehr zur vorherigen
+it|w_rollback|La nuova versione non funziona correttamente: ritorno alla precedente
+pt|w_rollback|A nova versão não está saudável: a voltar à anterior
 nl|w_rollback|De nieuwe versie is niet gezond: terugdraaien naar de vorige
 ru|w_rollback|Новая версия не работает: откат к предыдущей
 zh|w_rollback|新版本运行异常：正在回滚到上一版本
@@ -730,7 +730,7 @@ es|up_to_date|Ya está actualizado (%s)
 de|up_to_date|Bereits aktuell (%s)
 it|up_to_date|Già aggiornato (%s)
 pt|up_to_date|Já está atualizado (%s)
-nl|up_to_date|Al up-to-date (%s)
+nl|up_to_date|Al bijgewerkt (%s)
 ru|up_to_date|Уже актуально (%s)
 zh|up_to_date|已是最新版本（%s）
 ar|up_to_date|محدّث بالفعل (%s)
@@ -793,7 +793,7 @@ pt|e_installer_old|Este instalador é demasiado antigo para esta versão (requer
 nl|e_installer_old|Dit installatieprogramma is te oud voor deze versie (vereist versie %s): download het opnieuw van de kanaal-URL.
 ru|e_installer_old|Этот установщик слишком старый для этого релиза (нужна версия %s): скачайте его заново по URL канала.
 zh|e_installer_old|此安装程序对该版本而言太旧（需要版本 %s）：请从通道 URL 重新下载。
-ar|e_installer_old|هذا المثبّت قديم جدا لهذا الإصدار (يتطلب الإصدار %s): نزّله من جديد من عنوان القناة.
+ar|e_installer_old|هذا المثبّت قديم جدًا لهذا الإصدار (يتطلب الإصدار %s): نزّله من جديد من عنوان القناة.
 en|e_downgrade|The latest release %s of channel %s is older than the installed %s: use --force to downgrade.
 fr|e_downgrade|La dernière version %s du canal %s est plus ancienne que la version installée %s : utilisez --force pour rétrograder.
 es|e_downgrade|La última versión %s del canal %s es anterior a la instalada %s: use --force para degradar.
@@ -889,7 +889,7 @@ fr|sum_panel|Liens du panneau
 es|sum_panel|Enlaces del panel
 de|sum_panel|Panel-Links
 it|sum_panel|Link del pannello
-pt|sum_panel|Links do painel
+pt|sum_panel|Ligações do painel
 nl|sum_panel|Paneellinks
 ru|sum_panel|Ссылки на панель
 zh|sum_panel|面板链接
@@ -989,7 +989,7 @@ fr|sum_setup|Lien d'installation à usage unique
 es|sum_setup|Enlace de configuración de un solo uso
 de|sum_setup|Einmaliger Einrichtungslink
 it|sum_setup|Link di configurazione monouso
-pt|sum_setup|Link de configuração de uso único
+pt|sum_setup|Ligação de configuração de utilização única
 nl|sum_setup|Eenmalige installatielink
 ru|sum_setup|Одноразовая ссылка настройки
 zh|sum_setup|一次性设置链接
@@ -999,7 +999,7 @@ fr|sum_setup_note|Ouvrez-le pour configurer le lien du panneau, le compte et le 
 es|sum_setup_note|Ábralo para configurar el enlace del panel, la cuenta y la contraseña en el asistente web.
 de|sum_setup_note|Öffnen Sie ihn, um Panel-Link, Konto und Passwort im Web-Assistenten festzulegen.
 it|sum_setup_note|Aprilo per configurare il link del pannello, l'account e la password nell'installer web.
-pt|sum_setup_note|Abra-o para configurar o link do painel, a conta e a palavra-passe no assistente web.
+pt|sum_setup_note|Abra-a para configurar a ligação do painel, a conta e a palavra-passe no assistente web.
 nl|sum_setup_note|Open hem om de paneellink, het account en het wachtwoord in de webinstallatie in te stellen.
 ru|sum_setup_note|Откройте её, чтобы настроить ссылку панели, учётную запись и пароль в веб-установщике.
 zh|sum_setup_note|打开它即可在 Web 安装向导中设置面板链接、账户和密码。
@@ -1029,7 +1029,7 @@ fr|sum_setup_none|Pas de lien d'installation cette fois (déjà émis, ou compte
 es|sum_setup_none|Esta vez no hay enlace de configuración (ya emitido, o la cuenta ya existía). Cree uno con: toutwaf-cp setup-link --regenerate
 de|sum_setup_none|Diesmal kein Einrichtungslink (bereits ausgestellt oder Konto bestand schon). Neu erzeugen: toutwaf-cp setup-link --regenerate
 it|sum_setup_none|Nessun link di configurazione questa volta (già emesso, o account già esistente). Creane uno con: toutwaf-cp setup-link --regenerate
-pt|sum_setup_none|Sem link de configuração desta vez (já emitido, ou a conta já existia). Crie um com: toutwaf-cp setup-link --regenerate
+pt|sum_setup_none|Sem ligação de configuração desta vez (já emitida, ou a conta já existia). Crie uma com: toutwaf-cp setup-link --regenerate
 nl|sum_setup_none|Nu geen installatielink (al uitgegeven, of account bestond al). Maak een nieuwe met: toutwaf-cp setup-link --regenerate
 ru|sum_setup_none|Ссылки настройки сейчас нет (уже выдана или учётная запись уже существовала). Создать новую: toutwaf-cp setup-link --regenerate
 zh|sum_setup_none|本次没有设置链接（已签发，或账户已存在）。重新生成：toutwaf-cp setup-link --regenerate
@@ -1079,7 +1079,7 @@ fr|sum_fallback|Ce plan de contrôle n'a pas encore de commande 'bootstrap' : ou
 es|sum_fallback|Este plano de control aún no tiene el comando 'bootstrap': abra la URL de la consola y siga la página de configuración.
 de|sum_fallback|Diese Control Plane hat noch kein 'bootstrap'-Kommando: öffnen Sie die Konsolen-URL und folgen Sie der Einrichtungsseite.
 it|sum_fallback|Questo control plane non ha ancora il comando 'bootstrap': apri l'URL della console e segui la pagina di configurazione.
-pt|sum_fallback|Este plano de controle ainda não tem o comando 'bootstrap': abra a URL da console e siga a página de configuração.
+pt|sum_fallback|Este plano de controlo ainda não tem o comando 'bootstrap': abra a URL da consola e siga a página de configuração.
 nl|sum_fallback|Deze control plane heeft nog geen 'bootstrap'-opdracht: open de console-URL en volg de installatiepagina.
 ru|sum_fallback|У этого control plane пока нет команды 'bootstrap': откройте URL консоли и следуйте странице настройки.
 zh|sum_fallback|该控制平面尚无 'bootstrap' 命令：请打开控制台地址并按设置页面操作。
@@ -1089,7 +1089,7 @@ fr|sum_node_hint|Pour piloter ce nœud depuis la console : Nœuds > Ajouter un n
 es|sum_node_hint|Para gestionar este nodo desde la consola: Nodos > Agregar nodo y configure control_plane.url / enroll_token en %s.
 de|sum_node_hint|Um diesen Knoten über die Konsole zu verwalten: Knoten > Knoten hinzufügen, dann control_plane.url / enroll_token in %s setzen.
 it|sum_node_hint|Per gestire questo nodo dalla console: Nodi > Aggiungi nodo, poi imposta control_plane.url / enroll_token in %s.
-pt|sum_node_hint|Para gerir este nó a partir da console: Nós > Adicionar nó e defina control_plane.url / enroll_token em %s.
+pt|sum_node_hint|Para gerir este nó a partir da consola: Nós > Adicionar nó e defina control_plane.url / enroll_token em %s.
 nl|sum_node_hint|Om deze node via de console te beheren: Nodes > Node toevoegen, stel daarna control_plane.url / enroll_token in %s in.
 ru|sum_node_hint|Чтобы управлять этим узлом из консоли: Узлы > Добавить узел, затем задайте control_plane.url / enroll_token в %s.
 zh|sum_node_hint|要在控制台管理此节点：节点 > 添加节点，然后在 %s 中设置 control_plane.url / enroll_token。
@@ -1108,7 +1108,7 @@ en|st_healthy|healthy
 fr|st_healthy|sain
 es|st_healthy|sano
 de|st_healthy|gesund
-it|st_healthy|in salute
+it|st_healthy|funzionante
 pt|st_healthy|saudável
 nl|st_healthy|gezond
 ru|st_healthy|работает
@@ -1118,7 +1118,7 @@ en|st_unhealthy|NOT healthy
 fr|st_unhealthy|NON sain
 es|st_unhealthy|NO sano
 de|st_unhealthy|NICHT gesund
-it|st_unhealthy|NON in salute
+it|st_unhealthy|NON funzionante
 pt|st_unhealthy|NÃO saudável
 nl|st_unhealthy|NIET gezond
 ru|st_unhealthy|НЕ работает
@@ -1169,7 +1169,7 @@ fr|un_title|Désinstallation de ToutWAF
 es|un_title|Desinstalando ToutWAF
 de|un_title|ToutWAF wird deinstalliert
 it|un_title|Disinstallazione di ToutWAF
-pt|un_title|Desinstalando o ToutWAF
+pt|un_title|A desinstalar o ToutWAF
 nl|un_title|ToutWAF verwijderen
 ru|un_title|Удаление ToutWAF
 zh|un_title|正在卸载 ToutWAF
@@ -1199,11 +1199,11 @@ fr|p_console|console web + API
 es|p_console|consola web + API
 de|p_console|Web-Konsole + API
 it|p_console|console web + API
-pt|p_console|console web + API
+pt|p_console|consola web + API
 nl|p_console|webconsole + API
 ru|p_console|веб-консоль + API
 zh|p_console|Web 控制台 + API
-ar|p_console|لوحة الويب + API
+ar|p_console|وحدة تحكم الويب + API
 en|p_http|HTTP (reverse proxy)
 fr|p_http|HTTP (reverse proxy)
 es|p_http|HTTP (proxy inverso)
@@ -1249,7 +1249,7 @@ fr|need_cp|Une URL de plan de contrôle est nécessaire lorsqu'un jeton d'enrôl
 es|need_cp|Se necesita la URL de un plano de control cuando se indica un token de alta.
 de|need_cp|Mit einem Registrierungstoken wird die URL einer Control Plane benötigt.
 it|need_cp|Serve l'URL di un control plane quando si indica un token di registrazione.
-pt|need_cp|É necessária a URL de um plano de controle quando se indica um token de inscrição.
+pt|need_cp|É necessária a URL de um plano de controlo quando se indica um token de inscrição.
 nl|need_cp|Met een inschrijftoken is een control-plane-URL nodig.
 ru|need_cp|При указании токена регистрации нужен URL control plane.
 zh|need_cp|提供注册令牌时需要控制平面 URL。
@@ -1309,7 +1309,7 @@ fr|cp_w_like|%s n'est pas dans la table de compatibilité : traité comme la fam
 es|cp_w_like|%s no figura en la tabla de compatibilidad: se trata como la familia %s (esperado). Se continúa.
 de|cp_w_like|%s steht nicht in der Kompatibilitätstabelle: wird als Familie %s behandelt (erwartet). Es geht weiter.
 it|cp_w_like|%s non è nella tabella di compatibilità: trattato come famiglia %s (previsto). Si continua.
-pt|cp_w_like|%s não consta da tabela de compatibilidade: tratado como a família %s (esperado). Continuando.
+pt|cp_w_like|%s não consta da tabela de compatibilidade: tratado como a família %s (esperado). A continuar.
 nl|cp_w_like|%s staat niet in de compatibiliteitstabel: behandeld als de familie %s (verwacht). Er wordt doorgegaan.
 ru|cp_w_like|%s нет в таблице совместимости: обрабатывается как семейство %s (ожидается). Продолжаем.
 zh|cp_w_like|%s 不在兼容性表中：按 %s 系列处理（预期兼容）。继续。
@@ -1319,7 +1319,7 @@ fr|cp_w_newer|%s %s est plus récent que les versions listées : pas encore vali
 es|cp_w_newer|%s %s es más reciente que las versiones listadas: aún no validado (esperado). Se continúa.
 de|cp_w_newer|%s %s ist neuer als die gelisteten Versionen: noch nicht validiert (erwartet). Es geht weiter.
 it|cp_w_newer|%s %s è più recente delle versioni elencate: non ancora validato (previsto). Si continua.
-pt|cp_w_newer|%s %s é mais recente do que as versões listadas: ainda não validado (esperado). Continuando.
+pt|cp_w_newer|%s %s é mais recente do que as versões listadas: ainda não validado (esperado). A continuar.
 nl|cp_w_newer|%s %s is nieuwer dan de vermelde versies: nog niet gevalideerd (verwacht). Er wordt doorgegaan.
 ru|cp_w_newer|%s %s новее перечисленных версий: ещё не проверено (ожидается). Продолжаем.
 zh|cp_w_newer|%s %s 比列出的版本更新：尚未验证（预期兼容）。继续。
@@ -1329,7 +1329,7 @@ fr|cp_w_unlisted|%s %s n'est pas listé dans la table : traité comme attendu. O
 es|cp_w_unlisted|%s %s no figura en la tabla: se trata como esperado. Se continúa.
 de|cp_w_unlisted|%s %s steht nicht in der Tabelle: wird als erwartet behandelt. Es geht weiter.
 it|cp_w_unlisted|%s %s non è elencato nella tabella: trattato come previsto. Si continua.
-pt|cp_w_unlisted|%s %s não consta da tabela: tratado como esperado. Continuando.
+pt|cp_w_unlisted|%s %s não consta da tabela: tratado como esperado. A continuar.
 nl|cp_w_unlisted|%s %s staat niet in de tabel: behandeld als verwacht. Er wordt doorgegaan.
 ru|cp_w_unlisted|%s %s нет в таблице: считается ожидаемо совместимой. Продолжаем.
 zh|cp_w_unlisted|%s %s 不在表中：按预期兼容处理。继续。
@@ -1339,7 +1339,7 @@ fr|cp_w_nover|%s ne déclare aucune version (distribution en continu ou testing)
 es|cp_w_nover|%s no declara versión (rolling o testing): se trata como esperado. Se continúa.
 de|cp_w_nover|%s meldet keine Version (Rolling oder Testing): wird als erwartet behandelt. Es geht weiter.
 it|cp_w_nover|%s non dichiara una versione (rolling o testing): trattato come previsto. Si continua.
-pt|cp_w_nover|%s não declara versão (rolling ou testing): tratado como esperado. Continuando.
+pt|cp_w_nover|%s não declara versão (rolling ou testing): tratado como esperado. A continuar.
 nl|cp_w_nover|%s meldt geen versie (rolling of testing): behandeld als verwacht. Er wordt doorgegaan.
 ru|cp_w_nover|%s не сообщает версию (rolling или testing): считается ожидаемо совместимой. Продолжаем.
 zh|cp_w_nover|%s 未报告版本（滚动或测试版）：按预期兼容处理。继续。
@@ -1359,7 +1359,7 @@ fr|cp_w_skip|--skip-os-check : le contrôle de compatibilité est ignoré. Ce sy
 es|cp_w_skip|--skip-os-check: se omite la comprobación de compatibilidad. Este sistema NO es compatible: continúa bajo su responsabilidad.
 de|cp_w_skip|--skip-os-check: die Kompatibilitätsprüfung wird übergangen. Dieses System wird NICHT unterstützt: Fortfahren auf eigenes Risiko.
 it|cp_w_skip|--skip-os-check: il controllo di compatibilità è ignorato. Questo sistema NON è supportato: si continua a proprio rischio.
-pt|cp_w_skip|--skip-os-check: a verificação de compatibilidade foi ignorada. Este sistema NÃO é suportado: continuando por sua conta e risco.
+pt|cp_w_skip|--skip-os-check: a verificação de compatibilidade foi ignorada. Este sistema NÃO é suportado: a continuar por sua conta e risco.
 nl|cp_w_skip|--skip-os-check: de compatibiliteitscontrole wordt overgeslagen. Dit systeem wordt NIET ondersteund: doorgaan op eigen risico.
 ru|cp_w_skip|--skip-os-check: проверка совместимости пропущена. Эта система НЕ поддерживается: продолжаем на ваш риск.
 zh|cp_w_skip|--skip-os-check：已跳过兼容性检查。此系统不受支持：风险自负，继续。

@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "version": "0.2.0-dev.9",
+  "channel": "dev",
+  "released_at": "2026-10-06T19:53:00Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 49304941,
+      "sha256": "ee00ca3aaf2d6c1cd60aa5373eb2e902ef4be46b9292aec3d7aa803d35b980ae"
+    },
+    {
+      "name": "toutwaf-linux-arm64.tar.gz",
+      "os": "linux",
+      "arch": "arm64",
+      "size": 44666079,
+      "sha256": "f183327471ffde37d02bdf498a8ff5ad1f2e309b7eddd5172fc1de8a847f8afd"
+    },
+    {
+      "name": "toutwaf-windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "size": 50467872,
+      "sha256": "d7728fc58fb3656fe02ddb7858d2a219b909abfe642c6b4330aac5a85e315bff"
+    },
+    {
+      "name": "toutwaf-windows-arm64.zip",
+      "os": "windows",
+      "arch": "arm64",
+      "size": 45001098,
+      "sha256": "ac97fd81196cf491a3a131e811e3b5918d82766a9e3e877b01f89cdaade160c3"
+    }
+  ],
+  "notes": "## 0.2.0-dev.9\n\n- **Live attack map** (Map page and a widget on the home dashboard): 3D globe or flat 2D map, live feed or any period, animated attack arcs, top origins and attack types, full-screen and TV mode. Origins are placed at country level.\n- **Fuller home dashboard**: threat level, platform health, latest incidents, top ASNs and user agents.\n- **Analytics** (new section): visitors online, sessions, pages, sources and campaigns, countries, browsers and devices, behaviour, performance, security traffic, events and goals, comparison with the previous period, CSV export. Cookieless; a first-party tracker injected by ToutWAF measures screen size, scroll depth, engaged time, Core Web Vitals and custom events, switchable per site, with an allowed-origins list and a manual snippet mode.\n- **Customisable pages**: block, rate-limit, browser check, captcha, access denied, maintenance and error pages with a gallery of designs, a no-code editor, an advanced HTML editor, live preview, versions and per-site overrides. Configurable captcha: proof of work, built-in image captcha, Turnstile, hCaptcha, reCAPTCHA.\n- **Network check** in the Add server and Web servers wizards: required ports in both directions, live verification, ready-to-copy firewall rules, one-click fixes where possible.\n- **ToutPanel**: \"Also create this site in ToutPanel\" in Add site (panel API token), \"This machine\" proposed first in the Web servers wizard, ToutWAF is the only WAF offered.\n- **Agent and data plane verify the control plane by its certificate fingerprint** instead of the host name, so enrolment works by IP address or NAT address; new `toutwaf-cp tls regenerate` keeps the key.\n- Sidebar shows only the section of the current page; the version badge shows the running version; the top bar shows the distribution with a logo; translations reviewed (not by native speakers).\n- **ToutPanel 0.5.1 integration**: installing ToutPanel from ToutWAF with every installer option (loaded from the published options file), strict link mode, automatic certificate pinning from the panel heartbeat, official uninstall, honours rate-limit delays, clear message when the panel refuses the WAF address, \"Behind ToutWAF\" check, deep link to a site's SSL tab, notice when the panel drops the access token.\n- **Web server section** (when linked to ToutPanel): sites, FTP, PHP, backups, DNS zones through the panel API; certificates held by ToutWAF and drivable from ToutPanel; ToutPanel integration on/off switch in Cluster.\n- Fixes: site creation in ToutPanel (required domains field), a second server created when the agent was reinstalled, long single-line SSH output truncated, AI assistant drawer unreadable on glass themes."
+}

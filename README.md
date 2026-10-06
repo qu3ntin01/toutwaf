@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.2.0-dev.8** · canal **bêta (dev)** · 2026-10-05
+**Version 0.2.0-dev.9** · canal **bêta (dev)** · 2026-10-06
 
 </div>
 
@@ -220,23 +220,23 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 
 ## Versions et téléchargements
 
-**Version 0.2.0-dev.8**
+**Version 0.2.0-dev.9**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 42.5 MiB | `a9429bd7036ec2f045eacc33448153971c941c964691a4b8a668a64cbc52ffe2` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 38.8 MiB | `a08b89a34cc25e3df1830d07251a2b0f2a2667a9af646c817f93b89871c9905e` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 43.0 MiB | `258b13ba5fc491637202932874c3167a0dbf1671cb4d8e212f01ac1b43c6074c` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 39.1 MiB | `d41bfce2fe64f3645d7cd7a1e07e4d0c3ddba07b90b73992e8f030ae42361a4c` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 47.0 MiB | `ee00ca3aaf2d6c1cd60aa5373eb2e902ef4be46b9292aec3d7aa803d35b980ae` |
+| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 42.6 MiB | `f183327471ffde37d02bdf498a8ff5ad1f2e309b7eddd5172fc1de8a847f8afd` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 48.1 MiB | `d7728fc58fb3656fe02ddb7858d2a219b909abfe642c6b4330aac5a85e315bff` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 42.9 MiB | `ac97fd81196cf491a3a131e811e3b5918d82766a9e3e877b01f89cdaade160c3` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.2.0-dev.8` | 2026-10-05T17:24:59Z | **actuelle** | `releases/0.2.0-dev.8/` |
+| `0.2.0-dev.9` | 2026-10-06T19:53:00Z | **actuelle** | `releases/0.2.0-dev.9/` |
+| `0.2.0-dev.8` | 2026-10-05T17:24:59Z | disponible | `releases/0.2.0-dev.8/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | disponible | `releases/0.2.0-dev.7/` |
 | `0.2.0-dev.6` | 2026-10-04T18:03:29Z | disponible | `releases/0.2.0-dev.6/` |
 | `0.2.0-dev.5` | 2026-10-03T17:20:42Z | disponible | `releases/0.2.0-dev.5/` |
-| `0.2.0-dev.4` | 2026-10-03T13:59:43Z | disponible | `releases/0.2.0-dev.4/` |
 
 Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 
@@ -245,7 +245,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.2.0-dev.8 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.2.0-dev.9 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Vérifier une version
@@ -253,7 +253,7 @@ cd releases/0.2.0-dev.8 && sha256sum -c SHA256SUMS --ignore-missing
 À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `f8fc98e4c6e364fa`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
 
 ```sh
-V=0.2.0-dev.8; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
+V=0.2.0-dev.9; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
