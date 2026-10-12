@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.3.0-dev** · build `39d66eb1b0ae` · canal **bêta (dev)** · 2026-10-12
+**Version 0.3.0-dev** · build `18e5879cf509` · canal **bêta (dev)** · 2026-10-12
 
 </div>
 
@@ -226,15 +226,15 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 80.8 MiB | `8c1d56b2cd6ef9c1d006daea27b2624130db1dbe2474d1192d08ee13698dfb3c` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 73.4 MiB | `47a570ad882a9f9ea9b75f3d5a101b8e8a4f9b245eafb03ef3aeef56c752827f` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 82.2 MiB | `8e110f7deb6a822d06db7e0e373980df9aff217af8ce9ab0cdb03a5f428bbf20` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 74.0 MiB | `5eb71cfc205477c11522a68c08e66d903eb13b21d1a11011f9ae76ba51be9ae3` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 81.1 MiB | `edb18d7fcd2d6ea9a7fbdbda12f9678b4c6ca299c98fb19516a5356d4160ef86` |
+| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 73.6 MiB | `aa1bbfb08a79f5848a059a73470a984c5ce41c0e75f7c6cd3128a7b952e15562` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 82.5 MiB | `251fd8388b71da05227cd8956a753c91a4383974da5bd40fee8a487b94dfbc73` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 74.1 MiB | `6b3dac113bcb29869d00812efaad66f0e573d7cf78312c466b4cf5c03c207d14` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.3.0-dev` | 2026-10-12T01:25:08Z | **actuelle** | `releases/0.3.0-dev/` |
+| `0.3.0-dev` | 2026-10-12T14:16:21Z | **actuelle** | `releases/0.3.0-dev/` |
 | `0.2.0-dev.9` | 2026-10-06T19:53:00Z | disponible | `releases/0.2.0-dev.9/` |
 | `0.2.0-dev.8` | 2026-10-05T17:24:59Z | disponible | `releases/0.2.0-dev.8/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | disponible | `releases/0.2.0-dev.7/` |
