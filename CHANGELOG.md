@@ -2,6 +2,58 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.3.0-dev - 2026-10-12
+
+Development version (`0.3.0-dev`, replaced by each new build).
+
+### Added
+
+- Organisations and managed-service providers: organisations with their own quotas, suspension, safe deletion, moving a site between organisations, invitations, a policy floor that organisations cannot go below, and one report per client. A licensed feature.
+- Cluster: supervised servers (one is free) with host security checks, availability probes and thresholds; a standby console with manual promotion; staggered updates; a restore that restarts the service and rolls back if it does not come back; an encrypted backup server for supervised servers.
+- ToutWAF Antivirus (Horizon): endpoint enrolment, scans, quarantine and release of a quarantined file, definitions. Licensed; no free tier.
+- Mail security gateway: anti-spam, anti-phishing, data-loss prevention, quarantine. Licensed; no free tier.
+- IP and geo: degrees by country (watch, harden, challenge, restrict), reputation score with an explanation, trusted addresses, personal lists with import and export, a kernel blocklist helper.
+- API security: route profiles with an assistant, schema validation, object-level authorisation checks, WebSocket limits.
+- Load balancing: route pools, drain, canary roll-outs.
+- Certificates: several ACME authorities with automatic failover; a DNS check that looks at every A and AAAA record and recognises a CDN or proxy before a certificate is requested.
+- Automatic rules and definitions: automatic exceptions from your own traffic, a self-test of a new site, a measured precision of each list.
+- Doctor: one diagnostic from the machine to the origin of each site, with the cause and the action for every finding.
+- Extended audit log (CEF and Syslog exports for a SIEM) and 45 integration modules (6 free).
+- AI assistant with a private model (an Ollama or OpenAI-compatible server of your own). The assistant with an external provider sends a request excerpt only on an explicit action.
+- Installation: servers can be installed over SSH; Apache behind ToutWAF is supported with the files ToutWAF prepares; the installer refuses a system that cannot work, with the cause; the web stack of a ToutPanel server is applied after the installation by ToutWAF itself (PHP 8.5 by default).
+- Console: seven themes, a loading indicator, the brand logo kit, contextual help for tenants.
+
+### Changed
+
+- The free edition is limited to 3 sites, one node, two users and one organisation. Licensed features stay visible and locked ("Licence required"); protection continues after a licence expires and the data plane never consults the licence.
+- Requests ToutWAF makes to third parties no longer name the product or its version (neutral User-Agents), including the probes that go to the addresses of a site's DNS names.
+- Texts across the ten languages follow one term and one register per concept.
+- Version naming: the development version is always named `X.Y.Z-dev` and each publication replaces the previous one; the build identifier tells two builds of the same version apart. The stable channel only ever carries a fully tested version.
+- The ToutWAF mark and the product name are fixed on the pages shown to visitors; a client can add their own site name next to them.
+- Refusals keep their cause: an error shows its translated title followed by the reason.
+
+### Fixed
+
+- A first visit to a new site is no longer blocked (HTTP/2 `:authority` handling).
+- A new site without a certificate is served over HTTP so that HTTP-01 validation can pass, instead of being redirected to the fallback certificate.
+- A bare address in a parameter named `ip`, `url` or `host` is no longer treated as a request to an internal address.
+- The audit log, dashboard links, analytics measurement and the Wazuh rules file shipped with the integration.
+
+### Security
+
+- Bodies larger than the inspection window are handled by an explicit policy; the window is 1 MiB by default.
+- Addresses of administrators can be trusted for a limited time, at their explicit request.
+- Nothing identifying leaves an installation: the customer-journey bench plants canary data in the traffic and fails if any of it, or the product name, reaches a simulated third party.
+
+### Honest limits of this build
+
+- No real Windows, macOS or ARM host was used. The installer was exercised on Linux images only.
+- No real ToutPanel, router (OPNsense, pfSense) or certificate authority was used; the format of the output of `toutpanel stack apply --json` is still to be confirmed with the ToutPanel team.
+- The collective defence network is not offered in this build (it was a local preview that sent nothing).
+- Twelve functions carry a note that they have not yet been tried in real conditions (external CAPTCHA, private language model, SAML, kernel blocklist, standby console, virtual address, router files, ACME authorities, antivirus agent, ToutPanel stack, mail gateway, SIEM and ticketing integrations).
+- The eight languages other than French and English were not reviewed by native speakers.
+- No independent benchmark or penetration test has been done.
+
 ## 0.2.0-dev.9 - 2026-10-06
 
 ## 0.2.0-dev.9
