@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.2.0-dev.9** · canal **bêta (dev)** · 2026-10-06
+**Version 0.3.0-dev** · build `39d66eb1b0ae` · canal **bêta (dev)** · 2026-10-12
 
 </div>
 
@@ -22,7 +22,7 @@ ToutWAF se place **devant vos sites web et vos API** et examine chaque requête 
 
 Il s'installe sur **votre propre serveur** (Linux ou Windows), sans service cloud : vos données de trafic restent chez vous.
 
-> **Canal bêta.** Cette branche `dev` contient des versions de test (`X.Y.Z-dev.N`). Pour la production, utilisez la branche [`main`](https://github.com/qu3ntin01/toutwaf/tree/main) (canal stable).
+> **Canal de développement (bêta).** Cette branche `dev` contient **une seule** version, la version de développement publique (`X.Y.Z-dev`), remplacée à chaque publication : son numéro ne change pas, c'est l'**identifiant de build** (12 caractères, dans `channel.json` et le fichier `BUILD` de l'archive) qui dit laquelle vous avez. Pour la production, utilisez la branche [`main`](https://github.com/qu3ntin01/toutwaf/tree/main) (canal stable) quand une version stable y est publiée.
 
 > Ce dépôt publie uniquement les **installeurs et les binaires** de ToutWAF. Il ne contient pas de code source.
 
@@ -202,7 +202,9 @@ La page **Mises à jour** (menu Administration) affiche la version installée, l
 
 ## Édition gratuite
 
-Sans licence, ToutWAF fonctionne en **édition gratuite** : **5 sites protégés, 1 nœud, 2 utilisateurs, 1 organisation et 50 millions de requêtes par mois**. Dépasser le quota mensuel est signalé « hors quota » dans la console. Au-delà, l'ajout est refusé tant qu'aucune licence n'est installée. Tout le reste décrit ici est le même produit ; pour des limites plus élevées, contactez votre fournisseur ToutWAF.
+Sans licence, ToutWAF fonctionne en **édition gratuite**, gratuite pour un usage personnel raisonnable : **jusqu'à 3 sites protégés, 1 nœud, 2 utilisateurs, 1 organisation et 50 millions de requêtes par mois**. Dépasser le quota mensuel est signalé « hors quota » dans la console. Au-delà, l'ajout est refusé, avec la limite et le nombre utilisé, tant qu'aucune licence n'est installée.
+
+Plus de sites, l'usage en entreprise et les fonctions avancées sont sous licence : équilibrage de charge avancé, plusieurs organisations (locataires, MSSP), connexion d'entreprise (OIDC, SAML, SCIM), intégrations SIEM / SOAR / tickets / renseignement sur les menaces et sauvegardes hors site. Elles restent visibles dans la console, verrouillées, avec un lien vers les offres ; elles ne sont jamais cachées. À l'expiration d'une licence, une période de grâce de 14 jours s'applique, puis seule la *nouvelle configuration* de ces fonctions est refusée : la protection déjà en place continue de fonctionner. Tout le reste décrit ici est le même produit ; pour des limites plus élevées ou les fonctions avancées, contactez votre fournisseur ToutWAF.
 
 ## Limites connues
 
@@ -220,19 +222,20 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 
 ## Versions et téléchargements
 
-**Version 0.2.0-dev.9**
+**Version 0.3.0-dev**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 47.0 MiB | `ee00ca3aaf2d6c1cd60aa5373eb2e902ef4be46b9292aec3d7aa803d35b980ae` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 42.6 MiB | `f183327471ffde37d02bdf498a8ff5ad1f2e309b7eddd5172fc1de8a847f8afd` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 48.1 MiB | `d7728fc58fb3656fe02ddb7858d2a219b909abfe642c6b4330aac5a85e315bff` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 42.9 MiB | `ac97fd81196cf491a3a131e811e3b5918d82766a9e3e877b01f89cdaade160c3` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 80.8 MiB | `8c1d56b2cd6ef9c1d006daea27b2624130db1dbe2474d1192d08ee13698dfb3c` |
+| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 73.4 MiB | `47a570ad882a9f9ea9b75f3d5a101b8e8a4f9b245eafb03ef3aeef56c752827f` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 82.2 MiB | `8e110f7deb6a822d06db7e0e373980df9aff217af8ce9ab0cdb03a5f428bbf20` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 74.0 MiB | `5eb71cfc205477c11522a68c08e66d903eb13b21d1a11011f9ae76ba51be9ae3` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.2.0-dev.9` | 2026-10-06T19:53:00Z | **actuelle** | `releases/0.2.0-dev.9/` |
+| `0.3.0-dev` | 2026-10-12T01:25:08Z | **actuelle** | `releases/0.3.0-dev/` |
+| `0.2.0-dev.9` | 2026-10-06T19:53:00Z | disponible | `releases/0.2.0-dev.9/` |
 | `0.2.0-dev.8` | 2026-10-05T17:24:59Z | disponible | `releases/0.2.0-dev.8/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | disponible | `releases/0.2.0-dev.7/` |
 | `0.2.0-dev.6` | 2026-10-04T18:03:29Z | disponible | `releases/0.2.0-dev.6/` |
@@ -245,23 +248,25 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.2.0-dev.9 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.3.0-dev && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Vérifier une version
 
-À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `f8fc98e4c6e364fa`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
+À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `ebd2a20ce5a5650f`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
 
 ```sh
-V=0.2.0-dev.9; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
+V=0.3.0-dev; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
-{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
+{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
 openssl pkeyutl -verify -pubin -inkey release.pem -rawin -in SHA256SUMS -sigfile sig.bin   # « Signature Verified Successfully »
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 Une version signée avec une autre clé, ou modifiée après la signature, échoue avec « Signature Verification Failure ». Pour faire confiance à une autre clé (miroir privé), définissez `TOUTWAF_RELEASE_PUBKEY` ou créez `<home>/conf/release.pub` avant l'installation.
+
+**Changement de clé (2026-10-12).** Les versions 0.2.0-dev.7 à 0.2.0-dev.9 ont été signées avec la première clé (identifiant `f8fc98e4c6e364fa`, clé publique `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`), qui n'est plus utilisée. À partir de la 0.3.0-dev, les versions sont signées avec la clé ci-dessus ; les installeurs n'en portent qu'une, donc pour installer une des trois anciennes versions, fournissez l'ancienne clé avec `TOUTWAF_RELEASE_PUBKEY`.
 
 ## Licence et support
 

@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.2.0-dev.9** · channel **dev (pre-release)** · 2026-10-06
+**Version 0.3.0-dev** · build `39d66eb1b0ae` · channel **dev (pre-release)** · 2026-10-12
 
 </div>
 
@@ -22,7 +22,7 @@ ToutWAF sits **in front of your websites and APIs** and inspects every request b
 
 It installs on **your own server** (Linux or Windows), with no cloud service: your traffic data stays with you.
 
-> **Beta channel.** This `dev` branch carries test releases (`X.Y.Z-dev.N`). For production use the [`main`](https://github.com/qu3ntin01/toutwaf/tree/main) branch (stable channel).
+> **Development (beta) channel.** This `dev` branch carries **one** version, the public development version (`X.Y.Z-dev`), replaced by every publication: its number does not change, the **build identifier** (12 characters, in `channel.json` and in the `BUILD` file of the archive) tells which one you have. For production use the [`main`](https://github.com/qu3ntin01/toutwaf/tree/main) branch (stable channel) once a stable version is published there.
 
 > This repository publishes ToutWAF **installers and binaries only**. It contains no source code.
 
@@ -202,7 +202,9 @@ The **Updates** page (Administration menu) shows the installed version, the late
 
 ## Free edition
 
-Without a licence ToutWAF runs as the **free edition**: **5 protected sites, 1 node, 2 users, 1 organisation and 50 million requests per month**. Going over the monthly request quota is flagged as "over quota" in the console. Adding more is refused until a licence is installed. Everything else described here is the same product; for larger limits, contact your ToutWAF vendor.
+Without a licence ToutWAF runs as the **free edition**, free for a reasonable personal use: **up to 3 protected sites, 1 node, 2 users, 1 organisation and 50 million requests per month**. Going over the monthly request quota is flagged as "over quota" in the console. Adding more is refused, with the limit and the number in use, until a licence is installed.
+
+More sites, enterprise use and the advanced features are under licence: advanced load balancing, several organisations (tenants, MSSP), enterprise sign-in (OIDC, SAML, SCIM), SIEM / SOAR / ticketing / threat-intelligence integrations and off-site backups. They stay visible in the console, locked, with a link to the offers; they are never hidden. When a licence expires there is a 14-day grace period, then only the *new configuration* of those features is refused: the protection already in place keeps working. Everything else described here is the same product; for larger limits or the advanced features, contact your ToutWAF vendor.
 
 
 ## Known limitations
@@ -221,19 +223,20 @@ Let's be transparent about what is not (yet) covered:
 
 ## Versions and downloads
 
-**Version 0.2.0-dev.9**
+**Version 0.3.0-dev**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 47.0 MiB | `ee00ca3aaf2d6c1cd60aa5373eb2e902ef4be46b9292aec3d7aa803d35b980ae` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 42.6 MiB | `f183327471ffde37d02bdf498a8ff5ad1f2e309b7eddd5172fc1de8a847f8afd` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 48.1 MiB | `d7728fc58fb3656fe02ddb7858d2a219b909abfe642c6b4330aac5a85e315bff` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 42.9 MiB | `ac97fd81196cf491a3a131e811e3b5918d82766a9e3e877b01f89cdaade160c3` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 80.8 MiB | `8c1d56b2cd6ef9c1d006daea27b2624130db1dbe2474d1192d08ee13698dfb3c` |
+| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 73.4 MiB | `47a570ad882a9f9ea9b75f3d5a101b8e8a4f9b245eafb03ef3aeef56c752827f` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 82.2 MiB | `8e110f7deb6a822d06db7e0e373980df9aff217af8ce9ab0cdb03a5f428bbf20` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 74.0 MiB | `5eb71cfc205477c11522a68c08e66d903eb13b21d1a11011f9ae76ba51be9ae3` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.2.0-dev.9` | 2026-10-06T19:53:00Z | **current** | `releases/0.2.0-dev.9/` |
+| `0.3.0-dev` | 2026-10-12T01:25:08Z | **current** | `releases/0.3.0-dev/` |
+| `0.2.0-dev.9` | 2026-10-06T19:53:00Z | available | `releases/0.2.0-dev.9/` |
 | `0.2.0-dev.8` | 2026-10-05T17:24:59Z | available | `releases/0.2.0-dev.8/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | available | `releases/0.2.0-dev.7/` |
 | `0.2.0-dev.6` | 2026-10-04T18:03:29Z | available | `releases/0.2.0-dev.6/` |
@@ -246,23 +249,25 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.2.0-dev.9 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.3.0-dev && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Verify a release
 
-From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `f8fc98e4c6e364fa`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. To verify by hand (OpenSSL 3 or later):
+From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `ebd2a20ce5a5650f`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=`. To verify by hand (OpenSSL 3 or later):
 
 ```sh
-V=0.2.0-dev.9; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
+V=0.3.0-dev; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
-{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
+{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
 openssl pkeyutl -verify -pubin -inkey release.pem -rawin -in SHA256SUMS -sigfile sig.bin   # "Signature Verified Successfully"
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 A release signed with another key, or modified after signing, fails with "Signature Verification Failure". To trust another key (private mirror), set `TOUTWAF_RELEASE_PUBKEY` or create `<home>/conf/release.pub` before installing.
+
+**Key change (2026-10-12).** Releases 0.2.0-dev.7 to 0.2.0-dev.9 were signed with the first key (id `f8fc98e4c6e364fa`, public key `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`), which is no longer used. From 0.3.0-dev on, releases are signed with the key above; installers carry only one, so to install one of those three older releases, supply the old key with `TOUTWAF_RELEASE_PUBKEY`.
 
 ## License and support
 
