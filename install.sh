@@ -38,7 +38,11 @@ DATA_DIR="/var/lib/toutwaf"
 LOG_DIR="/var/log/toutwaf"
 SVC_USER="toutwaf"
 DESTDIR="${DESTDIR:-}"                          # staging root (packaging / tests): no system changes at all
-BASE_URL="${TOUTWAF_BASE_URL:-}"                # mirror, default: GitHub releases
+BASE_URL="${TOUTWAF_BASE_URL:-}"                # mirror, default: the project's own GitLab, GitHub as a fallback
+# Where releases are read: the project's own GitLab first (public project, raw files), the GitHub copy of the same signed channel when it is unreachable.
+# Release archives stay verified by the signature key of this installer, whichever source served them. TOUTWAF_REPO (another GitHub repository) disables both.
+SRC_PRIMARY="${TOUTWAF_SRC_PRIMARY:-https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw}"; SRC_FALLBACK="https://raw.githubusercontent.com/$REPO"; SRC_ROOT=""
+if [ -n "${TOUTWAF_REPO:-}" ]; then SRC_PRIMARY="$SRC_FALLBACK"; SRC_FALLBACK=""; fi
 CP_BIN="${TOUTWAF_CP_BIN:-}"                    # override of the toutwaf-cp used for `bootstrap` (tests)
 TARBALL=""                                      # local tarball instead of download
 CP_URL=""; NODE_TOKEN=""; ENROLL_TOKEN=""; NODE_GROUP=""; CP_CA=""
@@ -3107,7 +3111,7 @@ decide_channel() {
   CHANNEL="$(conf_get CHANNEL)"; case "$CHANNEL" in stable|dev) ;; *) CHANNEL=stable;; esac
 }
 channel_branch() { if [ "$CHANNEL" = dev ]; then echo dev; else echo main; fi; }
-repo_base() { printf '%s' "${BASE_URL:-https://raw.githubusercontent.com/$REPO/$(channel_branch)}"; }
+repo_base() { printf '%s' "${BASE_URL:-${SRC_ROOT:-$SRC_PRIMARY}/$(channel_branch)}"; }
 write_installer_conf() {
   if [ "$STAGING" = 1 ] || [ "$DRY_RUN" = 1 ]; then return 0; fi
   [ -d "$(dirname "$INSTALLER_CONF")" ] || return 0
@@ -3162,7 +3166,12 @@ ch_top() { ch_flat | sed -e 's/^[[:space:]]*{//' -e 's/}[[:space:]]*$//' -e ':a'
 ch_str() { ch_top | grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n1 | sed 's/^[^:]*:[[:space:]]*"\(.*\)"$/\1/' || true; }   # the string value of a top-level key
 fetch_channel() {   # returns 1 when unreachable / not JSON / without a version (CH_EMPTY=1 then: a valid channel.json saying that nothing is published)
   CH_EMPTY=0
-  curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG" || return 1
+  if ! curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG"; then
+    # the primary source is unreachable: the GitHub copy of the same signed channel (not when a mirror or another repository was chosen)
+    [ -z "$BASE_URL" ] && [ -n "$SRC_FALLBACK" ] && [ "$SRC_ROOT" != "$SRC_FALLBACK" ] || return 1
+    SRC_ROOT="$SRC_FALLBACK"
+    curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG" || return 1
+  fi
   CH_JSON="$(cat "$TMP/channel.json")"
   case "$CH_JSON" in *'{'*) ;; *) return 1;; esac
   CH_VERSION="$(ch_str version | tr -d '[:space:]')"
@@ -4118,7 +4127,9 @@ $(sd_opt 242 ProtectHostname=yes)
 RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK: Go lists the network interfaces through netlink. Without it the console cannot list the addresses of this machine (only the
+# public link is shown), the Doctor cannot tell which addresses are this machine's, and the certificate of the console misses its IP address.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 LockPersonality=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
@@ -4243,10 +4254,13 @@ case "${1:-request}" in
     plog "update requested: component=$comp channel=$chan version=$ver downgrade_allowed=$dg"
     br=main; [ "$chan" = dev ] && br=dev
     base="$(conf_get BASE_URL)"; case "$base" in http://*|https://*) ;; *) base="";; esac
-    url="${TOUTWAF_INSTALLER_URL:-${base:+$base/install.sh}}"; url="${url:-https://raw.githubusercontent.com/$REPO/$br/install.sh}"
+    url="${TOUTWAF_INSTALLER_URL:-${base:+$base/install.sh}}"; url="${url:-$SRC_PRIMARY/$br/install.sh}"
     inst="$(mktemp)"; trap 'rm -f "$inst"' EXIT
     S_PHASE="Downloading the installer"; write_status; plog "$S_PHASE ($url)"
-    curl -fsSL --retry 3 --connect-timeout 15 -o "$inst" "$url" 2>>"$LOGF" && head -c2 "$inst" | grep -q '^#!' || fail "cannot download the installer from $url"
+    { curl -fsSL --retry 3 --connect-timeout 15 -o "$inst" "$url" 2>>"$LOGF" && head -c2 "$inst" | grep -q '^#!'; } \
+      || { [ -z "$base" ] && [ -z "${TOUTWAF_INSTALLER_URL:-}" ] && [ -n "$SRC_FALLBACK" ] && url="$SRC_FALLBACK/$br/install.sh" \
+           && curl -fsSL --retry 3 --connect-timeout 15 -o "$inst" "$url" 2>>"$LOGF" && head -c2 "$inst" | grep -q '^#!'; } \
+      || fail "cannot download the installer from $url"
     args=(--update --component "$comp" --channel "$chan" --yes --no-color --quiet)
     [ "$ver" = latest ] || args+=(--version "$ver")
     [ -z "$base" ] || args+=(--base-url "$base")

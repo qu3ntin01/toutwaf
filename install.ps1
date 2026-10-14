@@ -2834,10 +2834,17 @@ function Resolve-Channel {
     $script:Channel = $c
 }
 function Get-ChannelBranch { if ($script:Channel -eq 'dev') { return 'dev' } else { return 'main' } }
+# Where releases are read: the project's own GitLab first (public project, raw files), the GitHub copy of the same signed channel when it is unreachable.
+# Release archives stay verified by the signature key of this installer, whichever source served them. -Repo (another GitHub repository) disables both.
+$script:SrcPrimary = if ($env:TOUTWAF_SRC_PRIMARY) { $env:TOUTWAF_SRC_PRIMARY.TrimEnd('/') } else { 'https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw' }
+$script:SrcFallback = "https://raw.githubusercontent.com/$Repo"
+if ($PSBoundParameters.ContainsKey('Repo')) { $script:SrcPrimary = $script:SrcFallback; $script:SrcFallback = '' }
+$script:SrcRoot = ''
 function Get-RepoBase {
     if ($BaseUrl) { return $BaseUrl.TrimEnd('/') }
     if ($env:TOUTWAF_BASE_URL) { return $env:TOUTWAF_BASE_URL.TrimEnd('/') }
-    return "https://raw.githubusercontent.com/$Repo/$(Get-ChannelBranch)"
+    $root = if ($script:SrcRoot) { $script:SrcRoot } else { $script:SrcPrimary }
+    return "$root/$(Get-ChannelBranch)"
 }
 function Save-InstallerConf {
     if ($DryRun) { return }
@@ -2888,12 +2895,20 @@ $script:ChQuery = ''
 function Get-ChannelJson {
     # $null when unreachable / not JSON / without a version ($script:ChEmpty is then $true when channel.json is valid and says that nothing is published)
     $script:ChEmpty = $false
-    try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri ((Get-RepoBase) + '/channel.json' + $script:ChQuery) -TimeoutSec 20
-        $j = $r.Content | ConvertFrom-Json
-        if ($j.PSObject.Properties.Name -contains 'version' -and $j.version) { return $j }
-        if ($j.PSObject.Properties.Name -contains 'channel') { $script:ChEmpty = $true }
-    } catch { Write-InstallLog "channel.json: $($_.Exception.Message)" }
+    foreach ($attempt in 1, 2) {
+        try {
+            $r = Invoke-WebRequest -UseBasicParsing -Uri ((Get-RepoBase) + '/channel.json' + $script:ChQuery) -TimeoutSec 20
+            $j = $r.Content | ConvertFrom-Json
+            if ($j.PSObject.Properties.Name -contains 'version' -and $j.version) { return $j }
+            if ($j.PSObject.Properties.Name -contains 'channel') { $script:ChEmpty = $true }
+            break
+        } catch {
+            Write-InstallLog "channel.json: $($_.Exception.Message)"
+            # the primary source is unreachable: the GitHub copy of the same signed channel (not when a mirror or another repository was chosen)
+            if ($attempt -eq 1 -and -not $BaseUrl -and -not $env:TOUTWAF_BASE_URL -and $script:SrcFallback -and $script:SrcRoot -ne $script:SrcFallback) { $script:SrcRoot = $script:SrcFallback; continue }
+            break
+        }
+    }
     return $null
 }
 function Get-ChannelBuild($j) { if ($j -and ($j.PSObject.Properties.Name -contains 'build')) { return (ConvertTo-Build ([string]$j.build)) } else { return '' } }

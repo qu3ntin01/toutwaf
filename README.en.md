@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.3.0-dev** · build `18e5879cf509` · channel **dev (pre-release)** · 2026-10-12
+**Version 0.3.0-dev** · build `ca37dd9878ab` · channel **dev (pre-release)** · 2026-10-14
 
 </div>
 
@@ -227,15 +227,15 @@ Let's be transparent about what is not (yet) covered:
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 81.1 MiB | `edb18d7fcd2d6ea9a7fbdbda12f9678b4c6ca299c98fb19516a5356d4160ef86` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 73.6 MiB | `aa1bbfb08a79f5848a059a73470a984c5ce41c0e75f7c6cd3128a7b952e15562` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 82.5 MiB | `251fd8388b71da05227cd8956a753c91a4383974da5bd40fee8a487b94dfbc73` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 74.1 MiB | `6b3dac113bcb29869d00812efaad66f0e573d7cf78312c466b4cf5c03c207d14` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 81.0 MiB | `74b079910f2bf61ce372b4d5716da893f78d8f433d01a4bd332de8593d658132` |
+| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 73.5 MiB | `ee1df453b8821b622a43a79ee6a85b94ef2a6d387ad19389cc5969d5e1ad1f4a` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 82.2 MiB | `80a4d2599a99e75569c588018d95cdc4685f248f536bb75152ed56c0b868b8fe` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 74.0 MiB | `df7d8ac32462db2fcfee426e99ee24315a1cb16a0141d9a0c111a21141d1cb68` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.3.0-dev` | 2026-10-12T14:16:21Z | **current** | `releases/0.3.0-dev/` |
+| `0.3.0-dev` | 2026-10-14T17:19:58Z | **current** | `releases/0.3.0-dev/` |
 | `0.2.0-dev.9` | 2026-10-06T19:53:00Z | available | `releases/0.2.0-dev.9/` |
 | `0.2.0-dev.8` | 2026-10-05T17:24:59Z | available | `releases/0.2.0-dev.8/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | available | `releases/0.2.0-dev.7/` |
