@@ -4,15 +4,15 @@
   ToutWAF installer for Windows (Windows 10 1809+ / 11, Windows Server 2016 / 2019 / 2022 / 2025; amd64 and arm64 (arm64 untested on real hardware); see -CheckCompat, -SkipOsCheck).
 
 .EXAMPLE
-  irm https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/install.ps1 | iex
+  irm https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/main/install.ps1 | iex
   # interactive menu
 
 .EXAMPLE
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/install.ps1))) -Install -Yes -PublicHost waf.example.com
+  & ([scriptblock]::Create((irm https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/main/install.ps1))) -Install -Yes -PublicHost waf.example.com
   # unattended "direct" install
 
 .EXAMPLE
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/install.ps1))) -Install -Component dp -CpUrl https://cp.example.com:9444 -EnrollToken XXXX -Yes
+  & ([scriptblock]::Create((irm https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/main/install.ps1))) -Install -Component dp -CpUrl https://cp.example.com:9444 -EnrollToken XXXX -Yes
 
 .DESCRIPTION
   Downloads the release, verifies its SHA-256 (and the cosign signature when cosign is installed), installs to
@@ -25,6 +25,8 @@
   Actions: -Install (default) -Update -Uninstall [-Purge] -Status -Links. Without any parameter, on a console, a menu is shown.
   Languages: -En -Fr -Es -De -It -Pt -Nl -Ru -Zh -Ar (or -Lang fr, or $env:TOUTWAF_LANG = 'fr') choose the installer language;
   by default it follows the Windows display language, English when that language is not supported.
+  -ViaRepo: read the release from ToutWAF's own package repository for Windows first (index.json checked against its SHA-256); when it is
+  unreachable or damaged the installer falls back to the project's GitLab, then GitHub, as without the switch. The archive is verified the same way.
 #>
 [CmdletBinding()]
 param(
@@ -38,6 +40,7 @@ param(
     [ValidateSet('dp', 'cp', 'all')][string]$Component = 'all',
     [string]$Repo = 'qu3ntin01/toutwaf',      # public binaries-only repository (deploy/RELEASE-LAYOUT.md)
     [string]$BaseUrl = '',
+    [switch]$ViaRepo,                         # try ToutWAF's own package repository for Windows first (falls back to GitLab, then GitHub)
     [string]$ZipPath = '',
     [string]$CpUrl = '',
     [string]$EnrollToken = '',
@@ -192,7 +195,13 @@ $script:Catalog = @{
         'st_latest' = 'Latest available: {0}'
         'st_newer' = 'update available: run with --update'
         'e_yanked' = 'Version {0} was withdrawn (yanked) and must not be installed. Run --update for the current release, or --force to override.'
+        'e_nover' = 'No version is published on the {0} channel yet, so there is nothing to install. ToutWAF was not installed or modified. To install from the {1} channel instead, run the installer again with -Channel {2}.'
         'e_installer_old' = 'This installer is too old for this release (needs version {0}): download it again from the channel URL.'
+        'up_rebuilt' = 'Same version, new build: installed {0}, available {1}. Updating.'
+        'st_newbuild' = 'same version, new build available: run again with {0}'
+        'st_nochannel' = 'Latest available: nothing published on this channel yet'
+        'w_mirror' = 'The public mirror served files that do not agree with each other ({0}): it is probably still refreshing after a publication. Reading the channel again, once.'
+        'e_mismatch' = 'checksum mismatch for {0} ({1}): the downloaded file does not match the checksum that was published, so nothing was installed or changed. Right after a publication the public mirror can serve the previous files for a few minutes: wait five minutes and run the installer again. If it happens again, do not install: the publication is damaged.'
         'e_downgrade' = 'The latest release {0} of channel {1} is older than the installed {2}: use --force to downgrade.'
         's_sigok' = 'release signature verified, key {0}'
         'w_sigold' = 'release {0} was published without a signature (releases before 0.2.0-dev.7 are unsigned): only SHA-256 was verified, the signature could not be checked'
@@ -223,6 +232,20 @@ $script:Catalog = @{
         'sum_file' = 'Summary saved (root only): {0}'
         'sum_fallback' = 'This control plane has no ''bootstrap'' command yet: open the console URL and follow the setup page.'
         'sum_node_hint' = 'To manage this node from the console: Nodes > Add node, then set control_plane.url / enroll_token in {0}.'
+        'q_fwmodule' = 'Do you also want ToutWAF to manage this machine''s firewall?'
+        'fwmod_n1' = 'Optional module, off unless you say yes. Nothing is applied during the installation: you review every change in the console.'
+        'fwmod_n2' = 'Every change runs as a trial with a countdown and rolls back by itself unless you keep it; an anti-lockout guard refuses any rule that would cut SSH or the console.'
+        'fwmod_n3' = 'This is not the question above, which only opens the ports ToutWAF needs in the system firewall (--no-firewall).'
+        's_fwmod' = 'Enabling the firewall module (no rule applied)'
+        'fwmod_done' = 'Firewall module enabled. Nothing was applied: open Firewall in the console to review and try rules.'
+        'fwmod_fail' = 'Could not enable the firewall module ({0}). The installation goes on; switch it on later in Settings > Modules.'
+        's_link' = 'Linking the data plane to the console'
+        'dp_link_ok' = 'Data plane linked to the console automatically: nothing to configure by hand.'
+        'dp_link_same' = 'Data plane already linked to the console; its configuration was not touched.'
+        'dp_link_fixed' = 'Data-plane configuration repaired (duplicated control_plane blocks merged into one); the previous file was kept.'
+        'dp_link_remote' = 'The data plane on this machine is configured for another console; it was left unchanged.'
+        'dp_link_fail' = 'The data plane could not be linked to the console automatically: {0}'
+        'dp_link_fail_hint' = 'The data plane keeps its standalone configuration, so sites answer HTTP 421 until it is linked. Fix the cause above and run this installer again: it links the node by itself.'
         'st_title' = 'Status'
         'st_healthy' = 'healthy'
         'st_unhealthy' = 'NOT healthy'
@@ -279,6 +302,52 @@ $script:Catalog = @{
         'cp_r_arm32' = '32-bit ARM (armv7) is not supported by ToutWAF. Install a 64-bit OS (Raspberry Pi OS 64-bit, Ubuntu or Debian arm64; Raspberry Pi 3, 4, 5 or Zero 2 W), then run the installer again.'
         'cp_r_arm_userland32' = 'The kernel is 64-bit but the system (userland) is 32-bit. ToutWAF needs a 64-bit OS: reinstall with Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) or Ubuntu / Debian arm64.'
         'cp_w_pi' = 'Raspberry Pi detected: arm64 is only smoke-tested under emulation, not on real hardware. Put the data and logs on an SSD / USB drive rather than the SD card, and avoid the all-in-one install below 2 GB of RAM (see docs/install/raspberry-pi.md).'
+        'pf_title' = 'Checking what this machine needs'
+        'pf_ok' = 'Nothing is in the way: the ports ToutWAF needs are free.'
+        'pf_refused' = 'ToutWAF cannot be installed on this machine as it is. Nothing was changed.'
+        'pf_ok_warn' = 'Nothing prevents the installation, but read the points above.'
+        'pf_l_refuse' = 'refused'
+        'pf_l_warn' = 'warning'
+        'pf_l_info' = 'note'
+        'pf_port_busy' = 'Port {0} is already used by {1}.'
+        'pf_prog_other' = 'another program'
+        'pf_prog_unknown' = 'another program (its name could not be read)'
+        'pf_act_web' = 'ToutWAF needs ports {0} and {1} to protect your sites. Stop that program, or move it to other ports (ToutPanel, installed beside ToutWAF, places its web server on 8080 and 8443), then run the installer again.'
+        'pf_act_console' = 'The console of ToutWAF needs this port. Free it, or choose another console port (the installer asks for it in its menu), then run the installer again.'
+        'pf_act_agent' = 'ToutWAF uses this port for the data planes and agents that connect to it. Free it, then run the installer again.'
+        'pf_act_admin' = 'The data plane uses this port on this machine only, for its own health check. Free it, then run the installer again.'
+        'pf_nostart' = '(nothing is started now, so this is only reported)'
+        'pf_boot' = '{0} is installed and starts with the machine, although it is stopped now. After the next restart it would take ports {1} and {2} before ToutWAF.'
+        'pf_act_boot' = 'Disable it so that it does not start with the machine, or move it to other ports, before the machine restarts.'
+        'pf_fw_cause' = 'A firewall ({0}) is active and does not let ports {1} and {2} through, and the installer was told not to change it.'
+        'pf_fw_action' = 'Open these ports in the firewall, or let the installer do it (do not use --no-firewall). Without that, your sites cannot be reached from outside.'
+        'pf_fwx_cause' = 'The firewall of this machine ({0}) refuses incoming connections by default and has no rule for ports {1} and {2}.'
+        'pf_fwx_action' = 'ToutWAF never changes the rules of this kind of firewall itself: open these ports in its configuration, then check your sites.'
+        'pf_cp_cause' = 'The control plane {0} cannot be reached from this machine.'
+        'pf_cp_action' = 'Check the address, that the control plane is running, and that its firewall lets this machine reach it (port 9444 by default), then run the installer again.'
+        'pf_router_cause' = 'This machine has a private address ({0}): it is probably behind a router or a box.'
+        'pf_router_action' = 'Once installed, ToutWAF shows which ports to forward to this machine and gives the files for the usual routers. There is nothing to prepare now.'
+        'pf_skipped' = 'The environment check was skipped as you asked: what is in the way will make the installation or the start fail later.'
+        's_sysupdate' = 'Updating the system packages (this can take several minutes)'
+        'su_skipped' = 'The system packages are not updated first (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = 'The system packages were updated less than 6 hours ago: not repeated.'
+        'su_dry' = 'the system packages would be updated first (skip it with TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = 'No supported package manager to update the system packages: skipped, the installation goes on.'
+        'su_failed' = 'The update of the system packages failed (exit {0}); the installation goes on without it. Details: {1}. Fix: run the update yourself and read its error (broken repository? another package manager running?), or run this command again with TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = 'A restart of this server is needed to finish the system update (new kernel or libraries). ToutWAF never restarts it for you: do it when you can.'
+        'q_sysupdate' = 'Update the system packages first (recommended)?'
+        'pr_disk_full' = 'Only {0} MB are free on {1} (at least {2} MB are needed): the installation could not finish.'
+        'pr_disk_full_a' = 'Free some space (package cache: apt-get clean or dnf clean all; old logs: journalctl --vacuum-size=100M), then run this command again. To go on anyway: TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = 'Free some space (Disk Cleanup, empty the recycle bin), then run this command again. To go on anyway: $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = 'Only {0} MB are free on {1} (about {2} MB are comfortable).'
+        'pr_disk_low_a' = 'Free some space or add disk space; the installation can go on.'
+        'pr_dns' = 'This machine cannot resolve the name {0} (DNS).'
+        'pr_dns_a' = 'Check the DNS servers (cat /etc/resolv.conf, resolvectl status), add a working one such as nameserver 9.9.9.9, then run this command again.'
+        'pr_dns_w_a' = 'Check the DNS servers with ''ipconfig /all'', set a working one (for example 9.9.9.9) in the network adapter settings, then run this command again.'
+        'pr_clock' = 'The clock of this machine is {0} seconds away from the Internet time: TLS certificates and signatures fail when the clock is wrong.'
+        'pr_clock_a' = 'Synchronise it: timedatectl set-ntp true (or chronyc makestep), check with timedatectl, then run this command again.'
+        'pr_clock_w_a' = 'Synchronise it: w32tm /resync (or Settings > Time and language > Sync now), then run this command again.'
+        'pr_ok' = 'Disk space, DNS and the clock are fine.'
     }
     'fr' = @{
         'tagline' = 'Protection des applications web et des API'
@@ -354,7 +423,13 @@ $script:Catalog = @{
         'st_latest' = 'Derni\u00e8re version disponible : {0}'
         'st_newer' = 'mise \u00e0 jour disponible : lancez avec --update'
         'e_yanked' = 'La version {0} a \u00e9t\u00e9 retir\u00e9e (yanked) et ne doit pas \u00eatre install\u00e9e. Lancez --update pour la version courante, ou --force pour passer outre.'
+        'e_nover' = 'Aucune version n''est encore publi\u00e9e sur le canal {0} : il n''y a rien \u00e0 installer. ToutWAF n''a \u00e9t\u00e9 ni install\u00e9 ni modifi\u00e9. Pour installer depuis le canal {1}, relancez l''installeur avec -Channel {2}.'
         'e_installer_old' = 'Cet installeur est trop ancien pour cette version (version {0} requise) : ret\u00e9l\u00e9chargez-le depuis l''URL du canal.'
+        'up_rebuilt' = 'M\u00eame version, nouvelle compilation : install\u00e9e {0}, disponible {1}. Mise \u00e0 jour en cours.'
+        'st_newbuild' = 'm\u00eame version, nouvelle compilation disponible : relancez avec {0}'
+        'st_nochannel' = 'Derni\u00e8re version disponible : rien n''est encore publi\u00e9 sur ce canal'
+        'w_mirror' = 'Le miroir public a servi des fichiers qui ne concordent pas ({0}) : il est probablement encore en cours de mise \u00e0 jour apr\u00e8s une publication. Nouvelle lecture du canal, une seule fois.'
+        'e_mismatch' = 'somme de contr\u00f4le incorrecte pour {0} ({1}) : le fichier t\u00e9l\u00e9charg\u00e9 ne correspond pas \u00e0 la somme publi\u00e9e, donc rien n''a \u00e9t\u00e9 install\u00e9 ni modifi\u00e9. Juste apr\u00e8s une publication, le miroir public peut servir les anciens fichiers pendant quelques minutes : attendez cinq minutes et relancez l''installeur. Si cela se reproduit, n''installez pas : la publication est endommag\u00e9e.'
         'e_downgrade' = 'La derni\u00e8re version {0} du canal {1} est plus ancienne que la version install\u00e9e {2} : utilisez --force pour r\u00e9trograder.'
         's_sigok' = 'signature de la version v\u00e9rifi\u00e9e, cl\u00e9 {0}'
         'w_sigold' = 'la version {0} a \u00e9t\u00e9 publi\u00e9e sans signature (les versions ant\u00e9rieures \u00e0 0.2.0-dev.7 ne sont pas sign\u00e9es) : seul le SHA-256 a \u00e9t\u00e9 v\u00e9rifi\u00e9, la signature n''a pas pu l''\u00eatre'
@@ -385,6 +460,20 @@ $script:Catalog = @{
         'sum_file' = 'R\u00e9capitulatif enregistr\u00e9 (root uniquement) : {0}'
         'sum_fallback' = 'Ce plan de contr\u00f4le n''a pas encore de commande ''bootstrap'' : ouvrez l''URL de la console et suivez la page de configuration.'
         'sum_node_hint' = 'Pour piloter ce n\u0153ud depuis la console : N\u0153uds > Ajouter un n\u0153ud, puis renseignez control_plane.url / enroll_token dans {0}.'
+        'q_fwmodule' = 'Voulez-vous aussi que ToutWAF g\u00e8re le pare-feu de cette machine ?'
+        'fwmod_n1' = 'Module optionnel, \u00e9teint sauf si vous r\u00e9pondez oui. Rien n''est appliqu\u00e9 pendant l''installation : vous relisez chaque changement dans la console.'
+        'fwmod_n2' = 'Chaque changement passe par un essai avec compte \u00e0 rebours et revient en arri\u00e8re tout seul si vous ne le gardez pas ; un garde-fou anti-lockout refuse toute r\u00e8gle qui couperait SSH ou la console.'
+        'fwmod_n3' = 'Ce n''est pas la question pr\u00e9c\u00e9dente, qui ouvre seulement les ports dont ToutWAF a besoin dans le pare-feu du syst\u00e8me (--no-firewall).'
+        's_fwmod' = 'Activation du module pare-feu (aucune r\u00e8gle appliqu\u00e9e)'
+        'fwmod_done' = 'Module pare-feu activ\u00e9. Rien n''a \u00e9t\u00e9 appliqu\u00e9 : ouvrez Pare-feu dans la console pour relire et essayer des r\u00e8gles.'
+        'fwmod_fail' = 'Impossible d''activer le module pare-feu ({0}). L''installation continue ; activez-le plus tard dans Param\u00e8tres > Modules.'
+        's_link' = 'Liaison du plan de donn\u00e9es \u00e0 la console'
+        'dp_link_ok' = 'Plan de donn\u00e9es li\u00e9 automatiquement \u00e0 la console : rien \u00e0 configurer \u00e0 la main.'
+        'dp_link_same' = 'Plan de donn\u00e9es d\u00e9j\u00e0 li\u00e9 \u00e0 la console ; sa configuration n''a pas \u00e9t\u00e9 modifi\u00e9e.'
+        'dp_link_fixed' = 'Configuration du plan de donn\u00e9es r\u00e9par\u00e9e (blocs control_plane en double fusionn\u00e9s en un seul) ; l''ancien fichier est conserv\u00e9.'
+        'dp_link_remote' = 'Le plan de donn\u00e9es de cette machine est configur\u00e9 pour une autre console ; il n''a pas \u00e9t\u00e9 modifi\u00e9.'
+        'dp_link_fail' = 'Le plan de donn\u00e9es n''a pas pu \u00eatre li\u00e9 automatiquement \u00e0 la console : {0}'
+        'dp_link_fail_hint' = 'Le plan de donn\u00e9es garde sa configuration autonome : les sites r\u00e9pondent HTTP 421 tant qu''il n''est pas li\u00e9. Corrigez la cause ci-dessus et relancez cet installateur : il lie le n\u0153ud tout seul.'
         'st_title' = '\u00c9tat'
         'st_healthy' = 'sain'
         'st_unhealthy' = 'NON sain'
@@ -441,6 +530,52 @@ $script:Catalog = @{
         'cp_r_arm32' = 'L''ARM 32 bits (armv7) n''est pas pris en charge par ToutWAF. Installez un syst\u00e8me 64 bits (Raspberry Pi OS 64 bits, Ubuntu ou Debian arm64 ; Raspberry Pi 3, 4, 5 ou Zero 2 W), puis relancez l''installateur.'
         'cp_r_arm_userland32' = 'Le noyau est 64 bits mais le syst\u00e8me (userland) est en 32 bits. ToutWAF exige un syst\u00e8me 64 bits : r\u00e9installez avec Raspberry Pi OS 64 bits (Raspberry Pi Imager : Raspberry Pi OS (64-bit)) ou Ubuntu / Debian arm64.'
         'cp_w_pi' = 'Raspberry Pi d\u00e9tect\u00e9 : l''arm64 n''a \u00e9t\u00e9 \u00e9prouv\u00e9 que sous \u00e9mulation, pas sur du mat\u00e9riel r\u00e9el. Placez donn\u00e9es et journaux sur un SSD / disque USB plut\u00f4t que sur la carte SD, et \u00e9vitez l''installation tout-en-un sous 2 Go de RAM (voir docs/install/raspberry-pi.md).'
+        'pf_title' = 'V\u00e9rification de ce dont cette machine a besoin'
+        'pf_ok' = 'Rien ne g\u00eane : les ports dont ToutWAF a besoin sont libres.'
+        'pf_refused' = 'ToutWAF ne peut pas \u00eatre install\u00e9 sur cette machine en l''\u00e9tat. Rien n''a \u00e9t\u00e9 modifi\u00e9.'
+        'pf_ok_warn' = 'Rien n''emp\u00eache l''installation, mais lisez les points ci-dessus.'
+        'pf_l_refuse' = 'refus\u00e9'
+        'pf_l_warn' = 'attention'
+        'pf_l_info' = '\u00e0 savoir'
+        'pf_port_busy' = 'Le port {0} est d\u00e9j\u00e0 utilis\u00e9 par {1}.'
+        'pf_prog_other' = 'un autre programme'
+        'pf_prog_unknown' = 'un autre programme (son nom n''a pas pu \u00eatre lu)'
+        'pf_act_web' = 'ToutWAF a besoin des ports {0} et {1} pour prot\u00e9ger vos sites. Arr\u00eatez ce programme ou d\u00e9placez-le sur d''autres ports (ToutPanel, install\u00e9 \u00e0 c\u00f4t\u00e9 de ToutWAF, place son serveur web sur 8080 et 8443), puis relancez l''installateur.'
+        'pf_act_console' = 'La console de ToutWAF a besoin de ce port. Lib\u00e9rez-le, ou choisissez un autre port pour la console (l''installateur le demande dans son menu), puis relancez l''installateur.'
+        'pf_act_agent' = 'ToutWAF utilise ce port pour les plans de donn\u00e9es et les agents qui s''y connectent. Lib\u00e9rez-le, puis relancez l''installateur.'
+        'pf_act_admin' = 'Le plan de donn\u00e9es utilise ce port sur cette machine seulement, pour son propre contr\u00f4le de sant\u00e9. Lib\u00e9rez-le, puis relancez l''installateur.'
+        'pf_nostart' = '(rien n''est d\u00e9marr\u00e9 maintenant, ce n''est donc que signal\u00e9)'
+        'pf_boot' = '{0} est install\u00e9 et d\u00e9marre avec la machine, bien qu''il soit arr\u00eat\u00e9 en ce moment. Au prochain red\u00e9marrage il prendrait les ports {1} et {2} avant ToutWAF.'
+        'pf_act_boot' = 'D\u00e9sactivez-le pour qu''il ne d\u00e9marre plus avec la machine, ou d\u00e9placez-le sur d''autres ports, avant le red\u00e9marrage de la machine.'
+        'pf_fw_cause' = 'Un pare-feu ({0}) est actif et ne laisse pas passer les ports {1} et {2}, et l''installateur a re\u00e7u l''ordre de ne pas le modifier.'
+        'pf_fw_action' = 'Ouvrez ces ports dans le pare-feu, ou laissez l''installateur le faire (sans l''option --no-firewall). Sinon, vos sites ne seront pas joignables de l''ext\u00e9rieur.'
+        'pf_fwx_cause' = 'Le pare-feu de cette machine ({0}) refuse les connexions entrantes par d\u00e9faut et n''a aucune r\u00e8gle pour les ports {1} et {2}.'
+        'pf_fwx_action' = 'ToutWAF ne modifie jamais lui-m\u00eame les r\u00e8gles de ce type de pare-feu : ouvrez ces ports dans sa configuration, puis v\u00e9rifiez vos sites.'
+        'pf_cp_cause' = 'Le plan de contr\u00f4le {0} est injoignable depuis cette machine.'
+        'pf_cp_action' = 'V\u00e9rifiez l''adresse, que le plan de contr\u00f4le fonctionne et que son pare-feu laisse cette machine l''atteindre (port 9444 par d\u00e9faut), puis relancez l''installateur.'
+        'pf_router_cause' = 'Cette machine a une adresse priv\u00e9e ({0}) : elle est probablement derri\u00e8re un routeur ou une box.'
+        'pf_router_action' = 'Une fois install\u00e9, ToutWAF indique les ports \u00e0 rediriger vers cette machine et fournit les fichiers pour les routeurs usuels. Il n''y a rien \u00e0 pr\u00e9parer maintenant.'
+        'pf_skipped' = 'La v\u00e9rification de l''environnement a \u00e9t\u00e9 saut\u00e9e \u00e0 votre demande : ce qui g\u00eane fera \u00e9chouer l''installation ou le d\u00e9marrage plus tard.'
+        's_sysupdate' = 'Mise \u00e0 jour des paquets syst\u00e8me (cela peut prendre plusieurs minutes)'
+        'su_skipped' = 'Les paquets syst\u00e8me ne sont pas mis \u00e0 jour au pr\u00e9alable (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = 'Les paquets syst\u00e8me ont \u00e9t\u00e9 mis \u00e0 jour il y a moins de 6 heures : pas de nouvelle mise \u00e0 jour.'
+        'su_dry' = 'les paquets syst\u00e8me seraient d''abord mis \u00e0 jour (\u00e0 \u00e9viter avec TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = 'Aucun gestionnaire de paquets pris en charge pour mettre le syst\u00e8me \u00e0 jour : \u00e9tape ignor\u00e9e, l''installation continue.'
+        'su_failed' = 'La mise \u00e0 jour des paquets syst\u00e8me a \u00e9chou\u00e9 (code {0}) ; l''installation continue sans elle. D\u00e9tails : {1}. Correction : lancez la mise \u00e0 jour vous-m\u00eame et lisez son erreur (d\u00e9p\u00f4t cass\u00e9 ? un autre gestionnaire de paquets en cours ?), ou relancez cette commande avec TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = 'Un red\u00e9marrage de ce serveur est n\u00e9cessaire pour terminer la mise \u00e0 jour du syst\u00e8me (nouveau noyau ou nouvelles biblioth\u00e8ques). ToutWAF ne le red\u00e9marre jamais \u00e0 votre place : faites-le d\u00e8s que possible.'
+        'q_sysupdate' = 'Mettre d''abord \u00e0 jour les paquets syst\u00e8me (recommand\u00e9) ?'
+        'pr_disk_full' = 'Seulement {0} Mo sont libres sur {1} (il en faut au moins {2} Mo) : l''installation ne pourrait pas se terminer.'
+        'pr_disk_full_a' = 'Lib\u00e9rez de la place (cache des paquets : apt-get clean ou dnf clean all ; anciens journaux : journalctl --vacuum-size=100M), puis relancez cette commande. Pour continuer malgr\u00e9 tout : TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = 'Lib\u00e9rez de la place (Nettoyage de disque, vidage de la corbeille), puis relancez cette commande. Pour continuer malgr\u00e9 tout : $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = 'Seulement {0} Mo sont libres sur {1} (environ {2} Mo sont confortables).'
+        'pr_disk_low_a' = 'Lib\u00e9rez de la place ou ajoutez du disque ; l''installation peut continuer.'
+        'pr_dns' = 'Cette machine ne parvient pas \u00e0 r\u00e9soudre le nom {0} (DNS).'
+        'pr_dns_a' = 'V\u00e9rifiez les serveurs DNS (cat /etc/resolv.conf, resolvectl status), ajoutez-en un qui fonctionne, par exemple nameserver 9.9.9.9, puis relancez cette commande.'
+        'pr_dns_w_a' = 'V\u00e9rifiez les serveurs DNS avec ''ipconfig /all'', indiquez-en un qui fonctionne (par exemple 9.9.9.9) dans les param\u00e8tres de la carte r\u00e9seau, puis relancez cette commande.'
+        'pr_clock' = 'L''horloge de cette machine est d\u00e9cal\u00e9e de {0} secondes par rapport \u00e0 l''heure d''Internet : les certificats TLS et les signatures \u00e9chouent quand l''horloge est fausse.'
+        'pr_clock_a' = 'Synchronisez-la : timedatectl set-ntp true (ou chronyc makestep), v\u00e9rifiez avec timedatectl, puis relancez cette commande.'
+        'pr_clock_w_a' = 'Synchronisez-la : w32tm /resync (ou Param\u00e8tres > Heure et langue > Synchroniser maintenant), puis relancez cette commande.'
+        'pr_ok' = 'L''espace disque, le DNS et l''horloge sont en ordre.'
     }
     'es' = @{
         'tagline' = 'Protecci\u00f3n de aplicaciones web y API'
@@ -516,7 +651,13 @@ $script:Catalog = @{
         'st_latest' = '\u00daltima versi\u00f3n disponible: {0}'
         'st_newer' = 'actualizaci\u00f3n disponible: ejecute con --update'
         'e_yanked' = 'La versi\u00f3n {0} fue retirada (yanked) y no debe instalarse. Ejecute --update para la versi\u00f3n actual, o --force para ignorarlo.'
+        'e_nover' = 'Todav\u00eda no hay ninguna versi\u00f3n publicada en el canal {0}, as\u00ed que no hay nada que instalar. ToutWAF no se ha instalado ni modificado. Para instalar desde el canal {1}, vuelva a ejecutar el instalador con -Channel {2}.'
         'e_installer_old' = 'Este instalador es demasiado antiguo para esta versi\u00f3n (requiere la versi\u00f3n {0}): desc\u00e1rguelo de nuevo desde la URL del canal.'
+        'up_rebuilt' = 'Misma versi\u00f3n, nueva compilaci\u00f3n: instalada {0}, disponible {1}. Actualizando.'
+        'st_newbuild' = 'misma versi\u00f3n, nueva compilaci\u00f3n disponible: ejecute de nuevo con {0}'
+        'st_nochannel' = '\u00daltima versi\u00f3n disponible: todav\u00eda no hay nada publicado en este canal'
+        'w_mirror' = 'El espejo p\u00fablico ha servido archivos que no concuerdan entre s\u00ed ({0}): probablemente a\u00fan se est\u00e1 actualizando tras una publicaci\u00f3n. Se lee el canal de nuevo, una sola vez.'
+        'e_mismatch' = 'suma de comprobaci\u00f3n incorrecta para {0} ({1}): el archivo descargado no coincide con la suma publicada, por lo que no se ha instalado ni modificado nada. Justo despu\u00e9s de una publicaci\u00f3n, el espejo p\u00fablico puede servir los archivos anteriores durante unos minutos: espere cinco minutos y vuelva a ejecutar el instalador. Si se repite, no instale: la publicaci\u00f3n est\u00e1 da\u00f1ada.'
         'e_downgrade' = 'La \u00faltima versi\u00f3n {0} del canal {1} es anterior a la instalada {2}: use --force para degradar.'
         's_sigok' = 'firma de la versi\u00f3n verificada, clave {0}'
         'w_sigold' = 'la versi\u00f3n {0} se public\u00f3 sin firma (las anteriores a 0.2.0-dev.7 no est\u00e1n firmadas): solo se verific\u00f3 el SHA-256, no se pudo comprobar la firma'
@@ -547,6 +688,20 @@ $script:Catalog = @{
         'sum_file' = 'Resumen guardado (solo root): {0}'
         'sum_fallback' = 'Este plano de control a\u00fan no tiene el comando ''bootstrap'': abra la URL de la consola y siga la p\u00e1gina de configuraci\u00f3n.'
         'sum_node_hint' = 'Para gestionar este nodo desde la consola: Nodos > Agregar nodo y configure control_plane.url / enroll_token en {0}.'
+        'q_fwmodule' = '\u00bfQuiere que ToutWAF gestione tambi\u00e9n el cortafuegos de esta m\u00e1quina?'
+        'fwmod_n1' = 'M\u00f3dulo opcional, apagado salvo que diga s\u00ed. No se aplica nada durante la instalaci\u00f3n: revisa cada cambio en la consola.'
+        'fwmod_n2' = 'Cada cambio se prueba con cuenta atr\u00e1s y se revierte solo si no lo conserva; una protecci\u00f3n anti-bloqueo rechaza toda regla que cortar\u00eda SSH o la consola.'
+        'fwmod_n3' = 'No es la pregunta anterior, que solo abre los puertos que ToutWAF necesita en el cortafuegos del sistema (--no-firewall).'
+        's_fwmod' = 'Activando el m\u00f3dulo de cortafuegos (ninguna regla aplicada)'
+        'fwmod_done' = 'M\u00f3dulo de cortafuegos activado. No se aplic\u00f3 nada: abra Cortafuegos en la consola para revisar y probar reglas.'
+        'fwmod_fail' = 'No se pudo activar el m\u00f3dulo de cortafuegos ({0}). La instalaci\u00f3n contin\u00faa; act\u00edvelo despu\u00e9s en Ajustes > M\u00f3dulos.'
+        's_link' = 'Vinculando el plano de datos a la consola'
+        'dp_link_ok' = 'Plano de datos vinculado autom\u00e1ticamente a la consola: nada que configurar a mano.'
+        'dp_link_same' = 'El plano de datos ya est\u00e1 vinculado a la consola; su configuraci\u00f3n no se modific\u00f3.'
+        'dp_link_fixed' = 'Configuraci\u00f3n del plano de datos reparada (bloques control_plane duplicados fusionados en uno); se conserv\u00f3 el archivo anterior.'
+        'dp_link_remote' = 'El plano de datos de esta m\u00e1quina est\u00e1 configurado para otra consola; no se modific\u00f3.'
+        'dp_link_fail' = 'No se pudo vincular autom\u00e1ticamente el plano de datos a la consola: {0}'
+        'dp_link_fail_hint' = 'El plano de datos conserva su configuraci\u00f3n aut\u00f3noma, por lo que los sitios responden HTTP 421 hasta que se vincule. Corrija la causa indicada y vuelva a ejecutar este instalador: vincula el nodo por s\u00ed solo.'
         'st_title' = 'Estado'
         'st_healthy' = 'sano'
         'st_unhealthy' = 'NO sano'
@@ -603,6 +758,52 @@ $script:Catalog = @{
         'cp_r_arm32' = 'ARM de 32 bits (armv7) no es compatible con ToutWAF. Instale un sistema de 64 bits (Raspberry Pi OS 64 bits, Ubuntu o Debian arm64; Raspberry Pi 3, 4, 5 o Zero 2 W) y vuelva a ejecutar el instalador.'
         'cp_r_arm_userland32' = 'El kernel es de 64 bits pero el sistema (userland) es de 32 bits. ToutWAF necesita un sistema de 64 bits: reinstale con Raspberry Pi OS 64 bits (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) o Ubuntu / Debian arm64.'
         'cp_w_pi' = 'Raspberry Pi detectada: arm64 solo se ha probado bajo emulaci\u00f3n, no en hardware real. Ponga datos y registros en un SSD / disco USB en lugar de la tarjeta SD y evite la instalaci\u00f3n todo en uno con menos de 2 GB de RAM (vea docs/install/raspberry-pi.md).'
+        'pf_title' = 'Comprobando lo que necesita esta m\u00e1quina'
+        'pf_ok' = 'Nada estorba: los puertos que necesita ToutWAF est\u00e1n libres.'
+        'pf_refused' = 'ToutWAF no se puede instalar en esta m\u00e1quina tal como est\u00e1. No se ha cambiado nada.'
+        'pf_ok_warn' = 'Nada impide la instalaci\u00f3n, pero lea los puntos anteriores.'
+        'pf_l_refuse' = 'rechazado'
+        'pf_l_warn' = 'atenci\u00f3n'
+        'pf_l_info' = 'nota'
+        'pf_port_busy' = 'El puerto {0} ya lo usa {1}.'
+        'pf_prog_other' = 'otro programa'
+        'pf_prog_unknown' = 'otro programa (no se pudo leer su nombre)'
+        'pf_act_web' = 'ToutWAF necesita los puertos {0} y {1} para proteger sus sitios. Detenga ese programa o mu\u00e9valo a otros puertos (ToutPanel, instalado junto a ToutWAF, coloca su servidor web en 8080 y 8443) y vuelva a ejecutar el instalador.'
+        'pf_act_console' = 'La consola de ToutWAF necesita este puerto. Lib\u00e9relo o elija otro puerto para la consola (el instalador lo pregunta en su men\u00fa) y vuelva a ejecutar el instalador.'
+        'pf_act_agent' = 'ToutWAF usa este puerto para los planos de datos y los agentes que se conectan a \u00e9l. Lib\u00e9relo y vuelva a ejecutar el instalador.'
+        'pf_act_admin' = 'El plano de datos usa este puerto solo en esta m\u00e1quina, para su propia comprobaci\u00f3n de estado. Lib\u00e9relo y vuelva a ejecutar el instalador.'
+        'pf_nostart' = '(ahora no se inicia nada, as\u00ed que solo se informa)'
+        'pf_boot' = '{0} est\u00e1 instalado y arranca con la m\u00e1quina, aunque ahora est\u00e9 detenido. En el pr\u00f3ximo reinicio ocupar\u00eda los puertos {1} y {2} antes que ToutWAF.'
+        'pf_act_boot' = 'Desact\u00edvelo para que no arranque con la m\u00e1quina, o mu\u00e9valo a otros puertos, antes de reiniciar la m\u00e1quina.'
+        'pf_fw_cause' = 'Hay un cortafuegos ({0}) activo que no deja pasar los puertos {1} y {2}, y se ha indicado al instalador que no lo modifique.'
+        'pf_fw_action' = 'Abra esos puertos en el cortafuegos o deje que lo haga el instalador (sin la opci\u00f3n --no-firewall). Si no, sus sitios no ser\u00e1n accesibles desde el exterior.'
+        'pf_fwx_cause' = 'El cortafuegos de esta m\u00e1quina ({0}) rechaza las conexiones entrantes por defecto y no tiene ninguna regla para los puertos {1} y {2}.'
+        'pf_fwx_action' = 'ToutWAF nunca modifica por s\u00ed mismo las reglas de este tipo de cortafuegos: abra esos puertos en su configuraci\u00f3n y compruebe sus sitios.'
+        'pf_cp_cause' = 'No se puede alcanzar el plano de control {0} desde esta m\u00e1quina.'
+        'pf_cp_action' = 'Compruebe la direcci\u00f3n, que el plano de control funciona y que su cortafuegos deja que esta m\u00e1quina lo alcance (puerto 9444 por defecto) y vuelva a ejecutar el instalador.'
+        'pf_router_cause' = 'Esta m\u00e1quina tiene una direcci\u00f3n privada ({0}): probablemente est\u00e1 detr\u00e1s de un router.'
+        'pf_router_action' = 'Una vez instalado, ToutWAF indica qu\u00e9 puertos redirigir a esta m\u00e1quina y proporciona los archivos para los routers habituales. No hay nada que preparar ahora.'
+        'pf_skipped' = 'Se omiti\u00f3 la comprobaci\u00f3n del entorno como pidi\u00f3: lo que estorbe har\u00e1 fallar la instalaci\u00f3n o el arranque m\u00e1s adelante.'
+        's_sysupdate' = 'Actualizando los paquetes del sistema (puede tardar varios minutos)'
+        'su_skipped' = 'Los paquetes del sistema no se actualizan antes (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = 'Los paquetes del sistema se actualizaron hace menos de 6 horas: no se repite.'
+        'su_dry' = 'los paquetes del sistema se actualizar\u00edan primero (se omite con TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = 'No hay un gestor de paquetes compatible para actualizar el sistema: se omite y la instalaci\u00f3n contin\u00faa.'
+        'su_failed' = 'La actualizaci\u00f3n de los paquetes del sistema ha fallado (c\u00f3digo {0}); la instalaci\u00f3n contin\u00faa sin ella. Detalles: {1}. Soluci\u00f3n: ejecute usted mismo la actualizaci\u00f3n y lea su error (\u00bfrepositorio roto? \u00bfotro gestor de paquetes en ejecuci\u00f3n?), o vuelva a ejecutar este comando con TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = 'Hace falta reiniciar este servidor para terminar la actualizaci\u00f3n del sistema (nuevo kernel o bibliotecas). ToutWAF nunca lo reinicia por usted: h\u00e1galo cuando pueda.'
+        'q_sysupdate' = '\u00bfActualizar primero los paquetes del sistema (recomendado)?'
+        'pr_disk_full' = 'Solo quedan {0} MB libres en {1} (se necesitan al menos {2} MB): la instalaci\u00f3n no podr\u00eda terminar.'
+        'pr_disk_full_a' = 'Libere espacio (cach\u00e9 de paquetes: apt-get clean o dnf clean all; registros antiguos: journalctl --vacuum-size=100M) y vuelva a ejecutar este comando. Para continuar de todos modos: TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = 'Libere espacio (Liberador de espacio en disco, vaciar la papelera) y vuelva a ejecutar este comando. Para continuar de todos modos: $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = 'Solo quedan {0} MB libres en {1} (unos {2} MB son lo c\u00f3modo).'
+        'pr_disk_low_a' = 'Libere espacio o a\u00f1ada disco; la instalaci\u00f3n puede continuar.'
+        'pr_dns' = 'Esta m\u00e1quina no puede resolver el nombre {0} (DNS).'
+        'pr_dns_a' = 'Compruebe los servidores DNS (cat /etc/resolv.conf, resolvectl status), a\u00f1ada uno que funcione, por ejemplo nameserver 9.9.9.9, y vuelva a ejecutar este comando.'
+        'pr_dns_w_a' = 'Compruebe los servidores DNS con ''ipconfig /all'', indique uno que funcione (por ejemplo 9.9.9.9) en la configuraci\u00f3n del adaptador de red y vuelva a ejecutar este comando.'
+        'pr_clock' = 'El reloj de esta m\u00e1quina est\u00e1 desfasado {0} segundos respecto a la hora de Internet: los certificados TLS y las firmas fallan cuando el reloj es incorrecto.'
+        'pr_clock_a' = 'Sincron\u00edcelo: timedatectl set-ntp true (o chronyc makestep), compruebe con timedatectl y vuelva a ejecutar este comando.'
+        'pr_clock_w_a' = 'Sincron\u00edcelo: w32tm /resync (o Configuraci\u00f3n > Hora e idioma > Sincronizar ahora) y vuelva a ejecutar este comando.'
+        'pr_ok' = 'El espacio en disco, el DNS y el reloj est\u00e1n en orden.'
     }
     'de' = @{
         'tagline' = 'Schutz f\u00fcr Webanwendungen und APIs'
@@ -671,14 +872,20 @@ $script:Catalog = @{
         's_start' = 'Dienste starten'
         's_health' = 'Warten auf gesunde Dienste'
         's_backup' = 'Konfiguration und Daten sichern'
-        'w_rollback' = 'Die neue Version ist nicht gesund: R\u00fcckkehr zur vorherigen'
+        'w_rollback' = 'Die neue Version arbeitet nicht fehlerfrei: R\u00fcckkehr zur vorherigen'
         'up_to_date' = 'Bereits aktuell ({0})'
         'not_installed' = 'ToutWAF ist nicht installiert: nichts zu aktualisieren.'
         'st_channel' = 'Kanal: {0}'
         'st_latest' = 'Neueste verf\u00fcgbare Version: {0}'
         'st_newer' = 'Update verf\u00fcgbar: mit --update ausf\u00fchren'
         'e_yanked' = 'Version {0} wurde zur\u00fcckgezogen (yanked) und darf nicht installiert werden. Mit --update die aktuelle Version holen, oder --force zum \u00dcbergehen.'
+        'e_nover' = 'Auf dem Kanal {0} ist noch keine Version ver\u00f6ffentlicht, es gibt also nichts zu installieren. ToutWAF wurde weder installiert noch ver\u00e4ndert. Um vom Kanal {1} zu installieren, starten Sie das Installationsprogramm erneut mit -Channel {2}.'
         'e_installer_old' = 'Dieses Installationsprogramm ist f\u00fcr diese Version zu alt (ben\u00f6tigt Version {0}): erneut von der Kanal-URL laden.'
+        'up_rebuilt' = 'Gleiche Version, neuer Build: installiert {0}, verf\u00fcgbar {1}. Aktualisierung l\u00e4uft.'
+        'st_newbuild' = 'gleiche Version, neuer Build verf\u00fcgbar: erneut mit {0} ausf\u00fchren'
+        'st_nochannel' = 'Neueste verf\u00fcgbare Version: in diesem Kanal ist noch nichts ver\u00f6ffentlicht'
+        'w_mirror' = 'Der \u00f6ffentliche Spiegel hat Dateien geliefert, die nicht zusammenpassen ({0}): vermutlich wird er nach einer Ver\u00f6ffentlichung noch aktualisiert. Der Kanal wird einmal neu gelesen.'
+        'e_mismatch' = 'Pr\u00fcfsumme stimmt nicht f\u00fcr {0} ({1}): Die heruntergeladene Datei passt nicht zur ver\u00f6ffentlichten Pr\u00fcfsumme, daher wurde nichts installiert oder ge\u00e4ndert. Direkt nach einer Ver\u00f6ffentlichung kann der \u00f6ffentliche Spiegel einige Minuten lang die vorherigen Dateien liefern: Warten Sie f\u00fcnf Minuten und starten Sie das Installationsprogramm erneut. Tritt es erneut auf, installieren Sie nicht: Die Ver\u00f6ffentlichung ist besch\u00e4digt.'
         'e_downgrade' = 'Die neueste Version {0} des Kanals {1} ist \u00e4lter als die installierte {2}: --force zum Downgrade.'
         's_sigok' = 'Release-Signatur gepr\u00fcft, Schl\u00fcssel {0}'
         'w_sigold' = 'Version {0} wurde ohne Signatur ver\u00f6ffentlicht (Versionen vor 0.2.0-dev.7 sind unsigniert): nur SHA-256 wurde gepr\u00fcft, die Signatur konnte nicht gepr\u00fcft werden'
@@ -709,6 +916,20 @@ $script:Catalog = @{
         'sum_file' = 'Zusammenfassung gespeichert (nur root): {0}'
         'sum_fallback' = 'Diese Control Plane hat noch kein ''bootstrap''-Kommando: \u00f6ffnen Sie die Konsolen-URL und folgen Sie der Einrichtungsseite.'
         'sum_node_hint' = 'Um diesen Knoten \u00fcber die Konsole zu verwalten: Knoten > Knoten hinzuf\u00fcgen, dann control_plane.url / enroll_token in {0} setzen.'
+        'q_fwmodule' = 'Soll ToutWAF auch die Firewall dieses Rechners verwalten?'
+        'fwmod_n1' = 'Optionales Modul, aus, au\u00dfer Sie sagen ja. W\u00e4hrend der Installation wird nichts angewendet: Sie pr\u00fcfen jede \u00c4nderung in der Konsole.'
+        'fwmod_n2' = 'Jede \u00c4nderung l\u00e4uft als Test mit Countdown und wird von selbst zur\u00fcckgenommen, wenn Sie sie nicht behalten; ein Aussperrschutz lehnt jede Regel ab, die SSH oder die Konsole kappen w\u00fcrde.'
+        'fwmod_n3' = 'Das ist nicht die Frage davor, die nur die von ToutWAF ben\u00f6tigten Ports in der System-Firewall \u00f6ffnet (--no-firewall).'
+        's_fwmod' = 'Firewall-Modul wird aktiviert (keine Regel angewendet)'
+        'fwmod_done' = 'Firewall-Modul aktiviert. Es wurde nichts angewendet: \u00d6ffnen Sie Firewall in der Konsole, um Regeln zu pr\u00fcfen und zu testen.'
+        'fwmod_fail' = 'Das Firewall-Modul konnte nicht aktiviert werden ({0}). Die Installation l\u00e4uft weiter; aktivieren Sie es sp\u00e4ter unter Einstellungen > Module.'
+        's_link' = 'Data Plane wird mit der Konsole verbunden'
+        'dp_link_ok' = 'Data Plane automatisch mit der Konsole verbunden: nichts von Hand zu konfigurieren.'
+        'dp_link_same' = 'Data Plane bereits mit der Konsole verbunden; die Konfiguration blieb unver\u00e4ndert.'
+        'dp_link_fixed' = 'Data-Plane-Konfiguration repariert (doppelte control_plane-Bl\u00f6cke zu einem zusammengef\u00fchrt); die vorherige Datei blieb erhalten.'
+        'dp_link_remote' = 'Die Data Plane dieses Rechners ist f\u00fcr eine andere Konsole konfiguriert und blieb unver\u00e4ndert.'
+        'dp_link_fail' = 'Die Data Plane konnte nicht automatisch mit der Konsole verbunden werden: {0}'
+        'dp_link_fail_hint' = 'Die Data Plane beh\u00e4lt ihre eigenst\u00e4ndige Konfiguration; Sites antworten mit HTTP 421, bis sie verbunden ist. Beheben Sie die oben genannte Ursache und starten Sie diesen Installer erneut: Er verbindet den Knoten selbst.'
         'st_title' = 'Status'
         'st_healthy' = 'gesund'
         'st_unhealthy' = 'NICHT gesund'
@@ -765,6 +986,52 @@ $script:Catalog = @{
         'cp_r_arm32' = '32-Bit-ARM (armv7) wird von ToutWAF nicht unterst\u00fctzt. Installieren Sie ein 64-Bit-System (Raspberry Pi OS 64 Bit, Ubuntu oder Debian arm64; Raspberry Pi 3, 4, 5 oder Zero 2 W) und starten Sie den Installer erneut.'
         'cp_r_arm_userland32' = 'Der Kernel ist 64-Bit, das System (Userland) aber 32-Bit. ToutWAF ben\u00f6tigt ein 64-Bit-System: Installieren Sie Raspberry Pi OS 64 Bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) oder Ubuntu / Debian arm64 neu.'
         'cp_w_pi' = 'Raspberry Pi erkannt: arm64 wurde nur unter Emulation getestet, nicht auf echter Hardware. Legen Sie Daten und Logs auf eine SSD / ein USB-Laufwerk statt auf die SD-Karte und vermeiden Sie die All-in-one-Installation unter 2 GB RAM (siehe docs/install/raspberry-pi.md).'
+        'pf_title' = 'Pr\u00fcfung dessen, was dieser Rechner braucht'
+        'pf_ok' = 'Nichts steht im Weg: Die Ports, die ToutWAF braucht, sind frei.'
+        'pf_refused' = 'ToutWAF kann auf diesem Rechner so nicht installiert werden. Es wurde nichts ge\u00e4ndert.'
+        'pf_ok_warn' = 'Nichts verhindert die Installation, aber lesen Sie die Punkte oben.'
+        'pf_l_refuse' = 'abgelehnt'
+        'pf_l_warn' = 'Hinweis'
+        'pf_l_info' = 'Info'
+        'pf_port_busy' = 'Port {0} wird bereits von {1} verwendet.'
+        'pf_prog_other' = 'ein anderes Programm'
+        'pf_prog_unknown' = 'ein anderes Programm (sein Name konnte nicht gelesen werden)'
+        'pf_act_web' = 'ToutWAF braucht die Ports {0} und {1}, um Ihre Sites zu sch\u00fctzen. Beenden Sie dieses Programm oder verlegen Sie es auf andere Ports (ToutPanel, neben ToutWAF installiert, legt seinen Webserver auf 8080 und 8443) und starten Sie den Installer erneut.'
+        'pf_act_console' = 'Die Konsole von ToutWAF braucht diesen Port. Geben Sie ihn frei oder w\u00e4hlen Sie einen anderen Konsolen-Port (der Installer fragt in seinem Men\u00fc danach) und starten Sie den Installer erneut.'
+        'pf_act_agent' = 'ToutWAF nutzt diesen Port f\u00fcr die Data Planes und Agenten, die sich damit verbinden. Geben Sie ihn frei und starten Sie den Installer erneut.'
+        'pf_act_admin' = 'Die Data Plane nutzt diesen Port nur auf diesem Rechner, f\u00fcr ihre eigene Zustandspr\u00fcfung. Geben Sie ihn frei und starten Sie den Installer erneut.'
+        'pf_nostart' = '(es wird jetzt nichts gestartet, daher nur ein Hinweis)'
+        'pf_boot' = '{0} ist installiert und startet mit dem Rechner, obwohl es gerade gestoppt ist. Beim n\u00e4chsten Neustart w\u00fcrde es die Ports {1} und {2} vor ToutWAF belegen.'
+        'pf_act_boot' = 'Deaktivieren Sie den Autostart oder verlegen Sie es auf andere Ports, bevor der Rechner neu startet.'
+        'pf_fw_cause' = 'Eine Firewall ({0}) ist aktiv und l\u00e4sst die Ports {1} und {2} nicht durch, und der Installer soll sie nicht \u00e4ndern.'
+        'pf_fw_action' = '\u00d6ffnen Sie diese Ports in der Firewall oder lassen Sie den Installer es tun (ohne die Option --no-firewall). Sonst sind Ihre Sites von au\u00dfen nicht erreichbar.'
+        'pf_fwx_cause' = 'Die Firewall dieses Rechners ({0}) lehnt eingehende Verbindungen standardm\u00e4\u00dfig ab und hat keine Regel f\u00fcr die Ports {1} und {2}.'
+        'pf_fwx_action' = 'ToutWAF \u00e4ndert die Regeln dieser Art von Firewall nie selbst: \u00d6ffnen Sie diese Ports in deren Konfiguration und pr\u00fcfen Sie dann Ihre Sites.'
+        'pf_cp_cause' = 'Die Control Plane {0} ist von diesem Rechner aus nicht erreichbar.'
+        'pf_cp_action' = 'Pr\u00fcfen Sie die Adresse, ob die Control Plane l\u00e4uft und ob deren Firewall diesen Rechner durchl\u00e4sst (standardm\u00e4\u00dfig Port 9444), und starten Sie den Installer erneut.'
+        'pf_router_cause' = 'Dieser Rechner hat eine private Adresse ({0}): Er steht wahrscheinlich hinter einem Router.'
+        'pf_router_action' = 'Nach der Installation zeigt ToutWAF, welche Ports an diesen Rechner weitergeleitet werden m\u00fcssen, und liefert die Dateien f\u00fcr g\u00e4ngige Router. Jetzt ist nichts vorzubereiten.'
+        'pf_skipped' = 'Die Umgebungspr\u00fcfung wurde auf Ihren Wunsch \u00fcbersprungen: Was im Weg steht, l\u00e4sst die Installation oder den Start sp\u00e4ter scheitern.'
+        's_sysupdate' = 'Systempakete werden aktualisiert (das kann einige Minuten dauern)'
+        'su_skipped' = 'Die Systempakete werden nicht vorher aktualisiert (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = 'Die Systempakete wurden vor weniger als 6 Stunden aktualisiert: keine Wiederholung.'
+        'su_dry' = 'die Systempakete w\u00fcrden zuerst aktualisiert (\u00fcberspringen mit TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = 'Kein unterst\u00fctzter Paketmanager f\u00fcr die Systemaktualisierung: \u00fcbersprungen, die Installation l\u00e4uft weiter.'
+        'su_failed' = 'Die Aktualisierung der Systempakete ist fehlgeschlagen (Code {0}); die Installation l\u00e4uft ohne sie weiter. Details: {1}. Abhilfe: F\u00fchren Sie die Aktualisierung selbst aus und lesen Sie die Fehlermeldung (defektes Repository? l\u00e4uft ein anderer Paketmanager?), oder starten Sie diesen Befehl erneut mit TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = 'Zum Abschluss der Systemaktualisierung ist ein Neustart dieses Servers n\u00f6tig (neuer Kernel oder neue Bibliotheken). ToutWAF startet ihn nie f\u00fcr Sie neu: Tun Sie es, wenn es passt.'
+        'q_sysupdate' = 'Zuerst die Systempakete aktualisieren (empfohlen)?'
+        'pr_disk_full' = 'Nur {0} MB sind frei auf {1} (mindestens {2} MB werden ben\u00f6tigt): Die Installation k\u00f6nnte nicht abgeschlossen werden.'
+        'pr_disk_full_a' = 'Schaffen Sie Platz (Paket-Cache: apt-get clean oder dnf clean all; alte Logs: journalctl --vacuum-size=100M) und f\u00fchren Sie diesen Befehl erneut aus. Trotzdem fortfahren: TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = 'Schaffen Sie Platz (Datentr\u00e4gerbereinigung, Papierkorb leeren) und f\u00fchren Sie diesen Befehl erneut aus. Trotzdem fortfahren: $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = 'Nur {0} MB sind frei auf {1} (etwa {2} MB sind komfortabel).'
+        'pr_disk_low_a' = 'Schaffen Sie Platz oder f\u00fcgen Sie Speicher hinzu; die Installation kann weiterlaufen.'
+        'pr_dns' = 'Dieser Rechner kann den Namen {0} nicht aufl\u00f6sen (DNS).'
+        'pr_dns_a' = 'Pr\u00fcfen Sie die DNS-Server (cat /etc/resolv.conf, resolvectl status), tragen Sie einen funktionierenden ein, z. B. nameserver 9.9.9.9, und f\u00fchren Sie diesen Befehl erneut aus.'
+        'pr_dns_w_a' = 'Pr\u00fcfen Sie die DNS-Server mit ''ipconfig /all'', tragen Sie in den Einstellungen des Netzwerkadapters einen funktionierenden ein (z. B. 9.9.9.9) und f\u00fchren Sie diesen Befehl erneut aus.'
+        'pr_clock' = 'Die Uhr dieses Rechners weicht um {0} Sekunden von der Internetzeit ab: TLS-Zertifikate und Signaturen schlagen fehl, wenn die Uhr falsch geht.'
+        'pr_clock_a' = 'Synchronisieren Sie sie: timedatectl set-ntp true (oder chronyc makestep), pr\u00fcfen Sie mit timedatectl und f\u00fchren Sie diesen Befehl erneut aus.'
+        'pr_clock_w_a' = 'Synchronisieren Sie sie: w32tm /resync (oder Einstellungen > Zeit und Sprache > Jetzt synchronisieren) und f\u00fchren Sie diesen Befehl erneut aus.'
+        'pr_ok' = 'Speicherplatz, DNS und Uhr sind in Ordnung.'
     }
     'it' = @{
         'tagline' = 'Protezione di applicazioni web e API'
@@ -833,14 +1100,20 @@ $script:Catalog = @{
         's_start' = 'Avvio dei servizi'
         's_health' = 'Attesa dei servizi in salute'
         's_backup' = 'Backup di configurazione e dati'
-        'w_rollback' = 'La nuova versione non \u00e8 sana: ritorno alla precedente'
+        'w_rollback' = 'La nuova versione non funziona correttamente: ritorno alla precedente'
         'up_to_date' = 'Gi\u00e0 aggiornato ({0})'
         'not_installed' = 'ToutWAF non \u00e8 installato: niente da aggiornare.'
         'st_channel' = 'Canale: {0}'
         'st_latest' = 'Ultima versione disponibile: {0}'
         'st_newer' = 'aggiornamento disponibile: esegui con --update'
         'e_yanked' = 'La versione {0} \u00e8 stata ritirata (yanked) e non va installata. Esegui --update per la versione corrente, o --force per forzare.'
+        'e_nover' = 'Sul canale {0} non \u00e8 ancora pubblicata nessuna versione, quindi non c''\u00e8 nulla da installare. ToutWAF non \u00e8 stato installato n\u00e9 modificato. Per installare dal canale {1}, rilancia l''installer con -Channel {2}.'
         'e_installer_old' = 'Questo installer \u00e8 troppo vecchio per questa versione (richiede la versione {0}): scaricalo di nuovo dall''URL del canale.'
+        'up_rebuilt' = 'Stessa versione, nuova build: installata {0}, disponibile {1}. Aggiornamento in corso.'
+        'st_newbuild' = 'stessa versione, nuova build disponibile: esegui di nuovo con {0}'
+        'st_nochannel' = 'Ultima versione disponibile: su questo canale non \u00e8 ancora stato pubblicato nulla'
+        'w_mirror' = 'Il mirror pubblico ha servito file che non concordano tra loro ({0}): probabilmente si sta ancora aggiornando dopo una pubblicazione. Rileggo il canale, una sola volta.'
+        'e_mismatch' = 'checksum non corrispondente per {0} ({1}): il file scaricato non corrisponde al checksum pubblicato, quindi non \u00e8 stato installato n\u00e9 modificato nulla. Subito dopo una pubblicazione il mirror pubblico pu\u00f2 servire per qualche minuto i file precedenti: attendi cinque minuti e rilancia l''installer. Se si ripete, non installare: la pubblicazione \u00e8 danneggiata.'
         'e_downgrade' = 'L''ultima versione {0} del canale {1} \u00e8 pi\u00f9 vecchia di quella installata {2}: usa --force per il downgrade.'
         's_sigok' = 'firma della release verificata, chiave {0}'
         'w_sigold' = 'la versione {0} \u00e8 stata pubblicata senza firma (le versioni precedenti a 0.2.0-dev.7 non sono firmate): \u00e8 stato verificato solo lo SHA-256, la firma non ha potuto essere controllata'
@@ -871,9 +1144,23 @@ $script:Catalog = @{
         'sum_file' = 'Riepilogo salvato (solo root): {0}'
         'sum_fallback' = 'Questo control plane non ha ancora il comando ''bootstrap'': apri l''URL della console e segui la pagina di configurazione.'
         'sum_node_hint' = 'Per gestire questo nodo dalla console: Nodi > Aggiungi nodo, poi imposta control_plane.url / enroll_token in {0}.'
+        'q_fwmodule' = 'Vuoi che ToutWAF gestisca anche il firewall di questa macchina?'
+        'fwmod_n1' = 'Modulo opzionale, spento salvo risposta affermativa. Durante l''installazione non viene applicato nulla: ogni modifica si rivede nella console.'
+        'fwmod_n2' = 'Ogni modifica passa da una prova con conto alla rovescia e torna indietro da sola se non la conservi; una protezione anti-lockout rifiuta ogni regola che taglierebbe SSH o la console.'
+        'fwmod_n3' = 'Non \u00e8 la domanda precedente, che apre solo le porte necessarie a ToutWAF nel firewall di sistema (--no-firewall).'
+        's_fwmod' = 'Attivazione del modulo firewall (nessuna regola applicata)'
+        'fwmod_done' = 'Modulo firewall attivato. Non \u00e8 stato applicato nulla: apri Firewall nella console per rivedere e provare le regole.'
+        'fwmod_fail' = 'Impossibile attivare il modulo firewall ({0}). L''installazione prosegue; attivalo pi\u00f9 tardi in Impostazioni > Moduli.'
+        's_link' = 'Collegamento del data plane alla console'
+        'dp_link_ok' = 'Data plane collegato automaticamente alla console: nulla da configurare a mano.'
+        'dp_link_same' = 'Data plane gi\u00e0 collegato alla console; la sua configurazione non \u00e8 stata modificata.'
+        'dp_link_fixed' = 'Configurazione del data plane riparata (blocchi control_plane duplicati uniti in uno); il file precedente \u00e8 stato conservato.'
+        'dp_link_remote' = 'Il data plane di questa macchina \u00e8 configurato per un''altra console; non \u00e8 stato modificato.'
+        'dp_link_fail' = 'Non \u00e8 stato possibile collegare automaticamente il data plane alla console: {0}'
+        'dp_link_fail_hint' = 'Il data plane mantiene la configurazione autonoma, quindi i siti rispondono HTTP 421 finch\u00e9 non \u00e8 collegato. Correggi la causa indicata sopra ed esegui di nuovo questo installer: collega il nodo da solo.'
         'st_title' = 'Stato'
-        'st_healthy' = 'in salute'
-        'st_unhealthy' = 'NON in salute'
+        'st_healthy' = 'funzionante'
+        'st_unhealthy' = 'NON funzionante'
         'st_active' = 'attivo'
         'st_inactive' = 'inattivo'
         'st_listening' = 'in ascolto'
@@ -927,38 +1214,84 @@ $script:Catalog = @{
         'cp_r_arm32' = 'ARM a 32 bit (armv7) non \u00e8 supportato da ToutWAF. Installare un sistema a 64 bit (Raspberry Pi OS 64 bit, Ubuntu o Debian arm64; Raspberry Pi 3, 4, 5 o Zero 2 W) e rilanciare l''installer.'
         'cp_r_arm_userland32' = 'Il kernel \u00e8 a 64 bit ma il sistema (userland) \u00e8 a 32 bit. ToutWAF richiede un sistema a 64 bit: reinstallare con Raspberry Pi OS 64 bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) o Ubuntu / Debian arm64.'
         'cp_w_pi' = 'Raspberry Pi rilevato: arm64 \u00e8 stato provato solo in emulazione, non su hardware reale. Mettere dati e log su un SSD / disco USB invece che sulla scheda SD ed evitare l''installazione tutto-in-uno sotto 2 GB di RAM (vedere docs/install/raspberry-pi.md).'
+        'pf_title' = 'Verifica di ci\u00f2 di cui ha bisogno questa macchina'
+        'pf_ok' = 'Nulla \u00e8 d''intralcio: le porte di cui ha bisogno ToutWAF sono libere.'
+        'pf_refused' = 'ToutWAF non pu\u00f2 essere installato su questa macchina cos\u00ec com''\u00e8. Non \u00e8 stato modificato nulla.'
+        'pf_ok_warn' = 'Nulla impedisce l''installazione, ma leggi i punti qui sopra.'
+        'pf_l_refuse' = 'rifiutato'
+        'pf_l_warn' = 'attenzione'
+        'pf_l_info' = 'nota'
+        'pf_port_busy' = 'La porta {0} \u00e8 gi\u00e0 usata da {1}.'
+        'pf_prog_other' = 'un altro programma'
+        'pf_prog_unknown' = 'un altro programma (il suo nome non \u00e8 leggibile)'
+        'pf_act_web' = 'ToutWAF ha bisogno delle porte {0} e {1} per proteggere i tuoi siti. Ferma quel programma o spostalo su altre porte (ToutPanel, installato accanto a ToutWAF, mette il suo server web su 8080 e 8443), poi rilancia l''installer.'
+        'pf_act_console' = 'La console di ToutWAF ha bisogno di questa porta. Liberala oppure scegli un''altra porta per la console (l''installer la chiede nel suo menu), poi rilancia l''installer.'
+        'pf_act_agent' = 'ToutWAF usa questa porta per i data plane e gli agenti che vi si collegano. Liberala, poi rilancia l''installer.'
+        'pf_act_admin' = 'Il data plane usa questa porta solo su questa macchina, per il proprio controllo di stato. Liberala, poi rilancia l''installer.'
+        'pf_nostart' = '(ora non viene avviato nulla, quindi \u00e8 solo una segnalazione)'
+        'pf_boot' = '{0} \u00e8 installato e parte con la macchina, anche se ora \u00e8 fermo. Al prossimo riavvio occuperebbe le porte {1} e {2} prima di ToutWAF.'
+        'pf_act_boot' = 'Disattivalo perch\u00e9 non parta con la macchina, oppure spostalo su altre porte, prima del riavvio della macchina.'
+        'pf_fw_cause' = 'Un firewall ({0}) \u00e8 attivo e non lascia passare le porte {1} e {2}, e all''installer \u00e8 stato detto di non modificarlo.'
+        'pf_fw_action' = 'Apri queste porte nel firewall oppure lascia che lo faccia l''installer (senza l''opzione --no-firewall). Altrimenti i tuoi siti non saranno raggiungibili dall''esterno.'
+        'pf_fwx_cause' = 'Il firewall di questa macchina ({0}) rifiuta le connessioni in ingresso per impostazione predefinita e non ha regole per le porte {1} e {2}.'
+        'pf_fwx_action' = 'ToutWAF non modifica mai da solo le regole di questo tipo di firewall: apri queste porte nella sua configurazione, poi controlla i tuoi siti.'
+        'pf_cp_cause' = 'Il control plane {0} non \u00e8 raggiungibile da questa macchina.'
+        'pf_cp_action' = 'Verifica l''indirizzo, che il control plane sia in funzione e che il suo firewall lasci raggiungerlo da questa macchina (porta 9444 per impostazione predefinita), poi rilancia l''installer.'
+        'pf_router_cause' = 'Questa macchina ha un indirizzo privato ({0}): probabilmente \u00e8 dietro un router.'
+        'pf_router_action' = 'Una volta installato, ToutWAF indica quali porte inoltrare a questa macchina e fornisce i file per i router pi\u00f9 comuni. Non c''\u00e8 nulla da preparare ora.'
+        'pf_skipped' = 'La verifica dell''ambiente \u00e8 stata saltata come richiesto: ci\u00f2 che \u00e8 d''intralcio far\u00e0 fallire pi\u00f9 tardi l''installazione o l''avvio.'
+        's_sysupdate' = 'Aggiornamento dei pacchetti di sistema (pu\u00f2 richiedere qualche minuto)'
+        'su_skipped' = 'I pacchetti di sistema non vengono aggiornati prima (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = 'I pacchetti di sistema sono stati aggiornati meno di 6 ore fa: non si ripete.'
+        'su_dry' = 'i pacchetti di sistema verrebbero aggiornati per primi (si salta con TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = 'Nessun gestore di pacchetti supportato per aggiornare il sistema: saltato, l''installazione continua.'
+        'su_failed' = 'L''aggiornamento dei pacchetti di sistema non \u00e8 riuscito (codice {0}); l''installazione continua senza. Dettagli: {1}. Soluzione: esegui tu l''aggiornamento e leggi l''errore (repository guasto? un altro gestore di pacchetti in esecuzione?), oppure rilancia questo comando con TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = 'Serve riavviare questo server per completare l''aggiornamento del sistema (nuovo kernel o librerie). ToutWAF non lo riavvia mai al posto tuo: fallo quando puoi.'
+        'q_sysupdate' = 'Aggiornare prima i pacchetti di sistema (consigliato)?'
+        'pr_disk_full' = 'Solo {0} MB liberi su {1} (ne servono almeno {2} MB): l''installazione non potrebbe concludersi.'
+        'pr_disk_full_a' = 'Libera spazio (cache dei pacchetti: apt-get clean o dnf clean all; vecchi log: journalctl --vacuum-size=100M), poi rilancia questo comando. Per proseguire comunque: TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = 'Libera spazio (Pulizia disco, svuota il cestino), poi rilancia questo comando. Per proseguire comunque: $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = 'Solo {0} MB liberi su {1} (circa {2} MB sono comodi).'
+        'pr_disk_low_a' = 'Libera spazio o aggiungi disco; l''installazione pu\u00f2 proseguire.'
+        'pr_dns' = 'Questa macchina non riesce a risolvere il nome {0} (DNS).'
+        'pr_dns_a' = 'Controlla i server DNS (cat /etc/resolv.conf, resolvectl status), aggiungine uno funzionante, ad esempio nameserver 9.9.9.9, poi rilancia questo comando.'
+        'pr_dns_w_a' = 'Controlla i server DNS con ''ipconfig /all'', imposta un server funzionante (ad esempio 9.9.9.9) nelle impostazioni della scheda di rete, poi rilancia questo comando.'
+        'pr_clock' = 'L''orologio di questa macchina \u00e8 sfasato di {0} secondi rispetto all''ora di Internet: certificati TLS e firme falliscono se l''orologio \u00e8 sbagliato.'
+        'pr_clock_a' = 'Sincronizzalo: timedatectl set-ntp true (o chronyc makestep), verifica con timedatectl, poi rilancia questo comando.'
+        'pr_clock_w_a' = 'Sincronizzalo: w32tm /resync (oppure Impostazioni > Ora e lingua > Sincronizza ora), poi rilancia questo comando.'
+        'pr_ok' = 'Spazio su disco, DNS e orologio sono a posto.'
     }
     'pt' = @{
         'tagline' = 'Prote\u00e7\u00e3o de aplica\u00e7\u00f5es web e APIs'
         'menu_title' = 'O que deseja fazer?'
-        'opt_install' = 'Instalar (plano de controle + plano de dados + console)'
-        'opt_install_d' = 'Tudo nesta m\u00e1quina: console web, reposit\u00f3rio de pol\u00edticas e proxy reverso / WAF.'
-        'opt_cp' = 'Instalar apenas o plano de controle'
+        'opt_install' = 'Instalar (plano de controlo + plano de dados + consola)'
+        'opt_install_d' = 'Tudo nesta m\u00e1quina: consola web, reposit\u00f3rio de pol\u00edticas e proxy reverso / WAF.'
+        'opt_cp' = 'Instalar apenas o plano de controlo'
         'opt_cp_d' = 'Console web, API e reposit\u00f3rio de pol\u00edticas. Os planos de dados (n\u00f3s) aderem depois.'
         'opt_dp' = 'Instalar apenas um plano de dados'
-        'opt_dp_d' = 'N\u00f3 de proxy reverso / WAF que se junta a um plano de controle existente (pede a URL e um token de inscri\u00e7\u00e3o).'
+        'opt_dp_d' = 'N\u00f3 de proxy reverso / WAF que se junta a um plano de controlo existente (pede a URL e um token de inscri\u00e7\u00e3o).'
         'opt_update' = 'Atualizar'
-        'opt_update_d' = 'Baixa uma vers\u00e3o mais recente, verifica (SHA-256 / sigstore), faz c\u00f3pia, mant\u00e9m configura\u00e7\u00e3o e dados e reverte em caso de falha.'
+        'opt_update_d' = 'Transfere uma vers\u00e3o mais recente, verifica-a (SHA-256 / sigstore), faz uma c\u00f3pia de seguran\u00e7a, mant\u00e9m configura\u00e7\u00e3o e dados e reverte em caso de falha.'
         'opt_uninstall' = 'Desinstalar'
-        'opt_uninstall_d' = 'Remove o ToutWAF; voc\u00ea escolhe manter ou apagar configura\u00e7\u00e3o, dados e logs.'
+        'opt_uninstall_d' = 'Remove o ToutWAF; escolhe se mant\u00e9m ou apaga a configura\u00e7\u00e3o, os dados e os logs.'
         'opt_status' = 'Estado e verifica\u00e7\u00e3o de integridade'
         'opt_status_d' = 'Vers\u00f5es instaladas, servi\u00e7os, portas em escuta e endpoints de sa\u00fade.'
-        'opt_links' = 'Mostrar novamente os links do painel'
-        'opt_links_d' = 'URLs do painel, link de configura\u00e7\u00e3o de uso \u00fanico e portas a abrir no firewall.'
+        'opt_links' = 'Mostrar novamente as liga\u00e7\u00f5es do painel'
+        'opt_links_d' = 'URLs do painel, liga\u00e7\u00e3o de configura\u00e7\u00e3o de utiliza\u00e7\u00e3o \u00fanica e portas a abrir na firewall.'
         'opt_quit' = 'Sair'
-        'choice' = 'Sua escolha'
+        'choice' = 'A sua escolha'
         'invalid_choice' = 'Escolha inv\u00e1lida.'
         'state_installed' = 'Instalado: {0}'
         'state_none' = 'O ToutWAF n\u00e3o est\u00e1 instalado nesta m\u00e1quina.'
         'cfg_title' = 'Op\u00e7\u00f5es de instala\u00e7\u00e3o (Enter = padr\u00e3o)'
-        'q_cp_url' = 'URL do plano de controle (ex. https://cp.example.com:9444)'
-        'q_token' = 'Token de inscri\u00e7\u00e3o (console: N\u00f3s > Adicionar n\u00f3)'
-        'q_cp_ca' = 'Arquivo PEM da CA / certificado do plano de controle (vazio = reposit\u00f3rio do sistema)'
-        'q_cp_port' = 'Porta da console'
+        'q_cp_url' = 'URL do plano de controlo (ex. https://cp.example.com:9444)'
+        'q_token' = 'Token de inscri\u00e7\u00e3o (consola: N\u00f3s > Adicionar n\u00f3)'
+        'q_cp_ca' = 'Ficheiro PEM da CA / certificado do plano de controlo (vazio = reposit\u00f3rio do sistema)'
+        'q_cp_port' = 'Porta da consola'
         'q_http_port' = 'Porta HTTP'
         'q_https_port' = 'Porta HTTPS'
         'q_public_host' = 'Nome de host ou IP p\u00fablico (vazio = dete\u00e7\u00e3o autom\u00e1tica)'
-        'q_firewall' = 'Abrir o firewall automaticamente (firewalld / ufw)?'
+        'q_firewall' = 'Abrir a firewall automaticamente (firewalld / ufw)?'
         'q_boot' = 'Iniciar os servi\u00e7os no arranque?'
         'q_channel' = 'Canal de lan\u00e7amento (stable / dev)'
         'q_bindir' = 'Diret\u00f3rio de instala\u00e7\u00e3o'
@@ -967,42 +1300,48 @@ $script:Catalog = @{
         'q_confirm_un' = 'Desinstalar mesmo o ToutWAF?'
         'aborted' = 'Cancelado.'
         'root_required' = 'Execute como root (sudo bash install.sh).'
-        's_prereq' = 'Instalando pr\u00e9-requisitos'
-        's_fetch' = 'Baixando o ToutWAF {0} ({1})'
+        's_prereq' = 'A instalar pr\u00e9-requisitos'
+        's_fetch' = 'A transferir o ToutWAF {0} ({1})'
         's_sha' = 'SHA-256 verificado'
         's_sig' = 'Assinatura cosign verificada'
         'w_nocosign' = 'cosign n\u00e3o instalado: assinatura n\u00e3o verificada (apenas checksum)'
-        's_user' = 'Criando a conta de servi\u00e7o e os diret\u00f3rios'
-        's_bin' = 'Instalando bin\u00e1rios'
-        's_cfg' = 'Gravando a configura\u00e7\u00e3o (arquivos existentes s\u00e3o mantidos)'
-        's_units' = 'Instalando unidades systemd e ajustes do sistema'
-        's_selinux' = 'Configurando o SELinux'
-        'q_console_from' = 'Permitir apenas esta rede na console (CIDR, ex. 203.0.113.0/24; vazio = qualquer um)'
-        'q_console_from_bad' = 'N\u00e3o \u00e9 um endere\u00e7o nem um CIDR (0.0.0.0/0 equivale a vazio): a porta da console fica aberta a todos.'
-        'fw_console_note' = 'A console (porta {0}) cont\u00e9m o login de administra\u00e7\u00e3o: abri-la a toda a Internet \u00e9 c\u00f4modo, mas exposto.'
-        'fw_console_open' = 'A porta {0} da console est\u00e1 aberta a todos: restrinja com --console-from CIDR ou na console (Configura\u00e7\u00f5es > Firewall)'
-        'fw_console_from' = 'A porta {0} da console est\u00e1 aberta apenas a {1}'
-        'fw_none' = 'Nenhum firewall ativo (firewalld / ufw / nftables / iptables): nada filtra o tr\u00e1fego, nenhuma porta a abrir'
-        'fw_manual' = 'O firewall {0} n\u00e3o \u00e9 modificado pelo instalador: execute voc\u00ea mesmo estes comandos'
-        'fw_failed' = 'N\u00e3o foi poss\u00edvel configurar o firewall: {0}'
+        's_user' = 'A criar a conta de servi\u00e7o e os diret\u00f3rios'
+        's_bin' = 'A instalar bin\u00e1rios'
+        's_cfg' = 'A gravar a configura\u00e7\u00e3o (os ficheiros existentes s\u00e3o mantidos)'
+        's_units' = 'A instalar unidades systemd e ajustes do sistema'
+        's_selinux' = 'A configurar o SELinux'
+        'q_console_from' = 'Permitir apenas esta rede na consola (CIDR, ex. 203.0.113.0/24; vazio = qualquer um)'
+        'q_console_from_bad' = 'N\u00e3o \u00e9 um endere\u00e7o nem um CIDR (0.0.0.0/0 equivale a vazio): a porta da consola fica aberta a todos.'
+        'fw_console_note' = 'A consola (porta {0}) cont\u00e9m o in\u00edcio de sess\u00e3o de administra\u00e7\u00e3o: abri-la a toda a Internet \u00e9 c\u00f3modo, mas exposto.'
+        'fw_console_open' = 'A porta {0} da consola est\u00e1 aberta a todos: restrinja com --console-from CIDR ou na consola (Defini\u00e7\u00f5es > Firewall)'
+        'fw_console_from' = 'A porta {0} da consola est\u00e1 aberta apenas a {1}'
+        'fw_none' = 'Nenhuma firewall ativa (firewalld / ufw / nftables / iptables): nada filtra o tr\u00e1fego, nenhuma porta a abrir'
+        'fw_manual' = 'A firewall {0} n\u00e3o \u00e9 modificada pelo instalador: execute estes comandos por si'
+        'fw_failed' = 'N\u00e3o foi poss\u00edvel configurar a firewall: {0}'
         'home_fresh' = 'Nova instala\u00e7\u00e3o: tudo fica em {0} (bin, conf, data, logs)'
-        'home_legacy' = 'Instala\u00e7\u00e3o existente detectada: os caminhos s\u00e3o mantidos (bin {0}, conf {1}, data {2}). Nada \u00e9 movido; use --home DIR para o novo layout.'
+        'home_legacy' = 'Instala\u00e7\u00e3o existente detetada: os caminhos s\u00e3o mantidos (bin {0}, conf {1}, data {2}). Nada \u00e9 movido; use --home DIR para o novo layout.'
         'home_explicit_legacy' = '--home {0} foi informado enquanto existe uma instala\u00e7\u00e3o em {1}: os dados dela N\u00c3O s\u00e3o movidos'
         'home_bad' = '--home deve ser um caminho absoluto (letras, d\u00edgitos, . _ - + /), n\u00e3o / nem sob /proc /sys /dev: {0}'
-        'home_noexec' = '{0} est\u00e1 em uma montagem noexec: os bin\u00e1rios n\u00e3o poderiam executar ali, escolha outro --home'
-        's_fw' = 'Configurando o firewall'
-        's_boot' = 'Preparando o painel (conta de administrador, caminho seguro)'
-        's_start' = 'Iniciando os servi\u00e7os'
-        's_health' = 'Aguardando os servi\u00e7os ficarem saud\u00e1veis'
+        'home_noexec' = '{0} est\u00e1 numa montagem noexec: os bin\u00e1rios n\u00e3o poderiam executar ali, escolha outro --home'
+        's_fw' = 'A configurar a firewall'
+        's_boot' = 'A preparar o painel (conta de administrador, caminho seguro)'
+        's_start' = 'A iniciar os servi\u00e7os'
+        's_health' = 'A aguardar que os servi\u00e7os fiquem saud\u00e1veis'
         's_backup' = 'C\u00f3pia de seguran\u00e7a de configura\u00e7\u00e3o e dados'
-        'w_rollback' = 'A nova vers\u00e3o n\u00e3o est\u00e1 saud\u00e1vel: voltando \u00e0 anterior'
+        'w_rollback' = 'A nova vers\u00e3o n\u00e3o est\u00e1 saud\u00e1vel: a voltar \u00e0 anterior'
         'up_to_date' = 'J\u00e1 est\u00e1 atualizado ({0})'
         'not_installed' = 'O ToutWAF n\u00e3o est\u00e1 instalado: nada a atualizar.'
         'st_channel' = 'Canal: {0}'
         'st_latest' = '\u00daltima vers\u00e3o dispon\u00edvel: {0}'
         'st_newer' = 'atualiza\u00e7\u00e3o dispon\u00edvel: execute com --update'
         'e_yanked' = 'A vers\u00e3o {0} foi retirada (yanked) e n\u00e3o deve ser instalada. Execute --update para a vers\u00e3o atual, ou --force para ignorar.'
+        'e_nover' = 'Ainda n\u00e3o h\u00e1 nenhuma vers\u00e3o publicada no canal {0}, por isso n\u00e3o h\u00e1 nada para instalar. O ToutWAF n\u00e3o foi instalado nem alterado. Para instalar a partir do canal {1}, execute o instalador de novo com -Channel {2}.'
         'e_installer_old' = 'Este instalador \u00e9 demasiado antigo para esta vers\u00e3o (requer a vers\u00e3o {0}): transfira-o novamente a partir do URL do canal.'
+        'up_rebuilt' = 'Mesma vers\u00e3o, nova compila\u00e7\u00e3o: instalada {0}, dispon\u00edvel {1}. A atualizar.'
+        'st_newbuild' = 'mesma vers\u00e3o, nova compila\u00e7\u00e3o dispon\u00edvel: execute novamente com {0}'
+        'st_nochannel' = '\u00daltima vers\u00e3o dispon\u00edvel: ainda n\u00e3o h\u00e1 nada publicado neste canal'
+        'w_mirror' = 'O espelho p\u00fablico serviu ficheiros que n\u00e3o concordam entre si ({0}): provavelmente ainda est\u00e1 a atualizar ap\u00f3s uma publica\u00e7\u00e3o. A ler o canal de novo, uma \u00fanica vez.'
+        'e_mismatch' = 'soma de verifica\u00e7\u00e3o incorreta para {0} ({1}): o ficheiro transferido n\u00e3o corresponde \u00e0 soma publicada, por isso nada foi instalado nem alterado. Logo ap\u00f3s uma publica\u00e7\u00e3o, o espelho p\u00fablico pode servir os ficheiros anteriores durante alguns minutos: aguarde cinco minutos e execute o instalador de novo. Se se repetir, n\u00e3o instale: a publica\u00e7\u00e3o est\u00e1 danificada.'
         'e_downgrade' = 'A \u00faltima vers\u00e3o {0} do canal {1} \u00e9 mais antiga do que a instalada {2}: use --force para reverter.'
         's_sigok' = 'assinatura da vers\u00e3o verificada, chave {0}'
         'w_sigold' = 'a vers\u00e3o {0} foi publicada sem assinatura (as anteriores a 0.2.0-dev.7 n\u00e3o s\u00e3o assinadas): s\u00f3 o SHA-256 foi verificado, a assinatura n\u00e3o p\u00f4de ser conferida'
@@ -1012,7 +1351,7 @@ $script:Catalog = @{
         'log_hint' = 'Registo completo: {0}'
         'dry_done' = 'Simula\u00e7\u00e3o: nada foi alterado.'
         'sum_title' = 'Resumo da instala\u00e7\u00e3o'
-        'sum_panel' = 'Links do painel'
+        'sum_panel' = 'Liga\u00e7\u00f5es do painel'
         'sum_tls_note' = 'Apenas HTTPS. O certificado \u00e9 autoassinado at\u00e9 instalar o seu: o navegador mostrar\u00e1 um aviso.'
         'sum_local' = 'Endere\u00e7os locais'
         'sum_public' = 'Endere\u00e7o p\u00fablico'
@@ -1022,17 +1361,31 @@ $script:Catalog = @{
         'sum_password' = 'Palavra-passe'
         'sum_pw_once' = 'mostrada apenas UMA vez - altere em Defini\u00e7\u00f5es > Acesso / Conta'
         'sum_pw_unchanged' = 'inalterada (nunca regenerada). Reponha com: toutwaf-cp admin reset-password --user {0}'
-        'sum_setup' = 'Link de configura\u00e7\u00e3o de uso \u00fanico'
-        'sum_setup_note' = 'Abra-o para configurar o link do painel, a conta e a palavra-passe no assistente web.'
+        'sum_setup' = 'Liga\u00e7\u00e3o de configura\u00e7\u00e3o de utiliza\u00e7\u00e3o \u00fanica'
+        'sum_setup_note' = 'Abra-a para configurar a liga\u00e7\u00e3o do painel, a conta e a palavra-passe no assistente web.'
         'p_dpapi_warn' = 'A porta 9444 (API do data plane) N\u00c3O est\u00e1 aberta: permita-a apenas a partir dos seus n\u00f3s data plane'
         'p_dpapi_only' = '9444/tcp apenas a partir dos seus data planes, ex.:'
-        'sum_setup_none' = 'Sem link de configura\u00e7\u00e3o desta vez (j\u00e1 emitido, ou a conta j\u00e1 existia). Crie um com: toutwaf-cp setup-link --regenerate'
-        'sum_ports' = 'Portas a abrir no firewall'
+        'sum_setup_none' = 'Sem liga\u00e7\u00e3o de configura\u00e7\u00e3o desta vez (j\u00e1 emitida, ou a conta j\u00e1 existia). Crie uma com: toutwaf-cp setup-link --regenerate'
+        'sum_ports' = 'Portas a abrir na firewall'
         'sum_cmds' = 'Comandos'
         'sum_cloud' = 'Cloud / alojamento: abra tamb\u00e9m estas portas no grupo de seguran\u00e7a / ACL de rede do fornecedor.'
         'sum_file' = 'Resumo guardado (apenas root): {0}'
-        'sum_fallback' = 'Este plano de controle ainda n\u00e3o tem o comando ''bootstrap'': abra a URL da console e siga a p\u00e1gina de configura\u00e7\u00e3o.'
-        'sum_node_hint' = 'Para gerir este n\u00f3 a partir da console: N\u00f3s > Adicionar n\u00f3 e defina control_plane.url / enroll_token em {0}.'
+        'sum_fallback' = 'Este plano de controlo ainda n\u00e3o tem o comando ''bootstrap'': abra a URL da consola e siga a p\u00e1gina de configura\u00e7\u00e3o.'
+        'sum_node_hint' = 'Para gerir este n\u00f3 a partir da consola: N\u00f3s > Adicionar n\u00f3 e defina control_plane.url / enroll_token em {0}.'
+        'q_fwmodule' = 'Quer que o ToutWAF tamb\u00e9m fa\u00e7a a gest\u00e3o da firewall desta m\u00e1quina?'
+        'fwmod_n1' = 'M\u00f3dulo opcional, desligado salvo se disser que sim. Nada \u00e9 aplicado durante a instala\u00e7\u00e3o: rev\u00ea cada altera\u00e7\u00e3o na consola.'
+        'fwmod_n2' = 'Cada altera\u00e7\u00e3o passa por um ensaio com contagem decrescente e volta atr\u00e1s sozinha se n\u00e3o a mantiver; uma prote\u00e7\u00e3o anti-bloqueio recusa qualquer regra que cortaria o SSH ou a consola.'
+        'fwmod_n3' = 'N\u00e3o \u00e9 a pergunta anterior, que apenas abre as portas de que o ToutWAF precisa na firewall do sistema (--no-firewall).'
+        's_fwmod' = 'A ativar o m\u00f3dulo de firewall (nenhuma regra aplicada)'
+        'fwmod_done' = 'M\u00f3dulo de firewall ativado. Nada foi aplicado: abra Firewall na consola para rever e testar regras.'
+        'fwmod_fail' = 'N\u00e3o foi poss\u00edvel ativar o m\u00f3dulo de firewall ({0}). A instala\u00e7\u00e3o continua; ative-o depois em Defini\u00e7\u00f5es > M\u00f3dulos.'
+        's_link' = 'A ligar o plano de dados \u00e0 consola'
+        'dp_link_ok' = 'Plano de dados ligado automaticamente \u00e0 consola: nada a configurar \u00e0 m\u00e3o.'
+        'dp_link_same' = 'O plano de dados j\u00e1 est\u00e1 ligado \u00e0 consola; a configura\u00e7\u00e3o n\u00e3o foi alterada.'
+        'dp_link_fixed' = 'Configura\u00e7\u00e3o do plano de dados reparada (blocos control_plane duplicados fundidos num s\u00f3); o ficheiro anterior foi mantido.'
+        'dp_link_remote' = 'O plano de dados desta m\u00e1quina est\u00e1 configurado para outra consola; n\u00e3o foi alterado.'
+        'dp_link_fail' = 'N\u00e3o foi poss\u00edvel ligar automaticamente o plano de dados \u00e0 consola: {0}'
+        'dp_link_fail_hint' = 'O plano de dados mant\u00e9m a configura\u00e7\u00e3o aut\u00f3noma, por isso os sites respondem HTTP 421 at\u00e9 ser ligado. Corrija a causa acima e execute novamente este instalador: liga o n\u00f3 sozinho.'
         'st_title' = 'Estado'
         'st_healthy' = 'saud\u00e1vel'
         'st_unhealthy' = 'N\u00c3O saud\u00e1vel'
@@ -1040,26 +1393,26 @@ $script:Catalog = @{
         'st_inactive' = 'inativo'
         'st_listening' = 'a escutar'
         'st_closed' = 'n\u00e3o escuta'
-        'un_title' = 'Desinstalando o ToutWAF'
+        'un_title' = 'A desinstalar o ToutWAF'
         'un_kept' = 'Configura\u00e7\u00e3o mantida em {0}, dados em {1} (use --purge para apagar).'
         'un_purged' = 'Configura\u00e7\u00e3o, dados e logs apagados.'
-        'p_console' = 'console web + API'
+        'p_console' = 'consola web + API'
         'p_http' = 'HTTP (proxy reverso)'
         'p_https' = 'HTTPS (proxy reverso)'
         'p_dpapi' = 'API dos planos de dados: APENAS se houver planos de dados noutros hosts (limite aos seus IPs)'
         'w_fw_manual' = 'A porta {0}/tcp n\u00e3o foi aberta automaticamente: veja os comandos no resumo.'
-        'need_cp' = '\u00c9 necess\u00e1ria a URL de um plano de controle quando se indica um token de inscri\u00e7\u00e3o.'
+        'need_cp' = '\u00c9 necess\u00e1ria a URL de um plano de controlo quando se indica um token de inscri\u00e7\u00e3o.'
         'cp_title' = 'Compatibilidade do sistema'
         'cp_detected' = 'Detetado: {0}, arq. {1}, glibc {2}, systemd {3}, kernel {4}'
         'cp_ok' = 'Compat\u00edvel: {0} ({1})'
         'cp_tested' = 'testado'
         'cp_expected' = 'esperado'
-        'cp_w_like' = '{0} n\u00e3o consta da tabela de compatibilidade: tratado como a fam\u00edlia {1} (esperado). Continuando.'
-        'cp_w_newer' = '{0} {1} \u00e9 mais recente do que as vers\u00f5es listadas: ainda n\u00e3o validado (esperado). Continuando.'
-        'cp_w_unlisted' = '{0} {1} n\u00e3o consta da tabela: tratado como esperado. Continuando.'
-        'cp_w_nover' = '{0} n\u00e3o declara vers\u00e3o (rolling ou testing): tratado como esperado. Continuando.'
+        'cp_w_like' = '{0} n\u00e3o consta da tabela de compatibilidade: tratado como a fam\u00edlia {1} (esperado). A continuar.'
+        'cp_w_newer' = '{0} {1} \u00e9 mais recente do que as vers\u00f5es listadas: ainda n\u00e3o validado (esperado). A continuar.'
+        'cp_w_unlisted' = '{0} {1} n\u00e3o consta da tabela: tratado como esperado. A continuar.'
+        'cp_w_nover' = '{0} n\u00e3o declara vers\u00e3o (rolling ou testing): tratado como esperado. A continuar.'
         'cp_w_glibc' = 'N\u00e3o foi poss\u00edvel determinar a vers\u00e3o da glibc; continuando.'
-        'cp_w_skip' = '--skip-os-check: a verifica\u00e7\u00e3o de compatibilidade foi ignorada. Este sistema N\u00c3O \u00e9 suportado: continuando por sua conta e risco.'
+        'cp_w_skip' = '--skip-os-check: a verifica\u00e7\u00e3o de compatibilidade foi ignorada. Este sistema N\u00c3O \u00e9 suportado: a continuar por sua conta e risco.'
         'cp_w_stage' = 'Staging (--destdir): o veredito de compatibilidade \u00e9 apenas informativo, nada \u00e9 recusado.'
         'cp_refused' = 'Este sistema n\u00e3o \u00e9 compat\u00edvel com o ToutWAF:'
         'cp_r_old' = '{0} {1} \u00e9 mais antigo do que a vers\u00e3o m\u00ednima suportada ({2}).'
@@ -1089,6 +1442,52 @@ $script:Catalog = @{
         'cp_r_arm32' = 'ARM de 32 bits (armv7) n\u00e3o \u00e9 suportado pelo ToutWAF. Instale um sistema de 64 bits (Raspberry Pi OS 64 bits, Ubuntu ou Debian arm64; Raspberry Pi 3, 4, 5 ou Zero 2 W) e execute o instalador novamente.'
         'cp_r_arm_userland32' = 'O kernel \u00e9 de 64 bits mas o sistema (userland) \u00e9 de 32 bits. O ToutWAF precisa de um sistema de 64 bits: reinstale com Raspberry Pi OS 64 bits (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) ou Ubuntu / Debian arm64.'
         'cp_w_pi' = 'Raspberry Pi detetado: o arm64 s\u00f3 foi testado em emula\u00e7\u00e3o, n\u00e3o em hardware real. Coloque dados e registos num SSD / disco USB em vez do cart\u00e3o SD e evite a instala\u00e7\u00e3o tudo-em-um com menos de 2 GB de RAM (ver docs/install/raspberry-pi.md).'
+        'pf_title' = 'A verificar o que esta m\u00e1quina precisa'
+        'pf_ok' = 'Nada est\u00e1 no caminho: as portas de que o ToutWAF precisa est\u00e3o livres.'
+        'pf_refused' = 'O ToutWAF n\u00e3o pode ser instalado nesta m\u00e1quina como est\u00e1. Nada foi alterado.'
+        'pf_ok_warn' = 'Nada impede a instala\u00e7\u00e3o, mas leia os pontos acima.'
+        'pf_l_refuse' = 'recusado'
+        'pf_l_warn' = 'aten\u00e7\u00e3o'
+        'pf_l_info' = 'nota'
+        'pf_port_busy' = 'A porta {0} j\u00e1 \u00e9 usada por {1}.'
+        'pf_prog_other' = 'outro programa'
+        'pf_prog_unknown' = 'outro programa (n\u00e3o foi poss\u00edvel ler o nome)'
+        'pf_act_web' = 'O ToutWAF precisa das portas {0} e {1} para proteger os seus sites. Pare esse programa ou mova-o para outras portas (o ToutPanel, instalado ao lado do ToutWAF, coloca o seu servidor web em 8080 e 8443) e volte a executar o instalador.'
+        'pf_act_console' = 'A consola do ToutWAF precisa desta porta. Liberte-a ou escolha outra porta para a consola (o instalador pergunta no seu menu) e volte a executar o instalador.'
+        'pf_act_agent' = 'O ToutWAF usa esta porta para os planos de dados e os agentes que se ligam a ele. Liberte-a e volte a executar o instalador.'
+        'pf_act_admin' = 'O plano de dados usa esta porta apenas nesta m\u00e1quina, para a sua pr\u00f3pria verifica\u00e7\u00e3o de estado. Liberte-a e volte a executar o instalador.'
+        'pf_nostart' = '(nada \u00e9 iniciado agora, por isso \u00e9 apenas assinalado)'
+        'pf_boot' = '{0} est\u00e1 instalado e arranca com a m\u00e1quina, embora esteja parado neste momento. No pr\u00f3ximo rein\u00edcio ocuparia as portas {1} e {2} antes do ToutWAF.'
+        'pf_act_boot' = 'Desative-o para que n\u00e3o arranque com a m\u00e1quina, ou mova-o para outras portas, antes de reiniciar a m\u00e1quina.'
+        'pf_fw_cause' = 'Uma firewall ({0}) est\u00e1 ativa e n\u00e3o deixa passar as portas {1} e {2}, e o instalador foi instru\u00eddo a n\u00e3o a alterar.'
+        'pf_fw_action' = 'Abra essas portas na firewall ou deixe o instalador faz\u00ea-lo (sem a op\u00e7\u00e3o --no-firewall). Caso contr\u00e1rio, os seus sites n\u00e3o ser\u00e3o acess\u00edveis do exterior.'
+        'pf_fwx_cause' = 'A firewall desta m\u00e1quina ({0}) recusa por defeito as liga\u00e7\u00f5es de entrada e n\u00e3o tem nenhuma regra para as portas {1} e {2}.'
+        'pf_fwx_action' = 'O ToutWAF nunca altera por si as regras deste tipo de firewall: abra essas portas na sua configura\u00e7\u00e3o e verifique os seus sites.'
+        'pf_cp_cause' = 'O plano de controlo {0} n\u00e3o \u00e9 acess\u00edvel a partir desta m\u00e1quina.'
+        'pf_cp_action' = 'Verifique o endere\u00e7o, se o plano de controlo est\u00e1 a funcionar e se a sua firewall deixa esta m\u00e1quina chegar a ele (porta 9444 por defeito) e volte a executar o instalador.'
+        'pf_router_cause' = 'Esta m\u00e1quina tem um endere\u00e7o privado ({0}): provavelmente est\u00e1 atr\u00e1s de um router.'
+        'pf_router_action' = 'Depois de instalado, o ToutWAF indica que portas reencaminhar para esta m\u00e1quina e fornece os ficheiros para os routers habituais. N\u00e3o h\u00e1 nada a preparar agora.'
+        'pf_skipped' = 'A verifica\u00e7\u00e3o do ambiente foi ignorada a seu pedido: o que estiver no caminho far\u00e1 falhar mais tarde a instala\u00e7\u00e3o ou o arranque.'
+        's_sysupdate' = 'A atualizar os pacotes do sistema (pode demorar alguns minutos)'
+        'su_skipped' = 'Os pacotes do sistema n\u00e3o s\u00e3o atualizados antes (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = 'Os pacotes do sistema foram atualizados h\u00e1 menos de 6 horas: n\u00e3o se repete.'
+        'su_dry' = 'os pacotes do sistema seriam atualizados primeiro (para saltar: TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = 'Nenhum gestor de pacotes suportado para atualizar o sistema: ignorado, a instala\u00e7\u00e3o continua.'
+        'su_failed' = 'A atualiza\u00e7\u00e3o dos pacotes do sistema falhou (c\u00f3digo {0}); a instala\u00e7\u00e3o continua sem ela. Detalhes: {1}. Solu\u00e7\u00e3o: execute a atualiza\u00e7\u00e3o e leia o erro (reposit\u00f3rio danificado? outro gestor de pacotes em execu\u00e7\u00e3o?), ou volte a executar este comando com TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = '\u00c9 preciso reiniciar este servidor para concluir a atualiza\u00e7\u00e3o do sistema (novo kernel ou bibliotecas). O ToutWAF nunca o reinicia por si: fa\u00e7a-o quando puder.'
+        'q_sysupdate' = 'Atualizar primeiro os pacotes do sistema (recomendado)?'
+        'pr_disk_full' = 'Apenas {0} MB livres em {1} (s\u00e3o precisos pelo menos {2} MB): a instala\u00e7\u00e3o n\u00e3o poderia terminar.'
+        'pr_disk_full_a' = 'Liberte espa\u00e7o (cache de pacotes: apt-get clean ou dnf clean all; registos antigos: journalctl --vacuum-size=100M) e volte a executar este comando. Para continuar mesmo assim: TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = 'Liberte espa\u00e7o (Limpeza do Disco, esvaziar a reciclagem) e volte a executar este comando. Para continuar mesmo assim: $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = 'Apenas {0} MB livres em {1} (cerca de {2} MB s\u00e3o confort\u00e1veis).'
+        'pr_disk_low_a' = 'Liberte espa\u00e7o ou adicione disco; a instala\u00e7\u00e3o pode continuar.'
+        'pr_dns' = 'Esta m\u00e1quina n\u00e3o consegue resolver o nome {0} (DNS).'
+        'pr_dns_a' = 'Verifique os servidores DNS (cat /etc/resolv.conf, resolvectl status), adicione um que funcione, por exemplo nameserver 9.9.9.9, e volte a executar este comando.'
+        'pr_dns_w_a' = 'Verifique os servidores DNS com ''ipconfig /all'', defina um que funcione (por exemplo 9.9.9.9) nas defini\u00e7\u00f5es do adaptador de rede e volte a executar este comando.'
+        'pr_clock' = 'O rel\u00f3gio desta m\u00e1quina est\u00e1 desfasado {0} segundos em rela\u00e7\u00e3o \u00e0 hora da Internet: os certificados TLS e as assinaturas falham quando o rel\u00f3gio est\u00e1 errado.'
+        'pr_clock_a' = 'Sincronize-o: timedatectl set-ntp true (ou chronyc makestep), verifique com timedatectl e volte a executar este comando.'
+        'pr_clock_w_a' = 'Sincronize-o: w32tm /resync (ou Defini\u00e7\u00f5es > Hora e idioma > Sincronizar agora) e volte a executar este comando.'
+        'pr_ok' = 'O espa\u00e7o em disco, o DNS e o rel\u00f3gio est\u00e3o em ordem.'
     }
     'nl' = @{
         'tagline' = 'Bescherming van webapplicaties en API''s'
@@ -1158,13 +1557,19 @@ $script:Catalog = @{
         's_health' = 'Wachten tot de services gezond zijn'
         's_backup' = 'Back-up van configuratie en data'
         'w_rollback' = 'De nieuwe versie is niet gezond: terugdraaien naar de vorige'
-        'up_to_date' = 'Al up-to-date ({0})'
+        'up_to_date' = 'Al bijgewerkt ({0})'
         'not_installed' = 'ToutWAF is niet ge\u00efnstalleerd: niets bij te werken.'
         'st_channel' = 'Kanaal: {0}'
         'st_latest' = 'Laatst beschikbare versie: {0}'
         'st_newer' = 'update beschikbaar: voer uit met --update'
         'e_yanked' = 'Versie {0} is ingetrokken (yanked) en mag niet worden ge\u00efnstalleerd. Gebruik --update voor de huidige versie, of --force om te negeren.'
+        'e_nover' = 'Op het kanaal {0} is nog geen versie gepubliceerd, dus er valt niets te installeren. ToutWAF is niet ge\u00efnstalleerd of gewijzigd. Om vanaf het kanaal {1} te installeren, start u het installatieprogramma opnieuw met -Channel {2}.'
         'e_installer_old' = 'Dit installatieprogramma is te oud voor deze versie (vereist versie {0}): download het opnieuw van de kanaal-URL.'
+        'up_rebuilt' = 'Zelfde versie, nieuwe build: ge\u00efnstalleerd {0}, beschikbaar {1}. Bezig met bijwerken.'
+        'st_newbuild' = 'zelfde versie, nieuwe build beschikbaar: voer opnieuw uit met {0}'
+        'st_nochannel' = 'Laatst beschikbare versie: in dit kanaal is nog niets gepubliceerd'
+        'w_mirror' = 'De openbare mirror leverde bestanden die niet bij elkaar passen ({0}): hij wordt waarschijnlijk nog bijgewerkt na een publicatie. Het kanaal wordt \u00e9\u00e9n keer opnieuw gelezen.'
+        'e_mismatch' = 'checksum klopt niet voor {0} ({1}): het gedownloade bestand komt niet overeen met de gepubliceerde checksum, dus er is niets ge\u00efnstalleerd of gewijzigd. Direct na een publicatie kan de openbare mirror enkele minuten de vorige bestanden aanbieden: wacht vijf minuten en start het installatieprogramma opnieuw. Gebeurt het opnieuw, installeer dan niet: de publicatie is beschadigd.'
         'e_downgrade' = 'De nieuwste versie {0} van kanaal {1} is ouder dan de ge\u00efnstalleerde {2}: gebruik --force om terug te gaan.'
         's_sigok' = 'release-handtekening gecontroleerd, sleutel {0}'
         'w_sigold' = 'versie {0} is zonder handtekening gepubliceerd (versies v\u00f3\u00f3r 0.2.0-dev.7 zijn niet ondertekend): alleen SHA-256 is gecontroleerd, de handtekening kon niet worden gecontroleerd'
@@ -1195,6 +1600,20 @@ $script:Catalog = @{
         'sum_file' = 'Samenvatting opgeslagen (alleen root): {0}'
         'sum_fallback' = 'Deze control plane heeft nog geen ''bootstrap''-opdracht: open de console-URL en volg de installatiepagina.'
         'sum_node_hint' = 'Om deze node via de console te beheren: Nodes > Node toevoegen, stel daarna control_plane.url / enroll_token in {0} in.'
+        'q_fwmodule' = 'Wilt u dat ToutWAF ook de firewall van deze machine beheert?'
+        'fwmod_n1' = 'Optionele module, uit tenzij u ja zegt. Tijdens de installatie wordt niets toegepast: u controleert elke wijziging in de console.'
+        'fwmod_n2' = 'Elke wijziging draait als proef met aftelling en wordt vanzelf teruggedraaid als u haar niet behoudt; een anti-lockout-beveiliging weigert elke regel die SSH of de console zou afsnijden.'
+        'fwmod_n3' = 'Dit is niet de vorige vraag, die alleen de poorten opent die ToutWAF nodig heeft in de systeemfirewall (--no-firewall).'
+        's_fwmod' = 'Firewallmodule wordt ingeschakeld (geen regel toegepast)'
+        'fwmod_done' = 'Firewallmodule ingeschakeld. Er is niets toegepast: open Firewall in de console om regels te bekijken en te proberen.'
+        'fwmod_fail' = 'Het firewallmodule kon niet worden ingeschakeld ({0}). De installatie gaat door; schakel het later in via Instellingen > Modules.'
+        's_link' = 'Dataplane koppelen aan de console'
+        'dp_link_ok' = 'Dataplane automatisch aan de console gekoppeld: niets handmatig te configureren.'
+        'dp_link_same' = 'Dataplane is al aan de console gekoppeld; de configuratie is ongewijzigd gelaten.'
+        'dp_link_fixed' = 'Dataplane-configuratie hersteld (dubbele control_plane-blokken samengevoegd); het vorige bestand is bewaard.'
+        'dp_link_remote' = 'Het dataplane op deze machine is voor een andere console geconfigureerd en is ongewijzigd gelaten.'
+        'dp_link_fail' = 'Het dataplane kon niet automatisch aan de console worden gekoppeld: {0}'
+        'dp_link_fail_hint' = 'Het dataplane behoudt zijn zelfstandige configuratie, dus sites antwoorden met HTTP 421 tot het is gekoppeld. Los de oorzaak hierboven op en voer dit installatieprogramma opnieuw uit: het koppelt de node zelf.'
         'st_title' = 'Status'
         'st_healthy' = 'gezond'
         'st_unhealthy' = 'NIET gezond'
@@ -1251,6 +1670,52 @@ $script:Catalog = @{
         'cp_r_arm32' = '32-bits ARM (armv7) wordt niet ondersteund door ToutWAF. Installeer een 64-bits besturingssysteem (Raspberry Pi OS 64-bit, Ubuntu of Debian arm64; Raspberry Pi 3, 4, 5 of Zero 2 W) en start het installatieprogramma opnieuw.'
         'cp_r_arm_userland32' = 'De kernel is 64-bits maar het systeem (userland) is 32-bits. ToutWAF vereist een 64-bits besturingssysteem: installeer opnieuw met Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) of Ubuntu / Debian arm64.'
         'cp_w_pi' = 'Raspberry Pi gedetecteerd: arm64 is alleen onder emulatie getest, niet op echte hardware. Zet data en logs op een SSD / USB-schijf in plaats van op de SD-kaart en vermijd de alles-in-\u00e9\u00e9n-installatie onder 2 GB RAM (zie docs/install/raspberry-pi.md).'
+        'pf_title' = 'Controle van wat deze machine nodig heeft'
+        'pf_ok' = 'Niets staat in de weg: de poorten die ToutWAF nodig heeft zijn vrij.'
+        'pf_refused' = 'ToutWAF kan niet op deze machine worden ge\u00efnstalleerd zoals ze nu is. Er is niets gewijzigd.'
+        'pf_ok_warn' = 'Niets verhindert de installatie, maar lees de punten hierboven.'
+        'pf_l_refuse' = 'geweigerd'
+        'pf_l_warn' = 'let op'
+        'pf_l_info' = 'opmerking'
+        'pf_port_busy' = 'Poort {0} wordt al gebruikt door {1}.'
+        'pf_prog_other' = 'een ander programma'
+        'pf_prog_unknown' = 'een ander programma (de naam kon niet worden gelezen)'
+        'pf_act_web' = 'ToutWAF heeft poort {0} en {1} nodig om uw sites te beschermen. Stop dat programma of verplaats het naar andere poorten (ToutPanel zet, naast ToutWAF ge\u00efnstalleerd, zijn webserver op 8080 en 8443) en start het installatieprogramma opnieuw.'
+        'pf_act_console' = 'De console van ToutWAF heeft deze poort nodig. Maak de poort vrij of kies een andere consolepoort (het installatieprogramma vraagt ernaar in zijn menu) en start het installatieprogramma opnieuw.'
+        'pf_act_agent' = 'ToutWAF gebruikt deze poort voor de data planes en agents die er verbinding mee maken. Maak de poort vrij en start het installatieprogramma opnieuw.'
+        'pf_act_admin' = 'De data plane gebruikt deze poort alleen op deze machine, voor zijn eigen gezondheidscontrole. Maak de poort vrij en start het installatieprogramma opnieuw.'
+        'pf_nostart' = '(er wordt nu niets gestart, dus dit wordt alleen gemeld)'
+        'pf_boot' = '{0} is ge\u00efnstalleerd en start met de machine, hoewel het nu gestopt is. Bij de volgende herstart zou het poort {1} en {2} bezetten v\u00f3\u00f3r ToutWAF.'
+        'pf_act_boot' = 'Schakel het uit zodat het niet met de machine start, of verplaats het naar andere poorten, v\u00f3\u00f3r de machine opnieuw start.'
+        'pf_fw_cause' = 'Een firewall ({0}) is actief en laat poort {1} en {2} niet door, en het installatieprogramma mag hem niet wijzigen.'
+        'pf_fw_action' = 'Open deze poorten in de firewall of laat het installatieprogramma het doen (zonder de optie --no-firewall). Anders zijn uw sites van buitenaf niet bereikbaar.'
+        'pf_fwx_cause' = 'De firewall van deze machine ({0}) weigert inkomende verbindingen standaard en heeft geen regel voor poort {1} en {2}.'
+        'pf_fwx_action' = 'ToutWAF wijzigt de regels van dit soort firewall nooit zelf: open deze poorten in de configuratie ervan en controleer daarna uw sites.'
+        'pf_cp_cause' = 'De control plane {0} is vanaf deze machine niet bereikbaar.'
+        'pf_cp_action' = 'Controleer het adres, of de control plane draait en of zijn firewall deze machine toelaat (standaard poort 9444) en start het installatieprogramma opnieuw.'
+        'pf_router_cause' = 'Deze machine heeft een priv\u00e9adres ({0}): ze staat waarschijnlijk achter een router.'
+        'pf_router_action' = 'Na de installatie toont ToutWAF welke poorten naar deze machine doorgestuurd moeten worden en geeft het de bestanden voor de gangbare routers. Nu hoeft u niets voor te bereiden.'
+        'pf_skipped' = 'De controle van de omgeving is op uw verzoek overgeslagen: wat in de weg staat laat de installatie of de start later mislukken.'
+        's_sysupdate' = 'Systeempakketten worden bijgewerkt (dit kan enkele minuten duren)'
+        'su_skipped' = 'De systeempakketten worden niet eerst bijgewerkt (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = 'De systeempakketten zijn minder dan 6 uur geleden bijgewerkt: niet herhaald.'
+        'su_dry' = 'de systeempakketten zouden eerst worden bijgewerkt (overslaan met TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = 'Geen ondersteunde pakketbeheerder om het systeem bij te werken: overgeslagen, de installatie gaat door.'
+        'su_failed' = 'Het bijwerken van de systeempakketten is mislukt (code {0}); de installatie gaat zonder verder. Details: {1}. Oplossing: voer de update zelf uit en lees de foutmelding (kapotte repository? draait er een andere pakketbeheerder?), of voer dit commando opnieuw uit met TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = 'Een herstart van deze server is nodig om de systeemupdate af te ronden (nieuwe kernel of bibliotheken). ToutWAF herstart hem nooit voor u: doe het wanneer het kan.'
+        'q_sysupdate' = 'Eerst de systeempakketten bijwerken (aanbevolen)?'
+        'pr_disk_full' = 'Slechts {0} MB vrij op {1} (minstens {2} MB nodig): de installatie zou niet kunnen worden voltooid.'
+        'pr_disk_full_a' = 'Maak ruimte vrij (pakketcache: apt-get clean of dnf clean all; oude logs: journalctl --vacuum-size=100M) en voer dit commando opnieuw uit. Toch doorgaan: TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = 'Maak ruimte vrij (Schijfopruiming, prullenbak legen) en voer dit commando opnieuw uit. Toch doorgaan: $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = 'Slechts {0} MB vrij op {1} (ongeveer {2} MB is comfortabel).'
+        'pr_disk_low_a' = 'Maak ruimte vrij of voeg schijfruimte toe; de installatie kan doorgaan.'
+        'pr_dns' = 'Deze machine kan de naam {0} niet omzetten (DNS).'
+        'pr_dns_a' = 'Controleer de DNS-servers (cat /etc/resolv.conf, resolvectl status), voeg een werkende toe, bijvoorbeeld nameserver 9.9.9.9, en voer dit commando opnieuw uit.'
+        'pr_dns_w_a' = 'Controleer de DNS-servers met ''ipconfig /all'', stel een werkende in (bijvoorbeeld 9.9.9.9) bij de instellingen van de netwerkadapter en voer dit commando opnieuw uit.'
+        'pr_clock' = 'De klok van deze machine wijkt {0} seconden af van de internettijd: TLS-certificaten en handtekeningen mislukken bij een verkeerde klok.'
+        'pr_clock_a' = 'Synchroniseer de klok: timedatectl set-ntp true (of chronyc makestep), controleer met timedatectl en voer dit commando opnieuw uit.'
+        'pr_clock_w_a' = 'Synchroniseer de klok: w32tm /resync (of Instellingen > Tijd en taal > Nu synchroniseren) en voer dit commando opnieuw uit.'
+        'pr_ok' = 'Schijfruimte, DNS en klok zijn in orde.'
     }
     'ru' = @{
         'tagline' = '\u0417\u0430\u0449\u0438\u0442\u0430 \u0432\u0435\u0431-\u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0439 \u0438 API'
@@ -1326,7 +1791,13 @@ $script:Catalog = @{
         'st_latest' = '\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430\u044f \u0432\u0435\u0440\u0441\u0438\u044f: {0}'
         'st_newer' = '\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435: \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0441 --update'
         'e_yanked' = '\u0412\u0435\u0440\u0441\u0438\u044f {0} \u043e\u0442\u043e\u0437\u0432\u0430\u043d\u0430 (yanked) \u0438 \u043d\u0435 \u0434\u043e\u043b\u0436\u043d\u0430 \u0443\u0441\u0442\u0430\u043d\u0430\u0432\u043b\u0438\u0432\u0430\u0442\u044c\u0441\u044f. \u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 --update \u0434\u043b\u044f \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u043e\u0439 \u0432\u0435\u0440\u0441\u0438\u0438 \u0438\u043b\u0438 --force, \u0447\u0442\u043e\u0431\u044b \u043e\u0431\u043e\u0439\u0442\u0438.'
+        'e_nover' = '\u0412 \u043a\u0430\u043d\u0430\u043b\u0435 {0} \u043f\u043e\u043a\u0430 \u043d\u0435 \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u043e \u043d\u0438 \u043e\u0434\u043d\u043e\u0439 \u0432\u0435\u0440\u0441\u0438\u0438, \u0443\u0441\u0442\u0430\u043d\u0430\u0432\u043b\u0438\u0432\u0430\u0442\u044c \u043d\u0435\u0447\u0435\u0433\u043e. ToutWAF \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d \u0438 \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0451\u043d. \u0427\u0442\u043e\u0431\u044b \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0438\u0437 \u043a\u0430\u043d\u0430\u043b\u0430 {1}, \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430 \u0441 -Channel {2}.'
         'e_installer_old' = '\u042d\u0442\u043e\u0442 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u0441\u0442\u0430\u0440\u044b\u0439 \u0434\u043b\u044f \u044d\u0442\u043e\u0433\u043e \u0440\u0435\u043b\u0438\u0437\u0430 (\u043d\u0443\u0436\u043d\u0430 \u0432\u0435\u0440\u0441\u0438\u044f {0}): \u0441\u043a\u0430\u0447\u0430\u0439\u0442\u0435 \u0435\u0433\u043e \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e URL \u043a\u0430\u043d\u0430\u043b\u0430.'
+        'up_rebuilt' = '\u0422\u0430 \u0436\u0435 \u0432\u0435\u0440\u0441\u0438\u044f, \u043d\u043e\u0432\u0430\u044f \u0441\u0431\u043e\u0440\u043a\u0430: \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430 {0}, \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 {1}. \u0412\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442\u0441\u044f \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435.'
+        'st_newbuild' = '\u0442\u0430 \u0436\u0435 \u0432\u0435\u0440\u0441\u0438\u044f, \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u043d\u043e\u0432\u0430\u044f \u0441\u0431\u043e\u0440\u043a\u0430: \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u043d\u043e\u0432\u0430 \u0441 {0}'
+        'st_nochannel' = '\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430\u044f \u0432\u0435\u0440\u0441\u0438\u044f: \u0432 \u044d\u0442\u043e\u043c \u043a\u0430\u043d\u0430\u043b\u0435 \u043f\u043e\u043a\u0430 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u043e'
+        'w_mirror' = '\u041f\u0443\u0431\u043b\u0438\u0447\u043d\u043e\u0435 \u0437\u0435\u0440\u043a\u0430\u043b\u043e \u043e\u0442\u0434\u0430\u043b\u043e \u0444\u0430\u0439\u043b\u044b, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u043d\u0435 \u0441\u043e\u0433\u043b\u0430\u0441\u0443\u044e\u0442\u0441\u044f \u043c\u0435\u0436\u0434\u0443 \u0441\u043e\u0431\u043e\u0439 ({0}): \u0432\u0435\u0440\u043e\u044f\u0442\u043d\u043e, \u043e\u043d\u043e \u0435\u0449\u0451 \u043e\u0431\u043d\u043e\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u043f\u043e\u0441\u043b\u0435 \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438. \u041a\u0430\u043d\u0430\u043b \u0431\u0443\u0434\u0435\u0442 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d \u0437\u0430\u043d\u043e\u0432\u043e \u043e\u0434\u0438\u043d \u0440\u0430\u0437.'
+        'e_mismatch' = '\u043a\u043e\u043d\u0442\u0440\u043e\u043b\u044c\u043d\u0430\u044f \u0441\u0443\u043c\u043c\u0430 \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442 \u0434\u043b\u044f {0} ({1}): \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u043d\u044b\u0439 \u0444\u0430\u0439\u043b \u043d\u0435 \u0441\u043e\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u0435\u0442 \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u043d\u043e\u0439 \u0441\u0443\u043c\u043c\u0435, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u0438 \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043e. \u0421\u0440\u0430\u0437\u0443 \u043f\u043e\u0441\u043b\u0435 \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438 \u043f\u0443\u0431\u043b\u0438\u0447\u043d\u043e\u0435 \u0437\u0435\u0440\u043a\u0430\u043b\u043e \u043c\u043e\u0436\u0435\u0442 \u043d\u0435\u0441\u043a\u043e\u043b\u044c\u043a\u043e \u043c\u0438\u043d\u0443\u0442 \u043e\u0442\u0434\u0430\u0432\u0430\u0442\u044c \u043f\u0440\u0435\u0436\u043d\u0438\u0435 \u0444\u0430\u0439\u043b\u044b: \u043f\u043e\u0434\u043e\u0436\u0434\u0438\u0442\u0435 \u043f\u044f\u0442\u044c \u043c\u0438\u043d\u0443\u0442 \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430. \u0415\u0441\u043b\u0438 \u043e\u0448\u0438\u0431\u043a\u0430 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0441\u044f, \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u0430\u0432\u043b\u0438\u0432\u0430\u0439\u0442\u0435: \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044f \u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0435\u043d\u0430.'
         'e_downgrade' = '\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 \u0440\u0435\u043b\u0438\u0437 {0} \u043a\u0430\u043d\u0430\u043b\u0430 {1} \u0441\u0442\u0430\u0440\u0448\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u043e\u0433\u043e {2}: \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 --force \u0434\u043b\u044f \u043f\u043e\u043d\u0438\u0436\u0435\u043d\u0438\u044f \u0432\u0435\u0440\u0441\u0438\u0438.'
         's_sigok' = '\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u0440\u0435\u043b\u0438\u0437\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430, \u043a\u043b\u044e\u0447 {0}'
         'w_sigold' = '\u0432\u0435\u0440\u0441\u0438\u044f {0} \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u0430 \u0431\u0435\u0437 \u043f\u043e\u0434\u043f\u0438\u0441\u0438 (\u0432\u0435\u0440\u0441\u0438\u0438 \u0434\u043e 0.2.0-dev.7 \u043d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u044b): \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e SHA-256, \u043f\u043e\u0434\u043f\u0438\u0441\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c'
@@ -1357,6 +1828,20 @@ $script:Catalog = @{
         'sum_file' = '\u0418\u0442\u043e\u0433\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b (\u0442\u043e\u043b\u044c\u043a\u043e root): {0}'
         'sum_fallback' = '\u0423 \u044d\u0442\u043e\u0433\u043e control plane \u043f\u043e\u043a\u0430 \u043d\u0435\u0442 \u043a\u043e\u043c\u0430\u043d\u0434\u044b ''bootstrap'': \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 URL \u043a\u043e\u043d\u0441\u043e\u043b\u0438 \u0438 \u0441\u043b\u0435\u0434\u0443\u0439\u0442\u0435 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438.'
         'sum_node_hint' = '\u0427\u0442\u043e\u0431\u044b \u0443\u043f\u0440\u0430\u0432\u043b\u044f\u0442\u044c \u044d\u0442\u0438\u043c \u0443\u0437\u043b\u043e\u043c \u0438\u0437 \u043a\u043e\u043d\u0441\u043e\u043b\u0438: \u0423\u0437\u043b\u044b > \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0443\u0437\u0435\u043b, \u0437\u0430\u0442\u0435\u043c \u0437\u0430\u0434\u0430\u0439\u0442\u0435 control_plane.url / enroll_token \u0432 {0}.'
+        'q_fwmodule' = '\u0425\u043e\u0442\u0438\u0442\u0435, \u0447\u0442\u043e\u0431\u044b ToutWAF \u0442\u0430\u043a\u0436\u0435 \u0443\u043f\u0440\u0430\u0432\u043b\u044f\u043b \u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u043e\u043c \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u044b?'
+        'fwmod_n1' = '\u041d\u0435\u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u0439 \u043c\u043e\u0434\u0443\u043b\u044c, \u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d, \u0435\u0441\u043b\u0438 \u0432\u044b \u043d\u0435 \u043e\u0442\u0432\u0435\u0442\u0438\u0442\u0435 \u00ab\u0434\u0430\u00bb. \u0412\u043e \u0432\u0440\u0435\u043c\u044f \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0438 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u0440\u0438\u043c\u0435\u043d\u044f\u0435\u0442\u0441\u044f: \u043a\u0430\u0436\u0434\u043e\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0435 \u0432\u044b \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u0442\u0435 \u0432 \u043a\u043e\u043d\u0441\u043e\u043b\u0438.'
+        'fwmod_n2' = '\u041a\u0430\u0436\u0434\u043e\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0435 \u043f\u0440\u043e\u0445\u043e\u0434\u0438\u0442 \u043f\u0440\u043e\u0431\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434 \u0441 \u043e\u0431\u0440\u0430\u0442\u043d\u044b\u043c \u043e\u0442\u0441\u0447\u0451\u0442\u043e\u043c \u0438 \u043e\u0442\u043a\u0430\u0442\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0441\u0430\u043c\u043e, \u0435\u0441\u043b\u0438 \u0432\u044b \u0435\u0433\u043e \u043d\u0435 \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u0435; \u0437\u0430\u0449\u0438\u0442\u0430 \u043e\u0442 \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0438 \u043e\u0442\u043a\u043b\u043e\u043d\u044f\u0435\u0442 \u043b\u044e\u0431\u043e\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u043e, \u043a\u043e\u0442\u043e\u0440\u043e\u0435 \u043e\u0442\u0440\u0435\u0437\u0430\u043b\u043e \u0431\u044b SSH \u0438\u043b\u0438 \u043a\u043e\u043d\u0441\u043e\u043b\u044c.'
+        'fwmod_n3' = '\u042d\u0442\u043e \u043d\u0435 \u043f\u0440\u0435\u0434\u044b\u0434\u0443\u0449\u0438\u0439 \u0432\u043e\u043f\u0440\u043e\u0441, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u043b\u0438\u0448\u044c \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442 \u043d\u0443\u0436\u043d\u044b\u0435 ToutWAF \u043f\u043e\u0440\u0442\u044b \u0432 \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u043e\u043c \u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u0435 (--no-firewall).'
+        's_fwmod' = '\u0412\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435 \u043c\u043e\u0434\u0443\u043b\u044f \u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u0430 (\u043f\u0440\u0430\u0432\u0438\u043b\u0430 \u043d\u0435 \u043f\u0440\u0438\u043c\u0435\u043d\u044f\u044e\u0442\u0441\u044f)'
+        'fwmod_done' = '\u041c\u043e\u0434\u0443\u043b\u044c \u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u0430 \u0432\u043a\u043b\u044e\u0447\u0451\u043d. \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043f\u0440\u0438\u043c\u0435\u043d\u0435\u043d\u043e: \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u00ab\u0411\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u00bb \u0432 \u043a\u043e\u043d\u0441\u043e\u043b\u0438, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0438 \u043e\u043f\u0440\u043e\u0431\u043e\u0432\u0430\u0442\u044c \u043f\u0440\u0430\u0432\u0438\u043b\u0430.'
+        'fwmod_fail' = '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043c\u043e\u0434\u0443\u043b\u044c \u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u0430 ({0}). \u0423\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0435\u0442\u0441\u044f; \u0432\u043a\u043b\u044e\u0447\u0438\u0442\u0435 \u0435\u0433\u043e \u043f\u043e\u0437\u0436\u0435 \u0432 \u00ab\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 > \u041c\u043e\u0434\u0443\u043b\u0438\u00bb.'
+        's_link' = '\u041f\u0440\u0438\u0432\u044f\u0437\u043a\u0430 \u043f\u043b\u043e\u0441\u043a\u043e\u0441\u0442\u0438 \u0434\u0430\u043d\u043d\u044b\u0445 \u043a \u043a\u043e\u043d\u0441\u043e\u043b\u0438'
+        'dp_link_ok' = '\u041f\u043b\u043e\u0441\u043a\u043e\u0441\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0445 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u0430 \u043a \u043a\u043e\u043d\u0441\u043e\u043b\u0438: \u0432\u0440\u0443\u0447\u043d\u0443\u044e \u043d\u0430\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044c \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043d\u0443\u0436\u043d\u043e.'
+        'dp_link_same' = '\u041f\u043b\u043e\u0441\u043a\u043e\u0441\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0445 \u0443\u0436\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u0430 \u043a \u043a\u043e\u043d\u0441\u043e\u043b\u0438; \u0435\u0451 \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0430.'
+        'dp_link_fixed' = '\u041a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f \u043f\u043b\u043e\u0441\u043a\u043e\u0441\u0442\u0438 \u0434\u0430\u043d\u043d\u044b\u0445 \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0430 (\u0434\u0443\u0431\u043b\u0438\u0440\u0443\u044e\u0449\u0438\u0435\u0441\u044f \u0431\u043b\u043e\u043a\u0438 control_plane \u043e\u0431\u044a\u0435\u0434\u0438\u043d\u0435\u043d\u044b); \u043f\u0440\u0435\u0436\u043d\u0438\u0439 \u0444\u0430\u0439\u043b \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d.'
+        'dp_link_remote' = '\u041f\u043b\u043e\u0441\u043a\u043e\u0441\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0445 \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0430 \u043d\u0430 \u0434\u0440\u0443\u0433\u0443\u044e \u043a\u043e\u043d\u0441\u043e\u043b\u044c; \u043e\u043d\u0430 \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0430.'
+        'dp_link_fail' = '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u0442\u044c \u043f\u043b\u043e\u0441\u043a\u043e\u0441\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0445 \u043a \u043a\u043e\u043d\u0441\u043e\u043b\u0438: {0}'
+        'dp_link_fail_hint' = '\u041f\u043b\u043e\u0441\u043a\u043e\u0441\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0445 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u0435\u0442 \u0430\u0432\u0442\u043e\u043d\u043e\u043c\u043d\u0443\u044e \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044e, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u0441\u0430\u0439\u0442\u044b \u043e\u0442\u0432\u0435\u0447\u0430\u044e\u0442 HTTP 421, \u043f\u043e\u043a\u0430 \u043e\u043d\u0430 \u043d\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u0430. \u0423\u0441\u0442\u0440\u0430\u043d\u0438\u0442\u0435 \u043f\u0440\u0438\u0447\u0438\u043d\u0443 \u0432\u044b\u0448\u0435 \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430: \u043e\u043d \u043f\u0440\u0438\u0432\u044f\u0436\u0435\u0442 \u0443\u0437\u0435\u043b \u0441\u0430\u043c.'
         'st_title' = '\u0421\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u0435'
         'st_healthy' = '\u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442'
         'st_unhealthy' = '\u041d\u0415 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442'
@@ -1413,6 +1898,52 @@ $script:Catalog = @{
         'cp_r_arm32' = '32-\u0440\u0430\u0437\u0440\u044f\u0434\u043d\u044b\u0439 ARM (armv7) \u043d\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f ToutWAF. \u0423\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 64-\u0440\u0430\u0437\u0440\u044f\u0434\u043d\u0443\u044e \u041e\u0421 (Raspberry Pi OS 64-bit, Ubuntu \u0438\u043b\u0438 Debian arm64; Raspberry Pi 3, 4, 5 \u0438\u043b\u0438 Zero 2 W) \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430.'
         'cp_r_arm_userland32' = '\u042f\u0434\u0440\u043e 64-\u0440\u0430\u0437\u0440\u044f\u0434\u043d\u043e\u0435, \u043d\u043e \u0441\u0438\u0441\u0442\u0435\u043c\u0430 (userland) 32-\u0440\u0430\u0437\u0440\u044f\u0434\u043d\u0430\u044f. ToutWAF \u043d\u0443\u0436\u043d\u0430 64-\u0440\u0430\u0437\u0440\u044f\u0434\u043d\u0430\u044f \u041e\u0421: \u043f\u0435\u0440\u0435\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 \u0441 Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) \u0438\u043b\u0438 Ubuntu / Debian arm64.'
         'cp_w_pi' = '\u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d Raspberry Pi: arm64 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u043b\u0430\u0441\u044c \u0442\u043e\u043b\u044c\u043a\u043e \u0432 \u044d\u043c\u0443\u043b\u044f\u0446\u0438\u0438, \u043d\u0435 \u043d\u0430 \u0440\u0435\u0430\u043b\u044c\u043d\u043e\u043c \u043e\u0431\u043e\u0440\u0443\u0434\u043e\u0432\u0430\u043d\u0438\u0438. \u0425\u0440\u0430\u043d\u0438\u0442\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0438 \u0436\u0443\u0440\u043d\u0430\u043b\u044b \u043d\u0430 SSD / USB-\u0434\u0438\u0441\u043a\u0435, \u0430 \u043d\u0435 \u043d\u0430 SD-\u043a\u0430\u0440\u0442\u0435, \u0438 \u0438\u0437\u0431\u0435\u0433\u0430\u0439\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0438 \u00ab\u0432\u0441\u0451 \u0432 \u043e\u0434\u043d\u043e\u043c\u00bb \u043f\u0440\u0438 \u043c\u0435\u043d\u0435\u0435 \u0447\u0435\u043c 2 \u0413\u0411 \u041e\u0417\u0423 (\u0441\u043c. docs/install/raspberry-pi.md).'
+        'pf_title' = '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0442\u043e\u0433\u043e, \u0447\u0442\u043e \u043d\u0443\u0436\u043d\u043e \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435'
+        'pf_ok' = '\u041d\u0438\u0447\u0442\u043e \u043d\u0435 \u043c\u0435\u0448\u0430\u0435\u0442: \u043f\u043e\u0440\u0442\u044b, \u043d\u0443\u0436\u043d\u044b\u0435 ToutWAF, \u0441\u0432\u043e\u0431\u043e\u0434\u043d\u044b.'
+        'pf_refused' = 'ToutWAF \u043d\u0435\u043b\u044c\u0437\u044f \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u043d\u0430 \u044d\u0442\u0443 \u043c\u0430\u0448\u0438\u043d\u0443 \u0432 \u0435\u0451 \u043d\u044b\u043d\u0435\u0448\u043d\u0435\u043c \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u0438. \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043e.'
+        'pf_ok_warn' = '\u0423\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0435 \u043d\u0438\u0447\u0442\u043e \u043d\u0435 \u043c\u0435\u0448\u0430\u0435\u0442, \u043d\u043e \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0439\u0442\u0435 \u043f\u0443\u043d\u043a\u0442\u044b \u0432\u044b\u0448\u0435.'
+        'pf_l_refuse' = '\u043e\u0442\u043a\u0430\u0437'
+        'pf_l_warn' = '\u0432\u043d\u0438\u043c\u0430\u043d\u0438\u0435'
+        'pf_l_info' = '\u0437\u0430\u043c\u0435\u0442\u043a\u0430'
+        'pf_port_busy' = '\u041f\u043e\u0440\u0442 {0} \u0443\u0436\u0435 \u0437\u0430\u043d\u044f\u0442: {1}.'
+        'pf_prog_other' = '\u0434\u0440\u0443\u0433\u0430\u044f \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430'
+        'pf_prog_unknown' = '\u0434\u0440\u0443\u0433\u0430\u044f \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430 (\u0435\u0451 \u0438\u043c\u044f \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c)'
+        'pf_act_web' = 'ToutWAF \u043d\u0443\u0436\u043d\u044b \u043f\u043e\u0440\u0442\u044b {0} \u0438 {1}, \u0447\u0442\u043e\u0431\u044b \u0437\u0430\u0449\u0438\u0449\u0430\u0442\u044c \u0432\u0430\u0448\u0438 \u0441\u0430\u0439\u0442\u044b. \u041e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 \u044d\u0442\u0443 \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0443 \u0438\u043b\u0438 \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0438\u0442\u0435 \u0435\u0451 \u043d\u0430 \u0434\u0440\u0443\u0433\u0438\u0435 \u043f\u043e\u0440\u0442\u044b (ToutPanel, \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u044b\u0439 \u0440\u044f\u0434\u043e\u043c \u0441 ToutWAF, \u0440\u0430\u0437\u043c\u0435\u0449\u0430\u0435\u0442 \u0441\u0432\u043e\u0439 \u0432\u0435\u0431-\u0441\u0435\u0440\u0432\u0435\u0440 \u043d\u0430 \u043f\u043e\u0440\u0442\u0430\u0445 8080 \u0438 8443) \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430.'
+        'pf_act_console' = '\u042d\u0442\u043e\u0442 \u043f\u043e\u0440\u0442 \u043d\u0443\u0436\u0435\u043d \u043a\u043e\u043d\u0441\u043e\u043b\u0438 ToutWAF. \u041e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u0435\u0433\u043e \u0438\u043b\u0438 \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0440\u0443\u0433\u043e\u0439 \u043f\u043e\u0440\u0442 \u043a\u043e\u043d\u0441\u043e\u043b\u0438 (\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043f\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u0442 \u043e\u0431 \u044d\u0442\u043e\u043c \u0432 \u0441\u0432\u043e\u0451\u043c \u043c\u0435\u043d\u044e) \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430.'
+        'pf_act_agent' = 'ToutWAF \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442 \u044d\u0442\u043e\u0442 \u043f\u043e\u0440\u0442 \u0434\u043b\u044f \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0430\u044e\u0449\u0438\u0445\u0441\u044f \u043a \u043d\u0435\u043c\u0443 \u0443\u0437\u043b\u043e\u0432 \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u043a\u0438 \u0434\u0430\u043d\u043d\u044b\u0445 \u0438 \u0430\u0433\u0435\u043d\u0442\u043e\u0432. \u041e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u0435\u0433\u043e \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430.'
+        'pf_act_admin' = '\u0423\u0437\u0435\u043b \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u043a\u0438 \u0434\u0430\u043d\u043d\u044b\u0445 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442 \u044d\u0442\u043e\u0442 \u043f\u043e\u0440\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435, \u0434\u043b\u044f \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u043e\u0439 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u044f. \u041e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u0435\u0433\u043e \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430.'
+        'pf_nostart' = '(\u0441\u0435\u0439\u0447\u0430\u0441 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0437\u0430\u043f\u0443\u0441\u043a\u0430\u0435\u0442\u0441\u044f, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u044d\u0442\u043e \u043b\u0438\u0448\u044c \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435)'
+        'pf_boot' = '{0} \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d \u0438 \u0437\u0430\u043f\u0443\u0441\u043a\u0430\u0435\u0442\u0441\u044f \u0432\u043c\u0435\u0441\u0442\u0435 \u0441 \u043c\u0430\u0448\u0438\u043d\u043e\u0439, \u0445\u043e\u0442\u044f \u0441\u0435\u0439\u0447\u0430\u0441 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d. \u041f\u043e\u0441\u043b\u0435 \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0435\u0439 \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u043e\u043d \u0437\u0430\u0439\u043c\u0451\u0442 \u043f\u043e\u0440\u0442\u044b {1} \u0438 {2} \u0440\u0430\u043d\u044c\u0448\u0435 ToutWAF.'
+        'pf_act_boot' = '\u041e\u0442\u043a\u043b\u044e\u0447\u0438\u0442\u0435 \u0435\u0433\u043e \u0430\u0432\u0442\u043e\u0437\u0430\u043f\u0443\u0441\u043a \u0438\u043b\u0438 \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0438\u0442\u0435 \u043d\u0430 \u0434\u0440\u0443\u0433\u0438\u0435 \u043f\u043e\u0440\u0442\u044b \u0434\u043e \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u043c\u0430\u0448\u0438\u043d\u044b.'
+        'pf_fw_cause' = '\u0410\u043a\u0442\u0438\u0432\u0435\u043d \u043c\u0435\u0436\u0441\u0435\u0442\u0435\u0432\u043e\u0439 \u044d\u043a\u0440\u0430\u043d ({0}), \u043e\u043d \u043d\u0435 \u043f\u0440\u043e\u043f\u0443\u0441\u043a\u0430\u0435\u0442 \u043f\u043e\u0440\u0442\u044b {1} \u0438 {2}, \u0430 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a\u0443 \u0432\u0435\u043b\u0435\u043d\u043e \u0435\u0433\u043e \u043d\u0435 \u043c\u0435\u043d\u044f\u0442\u044c.'
+        'pf_fw_action' = '\u041e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u044d\u0442\u0438 \u043f\u043e\u0440\u0442\u044b \u0432 \u043c\u0435\u0436\u0441\u0435\u0442\u0435\u0432\u043e\u043c \u044d\u043a\u0440\u0430\u043d\u0435 \u0438\u043b\u0438 \u043f\u043e\u0437\u0432\u043e\u043b\u044c\u0442\u0435 \u044d\u0442\u043e \u0441\u0434\u0435\u043b\u0430\u0442\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a\u0443 (\u0431\u0435\u0437 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u0430 --no-firewall). \u0418\u043d\u0430\u0447\u0435 \u0432\u0430\u0448\u0438 \u0441\u0430\u0439\u0442\u044b \u0431\u0443\u0434\u0443\u0442 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b \u0441\u043d\u0430\u0440\u0443\u0436\u0438.'
+        'pf_fwx_cause' = '\u041c\u0435\u0436\u0441\u0435\u0442\u0435\u0432\u043e\u0439 \u044d\u043a\u0440\u0430\u043d \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u044b ({0}) \u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e \u043e\u0442\u043a\u043b\u043e\u043d\u044f\u0435\u0442 \u0432\u0445\u043e\u0434\u044f\u0449\u0438\u0435 \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u044f \u0438 \u043d\u0435 \u0438\u043c\u0435\u0435\u0442 \u043f\u0440\u0430\u0432\u0438\u043b \u0434\u043b\u044f \u043f\u043e\u0440\u0442\u043e\u0432 {1} \u0438 {2}.'
+        'pf_fwx_action' = 'ToutWAF \u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u0441\u0430\u043c \u043d\u0435 \u043c\u0435\u043d\u044f\u0435\u0442 \u043f\u0440\u0430\u0432\u0438\u043b\u0430 \u0442\u0430\u043a\u043e\u0433\u043e \u043c\u0435\u0436\u0441\u0435\u0442\u0435\u0432\u043e\u0433\u043e \u044d\u043a\u0440\u0430\u043d\u0430: \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u044d\u0442\u0438 \u043f\u043e\u0440\u0442\u044b \u0432 \u0435\u0433\u043e \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430\u0445, \u0437\u0430\u0442\u0435\u043c \u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u0432\u043e\u0438 \u0441\u0430\u0439\u0442\u044b.'
+        'pf_cp_cause' = '\u0423\u043f\u0440\u0430\u0432\u043b\u044f\u044e\u0449\u0438\u0439 \u0443\u0437\u0435\u043b {0} \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d \u0441 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u044b.'
+        'pf_cp_action' = '\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0430\u0434\u0440\u0435\u0441, \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u043b\u0438 \u0443\u043f\u0440\u0430\u0432\u043b\u044f\u044e\u0449\u0438\u0439 \u0443\u0437\u0435\u043b \u0438 \u043f\u0440\u043e\u043f\u0443\u0441\u043a\u0430\u0435\u0442 \u043b\u0438 \u0435\u0433\u043e \u043c\u0435\u0436\u0441\u0435\u0442\u0435\u0432\u043e\u0439 \u044d\u043a\u0440\u0430\u043d \u044d\u0442\u0443 \u043c\u0430\u0448\u0438\u043d\u0443 (\u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e \u043f\u043e\u0440\u0442 9444), \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430.'
+        'pf_router_cause' = '\u0423 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u044b \u0447\u0430\u0441\u0442\u043d\u044b\u0439 \u0430\u0434\u0440\u0435\u0441 ({0}): \u0441\u043a\u043e\u0440\u0435\u0435 \u0432\u0441\u0435\u0433\u043e, \u043e\u043d\u0430 \u043d\u0430\u0445\u043e\u0434\u0438\u0442\u0441\u044f \u0437\u0430 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0442\u043e\u0440\u043e\u043c.'
+        'pf_router_action' = '\u041f\u043e\u0441\u043b\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0438 ToutWAF \u043f\u043e\u043a\u0430\u0436\u0435\u0442, \u043a\u0430\u043a\u0438\u0435 \u043f\u043e\u0440\u0442\u044b \u043d\u0443\u0436\u043d\u043e \u043f\u0440\u043e\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u043d\u0430 \u044d\u0442\u0443 \u043c\u0430\u0448\u0438\u043d\u0443, \u0438 \u0434\u0430\u0441\u0442 \u0444\u0430\u0439\u043b\u044b \u0434\u043b\u044f \u0440\u0430\u0441\u043f\u0440\u043e\u0441\u0442\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u0445 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0442\u043e\u0440\u043e\u0432. \u0421\u0435\u0439\u0447\u0430\u0441 \u043d\u0438\u0447\u0435\u0433\u043e \u0433\u043e\u0442\u043e\u0432\u0438\u0442\u044c \u043d\u0435 \u043d\u0443\u0436\u043d\u043e.'
+        'pf_skipped' = '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043e\u043a\u0440\u0443\u0436\u0435\u043d\u0438\u044f \u043f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u0430 \u043f\u043e \u0432\u0430\u0448\u0435\u0439 \u043f\u0440\u043e\u0441\u044c\u0431\u0435: \u0442\u043e, \u0447\u0442\u043e \u043c\u0435\u0448\u0430\u0435\u0442, \u043f\u0440\u0438\u0432\u0435\u0434\u0451\u0442 \u043a \u0441\u0431\u043e\u044e \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0438 \u0438\u043b\u0438 \u0437\u0430\u043f\u0443\u0441\u043a\u0430 \u043f\u043e\u0437\u0436\u0435.'
+        's_sysupdate' = '\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0445 \u043f\u0430\u043a\u0435\u0442\u043e\u0432 (\u044d\u0442\u043e \u043c\u043e\u0436\u0435\u0442 \u0437\u0430\u043d\u044f\u0442\u044c \u043d\u0435\u0441\u043a\u043e\u043b\u044c\u043a\u043e \u043c\u0438\u043d\u0443\u0442)'
+        'su_skipped' = '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043f\u0430\u043a\u0435\u0442\u044b \u043f\u0440\u0435\u0434\u0432\u0430\u0440\u0438\u0442\u0435\u043b\u044c\u043d\u043e \u043d\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u044f\u044e\u0442\u0441\u044f (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043f\u0430\u043a\u0435\u0442\u044b \u043e\u0431\u043d\u043e\u0432\u043b\u044f\u043b\u0438\u0441\u044c \u043c\u0435\u043d\u0435\u0435 6 \u0447\u0430\u0441\u043e\u0432 \u043d\u0430\u0437\u0430\u0434: \u043f\u043e\u0432\u0442\u043e\u0440\u043d\u043e \u043d\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u044f\u044e\u0442\u0441\u044f.'
+        'su_dry' = '\u0441\u043d\u0430\u0447\u0430\u043b\u0430 \u0431\u044b\u043b\u0438 \u0431\u044b \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u044b \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043f\u0430\u043a\u0435\u0442\u044b (\u043f\u0440\u043e\u043f\u0443\u0441\u0442\u0438\u0442\u044c: TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = '\u041d\u0435\u0442 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043c\u043e\u0433\u043e \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u0430 \u043f\u0430\u043a\u0435\u0442\u043e\u0432 \u0434\u043b\u044f \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u044b: \u0448\u0430\u0433 \u043f\u0440\u043e\u043f\u0443\u0449\u0435\u043d, \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0435\u0442\u0441\u044f.'
+        'su_failed' = '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043f\u0430\u043a\u0435\u0442\u044b (\u043a\u043e\u0434 {0}); \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0435\u0442\u0441\u044f \u0431\u0435\u0437 \u044d\u0442\u043e\u0433\u043e. \u041f\u043e\u0434\u0440\u043e\u0431\u043d\u043e\u0441\u0442\u0438: {1}. \u0427\u0442\u043e \u0434\u0435\u043b\u0430\u0442\u044c: \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0432\u0440\u0443\u0447\u043d\u0443\u044e \u0438 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0439\u0442\u0435 \u043e\u0448\u0438\u0431\u043a\u0443 (\u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0451\u043d \u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u0439? \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u0434\u0440\u0443\u0433\u043e\u0439 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440 \u043f\u0430\u043a\u0435\u0442\u043e\u0432?) \u043b\u0438\u0431\u043e \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443 \u0441 TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = '\u0414\u043b\u044f \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0438\u044f \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u044b \u043d\u0443\u0436\u043d\u043e \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u0441\u0435\u0440\u0432\u0435\u0440 (\u043d\u043e\u0432\u043e\u0435 \u044f\u0434\u0440\u043e \u0438\u043b\u0438 \u0431\u0438\u0431\u043b\u0438\u043e\u0442\u0435\u043a\u0438). ToutWAF \u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u0442 \u0435\u0433\u043e \u0437\u0430 \u0432\u0430\u0441: \u0441\u0434\u0435\u043b\u0430\u0439\u0442\u0435 \u044d\u0442\u043e, \u043a\u043e\u0433\u0434\u0430 \u0441\u043c\u043e\u0436\u0435\u0442\u0435.'
+        'q_sysupdate' = '\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043f\u0430\u043a\u0435\u0442\u044b (\u0440\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u0435\u0442\u0441\u044f)?'
+        'pr_disk_full' = '\u0421\u0432\u043e\u0431\u043e\u0434\u043d\u043e \u0442\u043e\u043b\u044c\u043a\u043e {0} \u041c\u0411 \u043d\u0430 {1} (\u043d\u0443\u0436\u043d\u043e \u043d\u0435 \u043c\u0435\u043d\u0435\u0435 {2} \u041c\u0411): \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043d\u0435 \u0441\u043c\u043e\u0436\u0435\u0442 \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044c\u0441\u044f.'
+        'pr_disk_full_a' = '\u041e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u043c\u0435\u0441\u0442\u043e (\u043a\u044d\u0448 \u043f\u0430\u043a\u0435\u0442\u043e\u0432: apt-get clean \u0438\u043b\u0438 dnf clean all; \u0441\u0442\u0430\u0440\u044b\u0435 \u0436\u0443\u0440\u043d\u0430\u043b\u044b: journalctl --vacuum-size=100M) \u0438 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443. \u0427\u0442\u043e\u0431\u044b \u0432\u0441\u0451 \u0440\u0430\u0432\u043d\u043e \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c: TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = '\u041e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u043c\u0435\u0441\u0442\u043e (\u041e\u0447\u0438\u0441\u0442\u043a\u0430 \u0434\u0438\u0441\u043a\u0430, \u043e\u0447\u0438\u0441\u0442\u043a\u0430 \u043a\u043e\u0440\u0437\u0438\u043d\u044b) \u0438 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443. \u0427\u0442\u043e\u0431\u044b \u0432\u0441\u0451 \u0440\u0430\u0432\u043d\u043e \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c: $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = '\u0421\u0432\u043e\u0431\u043e\u0434\u043d\u043e \u0442\u043e\u043b\u044c\u043a\u043e {0} \u041c\u0411 \u043d\u0430 {1} (\u043a\u043e\u043c\u0444\u043e\u0440\u0442\u043d\u043e \u2014 \u043e\u043a\u043e\u043b\u043e {2} \u041c\u0411).'
+        'pr_disk_low_a' = '\u041e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u043c\u0435\u0441\u0442\u043e \u0438\u043b\u0438 \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0434\u0438\u0441\u043a; \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043c\u043e\u0436\u0435\u0442 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0442\u044c\u0441\u044f.'
+        'pr_dns' = '\u042d\u0442\u0430 \u043c\u0430\u0448\u0438\u043d\u0430 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044c \u0438\u043c\u044f {0} (DNS).'
+        'pr_dns_a' = '\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 DNS-\u0441\u0435\u0440\u0432\u0435\u0440\u044b (cat /etc/resolv.conf, resolvectl status), \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0440\u0430\u0431\u043e\u0447\u0438\u0439, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440 nameserver 9.9.9.9, \u0438 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443.'
+        'pr_dns_w_a' = '\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 DNS-\u0441\u0435\u0440\u0432\u0435\u0440\u044b \u043a\u043e\u043c\u0430\u043d\u0434\u043e\u0439 ''ipconfig /all'', \u0443\u043a\u0430\u0436\u0438\u0442\u0435 \u0440\u0430\u0431\u043e\u0447\u0438\u0439 (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, 9.9.9.9) \u0432 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430\u0445 \u0441\u0435\u0442\u0435\u0432\u043e\u0433\u043e \u0430\u0434\u0430\u043f\u0442\u0435\u0440\u0430 \u0438 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443.'
+        'pr_clock' = '\u0427\u0430\u0441\u044b \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u044b \u0440\u0430\u0441\u0445\u043e\u0434\u044f\u0442\u0441\u044f \u0441 \u0438\u043d\u0442\u0435\u0440\u043d\u0435\u0442-\u0432\u0440\u0435\u043c\u0435\u043d\u0435\u043c \u043d\u0430 {0} \u0441: \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u044b TLS \u0438 \u043f\u043e\u0434\u043f\u0438\u0441\u0438 \u043d\u0435 \u043f\u0440\u043e\u0445\u043e\u0434\u044f\u0442 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u043f\u0440\u0438 \u043d\u0435\u0432\u0435\u0440\u043d\u044b\u0445 \u0447\u0430\u0441\u0430\u0445.'
+        'pr_clock_a' = '\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u0443\u0439\u0442\u0435 \u0447\u0430\u0441\u044b: timedatectl set-ntp true (\u0438\u043b\u0438 chronyc makestep), \u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 timedatectl \u0438 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443.'
+        'pr_clock_w_a' = '\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u0443\u0439\u0442\u0435 \u0447\u0430\u0441\u044b: w32tm /resync (\u0438\u043b\u0438 \u041f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b > \u0412\u0440\u0435\u043c\u044f \u0438 \u044f\u0437\u044b\u043a > \u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u0442\u044c) \u0438 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443.'
+        'pr_ok' = '\u041c\u0435\u0441\u0442\u043e \u043d\u0430 \u0434\u0438\u0441\u043a\u0435, DNS \u0438 \u0447\u0430\u0441\u044b \u0432 \u043f\u043e\u0440\u044f\u0434\u043a\u0435.'
     }
     'zh' = @{
         'tagline' = 'Web \u5e94\u7528\u4e0e API \u9632\u62a4'
@@ -1446,7 +1977,7 @@ $script:Catalog = @{
         'q_public_host' = '\u516c\u7f51\u4e3b\u673a\u540d\u6216 IP \u5730\u5740\uff08\u7559\u7a7a = \u81ea\u52a8\u68c0\u6d4b\uff09'
         'q_firewall' = '\u662f\u5426\u81ea\u52a8\u653e\u884c\u9632\u706b\u5899\u7aef\u53e3\uff08firewalld / ufw\uff09\uff1f'
         'q_boot' = '\u662f\u5426\u5f00\u673a\u81ea\u52a8\u542f\u52a8\u670d\u52a1\uff1f'
-        'q_channel' = '\u53d1\u5e03\u901a\u9053\uff08stable / beta\uff09'
+        'q_channel' = '\u53d1\u5e03\u901a\u9053\uff08stable / dev\uff09'
         'q_bindir' = '\u5b89\u88c5\u76ee\u5f55'
         'q_confirm' = '\u5f00\u59cb\u5b89\u88c5\uff1f'
         'q_purge' = '\u540c\u65f6\u5220\u9664\u914d\u7f6e\u3001\u6570\u636e\u548c\u65e5\u5fd7\uff1f\uff08\u5426 = \u4fdd\u7559\uff09'
@@ -1488,7 +2019,13 @@ $script:Catalog = @{
         'st_latest' = '\u6700\u65b0\u53ef\u7528\u7248\u672c\uff1a{0}'
         'st_newer' = '\u6709\u53ef\u7528\u66f4\u65b0\uff1a\u8bf7\u4f7f\u7528 --update \u8fd0\u884c'
         'e_yanked' = '\u7248\u672c {0} \u5df2\u88ab\u64a4\u56de\uff08yanked\uff09\uff0c\u4e0d\u5e94\u5b89\u88c5\u3002\u8bf7\u8fd0\u884c --update \u83b7\u53d6\u5f53\u524d\u7248\u672c\uff0c\u6216\u4f7f\u7528 --force \u5f3a\u5236\u3002'
+        'e_nover' = '{0} \u901a\u9053\u5c1a\u672a\u53d1\u5e03\u4efb\u4f55\u7248\u672c\uff0c\u56e0\u6b64\u6ca1\u6709\u53ef\u5b89\u88c5\u7684\u5185\u5bb9\u3002\u672a\u5b89\u88c5\u6216\u66f4\u6539 ToutWAF\u3002\u82e5\u8981\u6539\u4ece {1} \u901a\u9053\u5b89\u88c5\uff0c\u8bf7\u4f7f\u7528 -Channel {2} \u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002'
         'e_installer_old' = '\u6b64\u5b89\u88c5\u7a0b\u5e8f\u5bf9\u8be5\u7248\u672c\u800c\u8a00\u592a\u65e7\uff08\u9700\u8981\u7248\u672c {0}\uff09\uff1a\u8bf7\u4ece\u901a\u9053 URL \u91cd\u65b0\u4e0b\u8f7d\u3002'
+        'up_rebuilt' = '\u7248\u672c\u76f8\u540c\uff0c\u6709\u65b0\u6784\u5efa\uff1a\u5df2\u5b89\u88c5 {0}\uff0c\u53ef\u7528 {1}\u3002\u6b63\u5728\u66f4\u65b0\u3002'
+        'st_newbuild' = '\u7248\u672c\u76f8\u540c\uff0c\u6709\u65b0\u6784\u5efa\uff1a\u8bf7\u4f7f\u7528 {0} \u518d\u6b21\u8fd0\u884c'
+        'st_nochannel' = '\u6700\u65b0\u53ef\u7528\u7248\u672c\uff1a\u6b64\u6e20\u9053\u5c1a\u672a\u53d1\u5e03\u4efb\u4f55\u5185\u5bb9'
+        'w_mirror' = '\u516c\u5171\u955c\u50cf\u63d0\u4f9b\u7684\u6587\u4ef6\u5f7c\u6b64\u4e0d\u4e00\u81f4\uff08{0}\uff09\uff1a\u5f88\u53ef\u80fd\u662f\u53d1\u5e03\u540e\u4ecd\u5728\u5237\u65b0\u3002\u5c06\u91cd\u65b0\u8bfb\u53d6\u4e00\u6b21\u6e20\u9053\u3002'
+        'e_mismatch' = '{0} \u7684\u6821\u9a8c\u548c\u4e0d\u5339\u914d\uff08{1}\uff09\uff1a\u4e0b\u8f7d\u7684\u6587\u4ef6\u4e0e\u5df2\u53d1\u5e03\u7684\u6821\u9a8c\u548c\u4e0d\u4e00\u81f4\uff0c\u56e0\u6b64\u672a\u5b89\u88c5\u6216\u66f4\u6539\u4efb\u4f55\u5185\u5bb9\u3002\u53d1\u5e03\u540e\u7684\u51e0\u5206\u949f\u5185\uff0c\u516c\u5171\u955c\u50cf\u53ef\u80fd\u4ecd\u63d0\u4f9b\u65e7\u6587\u4ef6\uff1a\u8bf7\u7b49\u5f85\u4e94\u5206\u949f\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002\u82e5\u518d\u6b21\u51fa\u73b0\uff0c\u8bf7\u52ff\u5b89\u88c5\uff1a\u8be5\u53d1\u5e03\u5df2\u635f\u574f\u3002'
         'e_downgrade' = '\u6700\u65b0\u7248\u672c {0}\uff08\u901a\u9053 {1}\uff09\u6bd4\u5df2\u5b89\u88c5\u7684 {2} \u65e7\uff1a\u4f7f\u7528 --force \u964d\u7ea7\u3002'
         's_sigok' = '\u53d1\u5e03\u7b7e\u540d\u6821\u9a8c\u901a\u8fc7\uff0c\u5bc6\u94a5 {0}'
         'w_sigold' = '\u7248\u672c {0} \u53d1\u5e03\u65f6\u6ca1\u6709\u7b7e\u540d\uff080.2.0-dev.7 \u4e4b\u524d\u7684\u7248\u672c\u5747\u672a\u7b7e\u540d\uff09\uff1a\u4ec5\u6821\u9a8c\u4e86 SHA-256\uff0c\u65e0\u6cd5\u6821\u9a8c\u7b7e\u540d'
@@ -1519,6 +2056,20 @@ $script:Catalog = @{
         'sum_file' = '\u6458\u8981\u5df2\u4fdd\u5b58\uff08\u4ec5 root \u53ef\u8bfb\uff09\uff1a{0}'
         'sum_fallback' = '\u8be5\u63a7\u5236\u5e73\u9762\u5c1a\u65e0 ''bootstrap'' \u547d\u4ee4\uff1a\u8bf7\u6253\u5f00\u63a7\u5236\u53f0\u5730\u5740\u5e76\u6309\u8bbe\u7f6e\u9875\u9762\u64cd\u4f5c\u3002'
         'sum_node_hint' = '\u8981\u5728\u63a7\u5236\u53f0\u7ba1\u7406\u6b64\u8282\u70b9\uff1a\u8282\u70b9 > \u6dfb\u52a0\u8282\u70b9\uff0c\u7136\u540e\u5728 {0} \u4e2d\u8bbe\u7f6e control_plane.url / enroll_token\u3002'
+        'q_fwmodule' = '\u662f\u5426\u4e5f\u8ba9 ToutWAF \u7ba1\u7406\u672c\u673a\u7684\u9632\u706b\u5899\uff1f'
+        'fwmod_n1' = '\u53ef\u9009\u6a21\u5757\uff0c\u9664\u975e\u56de\u7b54\u201c\u662f\u201d\u5426\u5219\u4fdd\u6301\u5173\u95ed\u3002\u5b89\u88c5\u671f\u95f4\u4e0d\u4f1a\u5e94\u7528\u4efb\u4f55\u89c4\u5219\uff1a\u6bcf\u9879\u66f4\u6539\u90fd\u5728\u63a7\u5236\u53f0\u4e2d\u5ba1\u6838\u3002'
+        'fwmod_n2' = '\u6bcf\u9879\u66f4\u6539\u90fd\u5148\u8bd5\u7528\u5e76\u5012\u8ba1\u65f6\uff0c\u82e5\u4e0d\u4fdd\u7559\u4f1a\u81ea\u52a8\u56de\u9000\uff1b\u9632\u9501\u6b7b\u4fdd\u62a4\u4f1a\u62d2\u7edd\u4efb\u4f55\u53ef\u80fd\u5207\u65ad SSH \u6216\u63a7\u5236\u53f0\u7684\u89c4\u5219\u3002'
+        'fwmod_n3' = '\u8fd9\u4e0d\u540c\u4e8e\u4e0a\u4e00\u4e2a\u95ee\u9898\uff08\u5b83\u53ea\u5728\u7cfb\u7edf\u9632\u706b\u5899\u4e2d\u653e\u884c ToutWAF \u9700\u8981\u7684\u7aef\u53e3\uff0c\u5bf9\u5e94 --no-firewall\uff09\u3002'
+        's_fwmod' = '\u6b63\u5728\u542f\u7528\u9632\u706b\u5899\u6a21\u5757\uff08\u4e0d\u5e94\u7528\u4efb\u4f55\u89c4\u5219\uff09'
+        'fwmod_done' = '\u9632\u706b\u5899\u6a21\u5757\u5df2\u542f\u7528\u3002\u672a\u5e94\u7528\u4efb\u4f55\u89c4\u5219\uff1a\u8bf7\u5728\u63a7\u5236\u53f0\u6253\u5f00\u201c\u9632\u706b\u5899\u201d\u6765\u5ba1\u6838\u5e76\u8bd5\u7528\u89c4\u5219\u3002'
+        'fwmod_fail' = '\u65e0\u6cd5\u542f\u7528\u9632\u706b\u5899\u6a21\u5757\uff08{0}\uff09\u3002\u5b89\u88c5\u7ee7\u7eed\uff1b\u7a0d\u540e\u53ef\u5728\u201c\u8bbe\u7f6e > \u6a21\u5757\u201d\u4e2d\u542f\u7528\u3002'
+        's_link' = '\u6b63\u5728\u5c06\u6570\u636e\u5e73\u9762\u5173\u8054\u5230\u63a7\u5236\u53f0'
+        'dp_link_ok' = '\u6570\u636e\u5e73\u9762\u5df2\u81ea\u52a8\u5173\u8054\u5230\u63a7\u5236\u53f0\uff1a\u65e0\u9700\u624b\u52a8\u914d\u7f6e\u3002'
+        'dp_link_same' = '\u6570\u636e\u5e73\u9762\u5df2\u5173\u8054\u5230\u63a7\u5236\u53f0\uff1b\u5176\u914d\u7f6e\u672a\u4f5c\u4fee\u6539\u3002'
+        'dp_link_fixed' = '\u6570\u636e\u5e73\u9762\u914d\u7f6e\u5df2\u4fee\u590d\uff08\u91cd\u590d\u7684 control_plane \u5757\u5df2\u5408\u5e76\u4e3a\u4e00\u4e2a\uff09\uff1b\u539f\u6587\u4ef6\u5df2\u4fdd\u7559\u3002'
+        'dp_link_remote' = '\u6b64\u673a\u5668\u4e0a\u7684\u6570\u636e\u5e73\u9762\u5df2\u914d\u7f6e\u4e3a\u4f7f\u7528\u53e6\u4e00\u4e2a\u63a7\u5236\u53f0\uff1b\u672a\u4f5c\u4fee\u6539\u3002'
+        'dp_link_fail' = '\u65e0\u6cd5\u81ea\u52a8\u5c06\u6570\u636e\u5e73\u9762\u5173\u8054\u5230\u63a7\u5236\u53f0\uff1a{0}'
+        'dp_link_fail_hint' = '\u6570\u636e\u5e73\u9762\u4fdd\u7559\u5176\u72ec\u7acb\u914d\u7f6e\uff0c\u5728\u5173\u8054\u4e4b\u524d\u7ad9\u70b9\u5c06\u8fd4\u56de HTTP 421\u3002\u8bf7\u6392\u9664\u4e0a\u8ff0\u539f\u56e0\u540e\u91cd\u65b0\u8fd0\u884c\u6b64\u5b89\u88c5\u7a0b\u5e8f\uff1a\u5b83\u4f1a\u81ea\u52a8\u5173\u8054\u8be5\u8282\u70b9\u3002'
         'st_title' = '\u72b6\u6001'
         'st_healthy' = '\u6b63\u5e38'
         'st_unhealthy' = '\u5f02\u5e38'
@@ -1575,6 +2126,52 @@ $script:Catalog = @{
         'cp_r_arm32' = 'ToutWAF \u4e0d\u652f\u6301 32 \u4f4d ARM\uff08armv7\uff09\u3002\u8bf7\u5b89\u88c5 64 \u4f4d\u7cfb\u7edf\uff0864 \u4f4d Raspberry Pi OS\u3001Ubuntu \u6216 Debian arm64\uff1bRaspberry Pi 3\u30014\u30015 \u6216 Zero 2 W\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002'
         'cp_r_arm_userland32' = '\u5185\u6838\u662f 64 \u4f4d\uff0c\u4f46\u7cfb\u7edf\uff08\u7528\u6237\u7a7a\u95f4\uff09\u662f 32 \u4f4d\u3002ToutWAF \u9700\u8981 64 \u4f4d\u7cfb\u7edf\uff1a\u8bf7\u91cd\u65b0\u5b89\u88c5 64 \u4f4d Raspberry Pi OS\uff08Raspberry Pi Imager\uff1aRaspberry Pi OS (64-bit)\uff09\u6216 Ubuntu / Debian arm64\u3002'
         'cp_w_pi' = '\u68c0\u6d4b\u5230 Raspberry Pi\uff1aarm64 \u4ec5\u5728\u4eff\u771f\u4e0b\u505a\u8fc7\u5192\u70df\u6d4b\u8bd5\uff0c\u672a\u5728\u771f\u5b9e\u786c\u4ef6\u4e0a\u6d4b\u8bd5\u3002\u8bf7\u628a\u6570\u636e\u548c\u65e5\u5fd7\u653e\u5728 SSD / USB \u76d8\u800c\u4e0d\u662f SD \u5361\u4e0a\uff0c\u5185\u5b58\u4f4e\u4e8e 2 GB \u65f6\u907f\u514d\u4e00\u4f53\u5316\u5b89\u88c5\uff08\u89c1 docs/install/raspberry-pi.md\uff09\u3002'
+        'pf_title' = '\u6b63\u5728\u68c0\u67e5\u8fd9\u53f0\u673a\u5668\u7684\u9700\u6c42'
+        'pf_ok' = '\u6ca1\u6709\u4efb\u4f55\u963b\u788d\uff1aToutWAF \u9700\u8981\u7684\u7aef\u53e3\u90fd\u662f\u7a7a\u95f2\u7684\u3002'
+        'pf_refused' = 'ToutWAF \u65e0\u6cd5\u5728\u8fd9\u53f0\u673a\u5668\u7684\u5f53\u524d\u72b6\u6001\u4e0b\u5b89\u88c5\u3002\u672a\u505a\u4efb\u4f55\u66f4\u6539\u3002'
+        'pf_ok_warn' = '\u6ca1\u6709\u4ec0\u4e48\u4f1a\u963b\u6b62\u5b89\u88c5\uff0c\u4f46\u8bf7\u9605\u8bfb\u4e0a\u9762\u7684\u51e0\u70b9\u3002'
+        'pf_l_refuse' = '\u62d2\u7edd'
+        'pf_l_warn' = '\u6ce8\u610f'
+        'pf_l_info' = '\u8bf4\u660e'
+        'pf_port_busy' = '{0} \u7aef\u53e3\u5df2\u88ab {1} \u5360\u7528\u3002'
+        'pf_prog_other' = '\u53e6\u4e00\u4e2a\u7a0b\u5e8f'
+        'pf_prog_unknown' = '\u53e6\u4e00\u4e2a\u7a0b\u5e8f\uff08\u65e0\u6cd5\u8bfb\u53d6\u5176\u540d\u79f0\uff09'
+        'pf_act_web' = 'ToutWAF \u9700\u8981 {0} \u548c {1} \u7aef\u53e3\u6765\u4fdd\u62a4\u60a8\u7684\u7ad9\u70b9\u3002\u8bf7\u505c\u6b62\u8be5\u7a0b\u5e8f\uff0c\u6216\u5c06\u5176\u79fb\u5230\u5176\u4ed6\u7aef\u53e3\uff08\u4e0e ToutWAF \u5b89\u88c5\u5728\u4e00\u8d77\u7684 ToutPanel \u4f1a\u628a\u5b83\u7684 Web \u670d\u52a1\u5668\u653e\u5728 8080 \u548c 8443 \u7aef\u53e3\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002'
+        'pf_act_console' = 'ToutWAF \u7684\u63a7\u5236\u53f0\u9700\u8981\u4f7f\u7528\u6b64\u7aef\u53e3\u3002\u8bf7\u91ca\u653e\u8be5\u7aef\u53e3\uff0c\u6216\u4e3a\u63a7\u5236\u53f0\u9009\u62e9\u5176\u4ed6\u7aef\u53e3\uff08\u5b89\u88c5\u7a0b\u5e8f\u4f1a\u5728\u83dc\u5355\u4e2d\u8be2\u95ee\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002'
+        'pf_act_agent' = 'ToutWAF \u4f7f\u7528\u6b64\u7aef\u53e3\u63a5\u6536\u8fde\u63a5\u5b83\u7684\u6570\u636e\u5e73\u9762\u548c\u4ee3\u7406\u3002\u8bf7\u91ca\u653e\u8be5\u7aef\u53e3\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002'
+        'pf_act_admin' = '\u6570\u636e\u5e73\u9762\u4ec5\u5728\u8fd9\u53f0\u673a\u5668\u4e0a\u4f7f\u7528\u6b64\u7aef\u53e3\uff0c\u7528\u4e8e\u81ea\u8eab\u7684\u5065\u5eb7\u68c0\u67e5\u3002\u8bf7\u91ca\u653e\u8be5\u7aef\u53e3\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002'
+        'pf_nostart' = '\uff08\u73b0\u5728\u4e0d\u4f1a\u542f\u52a8\u4efb\u4f55\u670d\u52a1\uff0c\u56e0\u6b64\u4ec5\u4f5c\u63d0\u793a\uff09'
+        'pf_boot' = '{0} \u5df2\u5b89\u88c5\u5e76\u4f1a\u968f\u673a\u5668\u542f\u52a8\uff0c\u5c3d\u7ba1\u5b83\u73b0\u5728\u5df2\u505c\u6b62\u3002\u4e0b\u6b21\u91cd\u542f\u540e\uff0c\u5b83\u4f1a\u62a2\u5728 ToutWAF \u4e4b\u524d\u5360\u7528 {1} \u548c {2} \u7aef\u53e3\u3002'
+        'pf_act_boot' = '\u8bf7\u5728\u673a\u5668\u91cd\u542f\u524d\u7981\u7528\u5b83\u7684\u5f00\u673a\u542f\u52a8\uff0c\u6216\u5c06\u5176\u79fb\u5230\u5176\u4ed6\u7aef\u53e3\u3002'
+        'pf_fw_cause' = '\u9632\u706b\u5899\uff08{0}\uff09\u5904\u4e8e\u542f\u7528\u72b6\u6001\u4e14\u4e0d\u653e\u884c {1} \u548c {2} \u7aef\u53e3\uff0c\u800c\u5b89\u88c5\u7a0b\u5e8f\u88ab\u8981\u6c42\u4e0d\u8981\u4fee\u6539\u5b83\u3002'
+        'pf_fw_action' = '\u8bf7\u5728\u9632\u706b\u5899\u4e2d\u5f00\u653e\u8fd9\u4e9b\u7aef\u53e3\uff0c\u6216\u8ba9\u5b89\u88c5\u7a0b\u5e8f\u6765\u505a\uff08\u4e0d\u8981\u4f7f\u7528 --no-firewall \u9009\u9879\uff09\u3002\u5426\u5219\u5916\u90e8\u65e0\u6cd5\u8bbf\u95ee\u60a8\u7684\u7ad9\u70b9\u3002'
+        'pf_fwx_cause' = '\u8fd9\u53f0\u673a\u5668\u7684\u9632\u706b\u5899\uff08{0}\uff09\u9ed8\u8ba4\u62d2\u7edd\u5165\u7ad9\u8fde\u63a5\uff0c\u4e14\u6ca1\u6709\u9488\u5bf9 {1} \u548c {2} \u7aef\u53e3\u7684\u89c4\u5219\u3002'
+        'pf_fwx_action' = 'ToutWAF \u7edd\u4e0d\u4f1a\u81ea\u884c\u4fee\u6539\u8fd9\u7c7b\u9632\u706b\u5899\u7684\u89c4\u5219\uff1a\u8bf7\u5728\u5176\u914d\u7f6e\u4e2d\u5f00\u653e\u8fd9\u4e9b\u7aef\u53e3\uff0c\u7136\u540e\u68c0\u67e5\u60a8\u7684\u7ad9\u70b9\u3002'
+        'pf_cp_cause' = '\u65e0\u6cd5\u4ece\u8fd9\u53f0\u673a\u5668\u8bbf\u95ee\u63a7\u5236\u5e73\u9762 {0}\u3002'
+        'pf_cp_action' = '\u8bf7\u68c0\u67e5\u5730\u5740\u3001\u63a7\u5236\u5e73\u9762\u662f\u5426\u5728\u8fd0\u884c\uff0c\u4ee5\u53ca\u5176\u9632\u706b\u5899\u662f\u5426\u5141\u8bb8\u8fd9\u53f0\u673a\u5668\u8bbf\u95ee\u5b83\uff08\u9ed8\u8ba4 9444 \u7aef\u53e3\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002'
+        'pf_router_cause' = '\u8fd9\u53f0\u673a\u5668\u4f7f\u7528\u4e13\u7528\u5730\u5740\uff08{0}\uff09\uff1a\u5b83\u5f88\u53ef\u80fd\u4f4d\u4e8e\u8def\u7531\u5668\u4e4b\u540e\u3002'
+        'pf_router_action' = '\u5b89\u88c5\u540e\uff0cToutWAF \u4f1a\u663e\u793a\u9700\u8981\u8f6c\u53d1\u5230\u8fd9\u53f0\u673a\u5668\u7684\u7aef\u53e3\uff0c\u5e76\u63d0\u4f9b\u5e38\u89c1\u8def\u7531\u5668\u7684\u914d\u7f6e\u6587\u4ef6\u3002\u73b0\u5728\u65e0\u9700\u51c6\u5907\u4efb\u4f55\u4e1c\u897f\u3002'
+        'pf_skipped' = '\u5df2\u6309\u60a8\u7684\u8981\u6c42\u8df3\u8fc7\u73af\u5883\u68c0\u67e5\uff1a\u5b58\u5728\u7684\u963b\u788d\u5c06\u5bfc\u81f4\u4e4b\u540e\u7684\u5b89\u88c5\u6216\u542f\u52a8\u5931\u8d25\u3002'
+        's_sysupdate' = '\u6b63\u5728\u66f4\u65b0\u7cfb\u7edf\u8f6f\u4ef6\u5305\uff08\u53ef\u80fd\u9700\u8981\u51e0\u5206\u949f\uff09'
+        'su_skipped' = '\u4e0d\u4f1a\u5148\u66f4\u65b0\u7cfb\u7edf\u8f6f\u4ef6\u5305\uff08TOUTWAF_SKIP_SYSUPDATE\uff09\u3002'
+        'su_recent' = '\u7cfb\u7edf\u8f6f\u4ef6\u5305\u5728 6 \u5c0f\u65f6\u5185\u5df2\u66f4\u65b0\u8fc7\uff0c\u4e0d\u518d\u91cd\u590d\u3002'
+        'su_dry' = '\u5c06\u5148\u66f4\u65b0\u7cfb\u7edf\u8f6f\u4ef6\u5305\uff08\u4f7f\u7528 TOUTWAF_SKIP_SYSUPDATE=1 \u53ef\u8df3\u8fc7\uff09'
+        'su_nopm' = '\u6ca1\u6709\u53d7\u652f\u6301\u7684\u5305\u7ba1\u7406\u5668\u53ef\u7528\u4e8e\u66f4\u65b0\u7cfb\u7edf\uff1a\u5df2\u8df3\u8fc7\uff0c\u5b89\u88c5\u7ee7\u7eed\u3002'
+        'su_failed' = '\u7cfb\u7edf\u8f6f\u4ef6\u5305\u66f4\u65b0\u5931\u8d25\uff08\u9000\u51fa\u7801 {0}\uff09\uff1b\u5b89\u88c5\u5c06\u5728\u4e0d\u66f4\u65b0\u7684\u60c5\u51b5\u4e0b\u7ee7\u7eed\u3002\u8be6\u60c5\uff1a{1}\u3002\u5904\u7406\u65b9\u6cd5\uff1a\u8bf7\u81ea\u884c\u8fd0\u884c\u66f4\u65b0\u5e76\u67e5\u770b\u9519\u8bef\uff08\u8f6f\u4ef6\u6e90\u635f\u574f\uff1f\u53e6\u4e00\u4e2a\u5305\u7ba1\u7406\u5668\u6b63\u5728\u8fd0\u884c\uff1f\uff09\uff0c\u6216\u52a0\u4e0a TOUTWAF_SKIP_SYSUPDATE=1 \u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002'
+        'su_reboot' = '\u9700\u8981\u91cd\u542f\u6b64\u670d\u52a1\u5668\u624d\u80fd\u5b8c\u6210\u7cfb\u7edf\u66f4\u65b0\uff08\u65b0\u5185\u6838\u6216\u5e93\uff09\u3002ToutWAF \u7edd\u4e0d\u4f1a\u66ff\u60a8\u91cd\u542f\uff1a\u8bf7\u5728\u65b9\u4fbf\u65f6\u81ea\u884c\u91cd\u542f\u3002'
+        'q_sysupdate' = '\u5148\u66f4\u65b0\u7cfb\u7edf\u8f6f\u4ef6\u5305\uff08\u63a8\u8350\uff09\uff1f'
+        'pr_disk_full' = '\u4ec5\u5269 {0} MB \u53ef\u7528\u7a7a\u95f4\uff0c\u4f4d\u4e8e {1}\uff08\u81f3\u5c11\u9700\u8981 {2} MB\uff09\uff1a\u5b89\u88c5\u65e0\u6cd5\u5b8c\u6210\u3002'
+        'pr_disk_full_a' = '\u8bf7\u91ca\u653e\u4e00\u4e9b\u7a7a\u95f4\uff08\u8f6f\u4ef6\u5305\u7f13\u5b58\uff1aapt-get clean \u6216 dnf clean all\uff1b\u65e7\u65e5\u5fd7\uff1ajournalctl --vacuum-size=100M\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002\u5982\u8981\u5f3a\u884c\u7ee7\u7eed\uff1aTOUTWAF_SKIP_PREREQ=1\u3002'
+        'pr_disk_full_w_a' = '\u8bf7\u91ca\u653e\u4e00\u4e9b\u7a7a\u95f4\uff08\u78c1\u76d8\u6e05\u7406\u3001\u6e05\u7a7a\u56de\u6536\u7ad9\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002\u5982\u8981\u5f3a\u884c\u7ee7\u7eed\uff1a$env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = '\u4ec5\u5269 {0} MB \u53ef\u7528\u7a7a\u95f4\uff0c\u4f4d\u4e8e {1}\uff08\u7ea6 {2} MB \u8f83\u4e3a\u5bbd\u88d5\uff09\u3002'
+        'pr_disk_low_a' = '\u8bf7\u91ca\u653e\u7a7a\u95f4\u6216\u589e\u52a0\u78c1\u76d8\uff1b\u5b89\u88c5\u53ef\u4ee5\u7ee7\u7eed\u3002'
+        'pr_dns' = '\u8fd9\u53f0\u673a\u5668\u65e0\u6cd5\u89e3\u6790\u540d\u79f0 {0}\uff08DNS\uff09\u3002'
+        'pr_dns_a' = '\u8bf7\u68c0\u67e5 DNS \u670d\u52a1\u5668\uff08cat /etc/resolv.conf\u3001resolvectl status\uff09\uff0c\u6dfb\u52a0\u4e00\u4e2a\u53ef\u7528\u7684\u670d\u52a1\u5668\uff0c\u4f8b\u5982 nameserver 9.9.9.9\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002'
+        'pr_dns_w_a' = '\u8bf7\u7528 ''ipconfig /all'' \u68c0\u67e5 DNS \u670d\u52a1\u5668\uff0c\u5728\u7f51\u7edc\u9002\u914d\u5668\u8bbe\u7f6e\u4e2d\u586b\u5165\u4e00\u4e2a\u53ef\u7528\u7684\u670d\u52a1\u5668\uff08\u4f8b\u5982 9.9.9.9\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002'
+        'pr_clock' = '\u8fd9\u53f0\u673a\u5668\u7684\u65f6\u949f\u4e0e\u4e92\u8054\u7f51\u65f6\u95f4\u76f8\u5dee {0} \u79d2\uff1a\u65f6\u949f\u4e0d\u51c6\u65f6\uff0cTLS \u8bc1\u4e66\u548c\u7b7e\u540d\u6821\u9a8c\u4f1a\u5931\u8d25\u3002'
+        'pr_clock_a' = '\u8bf7\u540c\u6b65\u65f6\u949f\uff1atimedatectl set-ntp true\uff08\u6216 chronyc makestep\uff09\uff0c\u7528 timedatectl \u68c0\u67e5\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002'
+        'pr_clock_w_a' = '\u8bf7\u540c\u6b65\u65f6\u949f\uff1aw32tm /resync\uff08\u6216 \u8bbe\u7f6e > \u65f6\u95f4\u548c\u8bed\u8a00 > \u7acb\u5373\u540c\u6b65\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002'
+        'pr_ok' = '\u78c1\u76d8\u7a7a\u95f4\u3001DNS \u548c\u65f6\u949f\u5747\u6b63\u5e38\u3002'
     }
     'ar' = @{
         'tagline' = '\u062d\u0645\u0627\u064a\u0629 \u062a\u0637\u0628\u064a\u0642\u0627\u062a \u0627\u0644\u0648\u064a\u0628 \u0648\u0648\u0627\u062c\u0647\u0627\u062a API'
@@ -1650,7 +2247,13 @@ $script:Catalog = @{
         'st_latest' = '\u0623\u062d\u062f\u062b \u0625\u0635\u062f\u0627\u0631 \u0645\u062a\u0627\u062d: {0}'
         'st_newer' = '\u062a\u062d\u062f\u064a\u062b \u0645\u062a\u0627\u062d: \u0634\u063a\u0651\u0644 \u0645\u0639 --update'
         'e_yanked' = '\u062a\u0645 \u0633\u062d\u0628 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0} (yanked) \u0648\u0644\u0627 \u064a\u062c\u0628 \u062a\u062b\u0628\u064a\u062a\u0647. \u0634\u063a\u0651\u0644 --update \u0644\u0644\u0625\u0635\u062f\u0627\u0631 \u0627\u0644\u062d\u0627\u0644\u064a \u0623\u0648 --force \u0644\u0644\u062a\u062c\u0627\u0648\u0632.'
-        'e_installer_old' = '\u0647\u0630\u0627 \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0642\u062f\u064a\u0645 \u062c\u062f\u0627 \u0644\u0647\u0630\u0627 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 (\u064a\u062a\u0637\u0644\u0628 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0}): \u0646\u0632\u0651\u0644\u0647 \u0645\u0646 \u062c\u062f\u064a\u062f \u0645\u0646 \u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0642\u0646\u0627\u0629.'
+        'e_nover' = '\u0644\u0645 \u064a\u064f\u0646\u0634\u0631 \u0623\u064a \u0625\u0635\u062f\u0627\u0631 \u0639\u0644\u0649 \u0627\u0644\u0642\u0646\u0627\u0629 {0} \u0628\u0639\u062f\u060c \u0644\u0630\u0644\u0643 \u0644\u0627 \u064a\u0648\u062c\u062f \u0645\u0627 \u064a\u0645\u0643\u0646 \u062a\u062b\u0628\u064a\u062a\u0647. \u0644\u0645 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a ToutWAF \u0623\u0648 \u062a\u063a\u064a\u064a\u0631\u0647. \u0644\u0644\u062a\u062b\u0628\u064a\u062a \u0645\u0646 \u0627\u0644\u0642\u0646\u0627\u0629 {1} \u0634\u063a\u0651\u0644 \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0645\u062c\u062f\u062f\u064b\u0627 \u0645\u0639 -Channel {2}.'
+        'e_installer_old' = '\u0647\u0630\u0627 \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0642\u062f\u064a\u0645 \u062c\u062f\u064b\u0627 \u0644\u0647\u0630\u0627 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 (\u064a\u062a\u0637\u0644\u0628 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0}): \u0646\u0632\u0651\u0644\u0647 \u0645\u0646 \u062c\u062f\u064a\u062f \u0645\u0646 \u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0642\u0646\u0627\u0629.'
+        'up_rebuilt' = '\u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0646\u0641\u0633\u0647 \u0648\u0628\u0646\u0627\u0621 \u062c\u062f\u064a\u062f: \u0627\u0644\u0645\u062b\u0628\u0651\u062a {0}\u060c \u0627\u0644\u0645\u062a\u0627\u062d {1}. \u062c\u0627\u0631\u064d \u0627\u0644\u062a\u062d\u062f\u064a\u062b.'
+        'st_newbuild' = '\u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0646\u0641\u0633\u0647 \u0648\u0628\u0646\u0627\u0621 \u062c\u062f\u064a\u062f \u0645\u062a\u0627\u062d: \u0634\u063a\u0651\u0644 \u0645\u062c\u062f\u062f\u064b\u0627 \u0645\u0639 {0}'
+        'st_nochannel' = '\u0623\u062d\u062f\u062b \u0625\u0635\u062f\u0627\u0631 \u0645\u062a\u0627\u062d: \u0644\u0645 \u064a\u064f\u0646\u0634\u0631 \u0634\u064a\u0621 \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u0642\u0646\u0627\u0629 \u0628\u0639\u062f'
+        'w_mirror' = '\u0642\u062f\u0651\u0645\u062a \u0627\u0644\u0645\u0631\u0622\u0629 \u0627\u0644\u0639\u0627\u0645\u0629 \u0645\u0644\u0641\u0627\u062a \u063a\u064a\u0631 \u0645\u062a\u0633\u0642\u0629 \u0641\u064a\u0645\u0627 \u0628\u064a\u0646\u0647\u0627 ({0}): \u0631\u0628\u0645\u0627 \u0645\u0627 \u0632\u0627\u0644\u062a \u062a\u064f\u062d\u062f\u064e\u0651\u062b \u0628\u0639\u062f \u0627\u0644\u0646\u0634\u0631. \u0633\u062a\u064f\u0639\u0627\u062f \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0642\u0646\u0627\u0629 \u0645\u0631\u0629 \u0648\u0627\u062d\u062f\u0629.'
+        'e_mismatch' = '\u0645\u062c\u0645\u0648\u0639 \u0627\u0644\u062a\u062d\u0642\u0642 \u063a\u064a\u0631 \u0645\u0637\u0627\u0628\u0642 \u0644\u0640 {0} ({1}): \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0630\u064a \u0646\u064f\u0632\u0650\u0651\u0644 \u0644\u0627 \u064a\u0637\u0627\u0628\u0642 \u0627\u0644\u0645\u062c\u0645\u0648\u0639 \u0627\u0644\u0645\u0646\u0634\u0648\u0631\u060c \u0644\u0630\u0644\u0643 \u0644\u0645 \u064a\u064f\u062b\u0628\u064e\u0651\u062a \u0623\u0648 \u064a\u064f\u063a\u064a\u064e\u0651\u0631 \u0623\u064a \u0634\u064a\u0621. \u0628\u0639\u062f \u0627\u0644\u0646\u0634\u0631 \u0645\u0628\u0627\u0634\u0631\u0629 \u0642\u062f \u062a\u0642\u062f\u0651\u0645 \u0627\u0644\u0645\u0631\u0622\u0629 \u0627\u0644\u0639\u0627\u0645\u0629 \u0627\u0644\u0645\u0644\u0641\u0627\u062a \u0627\u0644\u0633\u0627\u0628\u0642\u0629 \u0644\u0628\u0636\u0639 \u062f\u0642\u0627\u0626\u0642: \u0627\u0646\u062a\u0638\u0631 \u062e\u0645\u0633 \u062f\u0642\u0627\u0626\u0642 \u0648\u0634\u063a\u0651\u0644 \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0645\u062c\u062f\u062f\u064b\u0627. \u0625\u0646 \u062a\u0643\u0631\u0631 \u0630\u0644\u0643 \u0641\u0644\u0627 \u062a\u062b\u0628\u0651\u062a: \u0627\u0644\u0646\u0634\u0631 \u062a\u0627\u0644\u0641.'
         'e_downgrade' = '\u0623\u062d\u062f\u062b \u0625\u0635\u062f\u0627\u0631 {0} \u0641\u064a \u0627\u0644\u0642\u0646\u0627\u0629 {1} \u0623\u0642\u062f\u0645 \u0645\u0646 \u0627\u0644\u0645\u062b\u0628\u0651\u062a {2}: \u0627\u0633\u062a\u062e\u062f\u0645 --force \u0644\u0644\u0631\u062c\u0648\u0639.'
         's_sigok' = '\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u0625\u0635\u062f\u0627\u0631\u060c \u0627\u0644\u0645\u0641\u062a\u0627\u062d {0}'
         'w_sigold' = '\u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0} \u0646\u064f\u0634\u0631 \u0628\u062f\u0648\u0646 \u062a\u0648\u0642\u064a\u0639 (\u0627\u0644\u0625\u0635\u062f\u0627\u0631\u0627\u062a \u0642\u0628\u0644 0.2.0-dev.7 \u063a\u064a\u0631 \u0645\u0648\u0642\u0651\u0639\u0629): \u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 SHA-256 \u0641\u0642\u0637 \u0648\u0644\u0645 \u064a\u0645\u0643\u0646 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u062a\u0648\u0642\u064a\u0639'
@@ -1681,6 +2284,20 @@ $script:Catalog = @{
         'sum_file' = '\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u0645\u0644\u062e\u0635 (root \u0641\u0642\u0637): {0}'
         'sum_fallback' = '\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062a\u062d\u0643\u0645 \u0647\u0630\u0627 \u0644\u0627 \u064a\u062a\u0636\u0645\u0646 \u0623\u0645\u0631 ''bootstrap'' \u0628\u0639\u062f: \u0627\u0641\u062a\u062d \u0639\u0646\u0648\u0627\u0646 \u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645 \u0648\u0627\u062a\u0628\u0639 \u0635\u0641\u062d\u0629 \u0627\u0644\u0625\u0639\u062f\u0627\u062f.'
         'sum_node_hint' = '\u0644\u0625\u062f\u0627\u0631\u0629 \u0647\u0630\u0647 \u0627\u0644\u0639\u0642\u062f\u0629 \u0645\u0646 \u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645: \u0627\u0644\u0639\u0642\u062f > \u0625\u0636\u0627\u0641\u0629 \u0639\u0642\u062f\u0629\u060c \u062b\u0645 \u0627\u0636\u0628\u0637 control_plane.url / enroll_token \u0641\u064a {0}.'
+        'q_fwmodule' = '\u0647\u0644 \u062a\u0631\u064a\u062f \u0623\u0646 \u064a\u062f\u064a\u0631 ToutWAF \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0644\u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0623\u064a\u0636\u0627\u061f'
+        'fwmod_n1' = '\u0648\u062d\u062f\u0629 \u0627\u062e\u062a\u064a\u0627\u0631\u064a\u0629\u060c \u0645\u062a\u0648\u0642\u0641\u0629 \u0645\u0627 \u0644\u0645 \u062a\u062c\u0628 \u0628\u0646\u0639\u0645. \u0644\u0627 \u064a\u064f\u0637\u0628\u064e\u0651\u0642 \u0634\u064a\u0621 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062b\u0628\u064a\u062a: \u062a\u0631\u0627\u062c\u0639 \u0643\u0644 \u062a\u063a\u064a\u064a\u0631 \u0641\u064a \u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645.'
+        'fwmod_n2' = '\u0643\u0644 \u062a\u063a\u064a\u064a\u0631 \u064a\u0645\u0631 \u0628\u062a\u062c\u0631\u0628\u0629 \u0645\u0639 \u0639\u062f \u062a\u0646\u0627\u0632\u0644\u064a \u0648\u064a\u062a\u0631\u0627\u062c\u0639 \u062a\u0644\u0642\u0627\u0626\u064a\u0627 \u0645\u0627 \u0644\u0645 \u062a\u062d\u062a\u0641\u0638 \u0628\u0647\u061b \u0648\u062a\u0645\u0646\u0639 \u062d\u0645\u0627\u064a\u0629 \u0645\u0636\u0627\u062f\u0629 \u0644\u0644\u0625\u0642\u0641\u0627\u0644 \u0623\u064a \u0642\u0627\u0639\u062f\u0629 \u0642\u062f \u062a\u0642\u0637\u0639 SSH \u0623\u0648 \u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645.'
+        'fwmod_n3' = '\u0647\u0630\u0627 \u0644\u064a\u0633 \u0627\u0644\u0633\u0624\u0627\u0644 \u0627\u0644\u0633\u0627\u0628\u0642 \u0627\u0644\u0630\u064a \u064a\u0641\u062a\u062d \u0641\u0642\u0637 \u0627\u0644\u0645\u0646\u0627\u0641\u0630 \u0627\u0644\u062a\u064a \u064a\u062d\u062a\u0627\u062c\u0647\u0627 ToutWAF \u0641\u064a \u062c\u062f\u0627\u0631 \u062d\u0645\u0627\u064a\u0629 \u0627\u0644\u0646\u0638\u0627\u0645 (--no-firewall).'
+        's_fwmod' = '\u062a\u0641\u0639\u064a\u0644 \u0648\u062d\u062f\u0629 \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 (\u062f\u0648\u0646 \u062a\u0637\u0628\u064a\u0642 \u0623\u064a \u0642\u0627\u0639\u062f\u0629)'
+        'fwmod_done' = '\u062a\u0645 \u062a\u0641\u0639\u064a\u0644 \u0648\u062d\u062f\u0629 \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629. \u0644\u0645 \u064a\u064f\u0637\u0628\u064e\u0651\u0642 \u0634\u064a\u0621: \u0627\u0641\u062a\u062d \u00ab\u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629\u00bb \u0641\u064a \u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645 \u0644\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0642\u0648\u0627\u0639\u062f \u0648\u062a\u062c\u0631\u0628\u062a\u0647\u0627.'
+        'fwmod_fail' = '\u062a\u0639\u0630\u0651\u0631 \u062a\u0641\u0639\u064a\u0644 \u0648\u062d\u062f\u0629 \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 ({0}). \u064a\u0633\u062a\u0645\u0631 \u0627\u0644\u062a\u062b\u0628\u064a\u062a\u061b \u0641\u0639\u0651\u0644\u0647\u0627 \u0644\u0627\u062d\u0642\u0627 \u0645\u0646 \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a > \u0627\u0644\u0648\u062d\u062f\u0627\u062a.'
+        's_link' = '\u0631\u0628\u0637 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0628\u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645'
+        'dp_link_ok' = '\u062a\u0645 \u0631\u0628\u0637 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0628\u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645 \u062a\u0644\u0642\u0627\u0626\u064a\u064b\u0627: \u0644\u0627 \u0634\u064a\u0621 \u0644\u0636\u0628\u0637\u0647 \u064a\u062f\u0648\u064a\u064b\u0627.'
+        'dp_link_same' = '\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0645\u0631\u062a\u0628\u0637 \u0628\u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645 \u0628\u0627\u0644\u0641\u0639\u0644\u061b \u0644\u0645 \u064a\u062a\u0645 \u062a\u0639\u062f\u064a\u0644 \u062a\u0643\u0648\u064a\u0646\u0647.'
+        'dp_link_fixed' = '\u062a\u0645 \u0625\u0635\u0644\u0627\u062d \u062a\u0643\u0648\u064a\u0646 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a (\u062f\u064f\u0645\u062c\u062a \u0643\u062a\u0644 control_plane \u0627\u0644\u0645\u0643\u0631\u0631\u0629 \u0641\u064a \u0643\u062a\u0644\u0629 \u0648\u0627\u062d\u062f\u0629)\u061b \u062a\u0645 \u0627\u0644\u0627\u062d\u062a\u0641\u0627\u0638 \u0628\u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0633\u0627\u0628\u0642.'
+        'dp_link_remote' = '\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0645\u0636\u0628\u0648\u0637 \u0644\u0644\u0639\u0645\u0644 \u0645\u0639 \u0644\u0648\u062d\u0629 \u062a\u062d\u0643\u0645 \u0623\u062e\u0631\u0649\u061b \u0644\u0645 \u064a\u062a\u0645 \u062a\u0639\u062f\u064a\u0644\u0647.'
+        'dp_link_fail' = '\u062a\u0639\u0630\u0651\u0631 \u0631\u0628\u0637 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0628\u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645 \u062a\u0644\u0642\u0627\u0626\u064a\u064b\u0627: {0}'
+        'dp_link_fail_hint' = '\u064a\u062d\u062a\u0641\u0638 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0628\u062a\u0643\u0648\u064a\u0646\u0647 \u0627\u0644\u0645\u0633\u062a\u0642\u0644\u060c \u0644\u0630\u0627 \u062a\u0631\u062f\u0651 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0628\u0627\u0644\u0631\u0645\u0632 HTTP 421 \u0625\u0644\u0649 \u0623\u0646 \u064a\u062a\u0645 \u0631\u0628\u0637\u0647. \u0623\u0635\u0644\u062d \u0627\u0644\u0633\u0628\u0628 \u0623\u0639\u0644\u0627\u0647 \u0648\u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0645\u062b\u0628\u0651\u062a: \u0641\u0647\u0648 \u064a\u0631\u0628\u0637 \u0627\u0644\u0639\u0642\u062f\u0629 \u0628\u0646\u0641\u0633\u0647.'
         'st_title' = '\u0627\u0644\u062d\u0627\u0644\u0629'
         'st_healthy' = '\u0633\u0644\u064a\u0645'
         'st_unhealthy' = '\u063a\u064a\u0631 \u0633\u0644\u064a\u0645'
@@ -1691,7 +2308,7 @@ $script:Catalog = @{
         'un_title' = '\u062c\u0627\u0631 \u0625\u0632\u0627\u0644\u0629 ToutWAF'
         'un_kept' = '\u062a\u0645 \u0627\u0644\u0627\u062d\u062a\u0641\u0627\u0638 \u0628\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0641\u064a {0} \u0648\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0641\u064a {1} (\u0627\u0633\u062a\u062e\u062f\u0645 --purge \u0644\u0644\u062d\u0630\u0641).'
         'un_purged' = '\u062a\u0645 \u062d\u0630\u0641 \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0648\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0633\u062c\u0644\u0627\u062a.'
-        'p_console' = '\u0644\u0648\u062d\u0629 \u0627\u0644\u0648\u064a\u0628 + API'
+        'p_console' = '\u0648\u062d\u062f\u0629 \u062a\u062d\u0643\u0645 \u0627\u0644\u0648\u064a\u0628 + API'
         'p_http' = 'HTTP (\u0648\u0643\u064a\u0644 \u0639\u0643\u0633\u064a)'
         'p_https' = 'HTTPS (\u0648\u0643\u064a\u0644 \u0639\u0643\u0633\u064a)'
         'p_dpapi' = '\u0648\u0627\u062c\u0647\u0629 API \u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a: \u0641\u0642\u0637 \u0625\u0630\u0627 \u0643\u0627\u0646\u062a \u0645\u0633\u062a\u0648\u064a\u0627\u062a \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0639\u0644\u0649 \u0645\u0636\u064a\u0641\u0627\u062a \u0623\u062e\u0631\u0649 (\u0642\u064a\u0651\u062f\u0647\u0627 \u0628\u0639\u0646\u0627\u0648\u064a\u0646\u0647\u0627)'
@@ -1737,6 +2354,52 @@ $script:Catalog = @{
         'cp_r_arm32' = 'ToutWAF \u0644\u0627 \u064a\u062f\u0639\u0645 ARM \u0628\u0646\u0638\u0627\u0645 32 \u0628\u062a (armv7). \u062b\u0628\u0651\u062a \u0646\u0638\u0627\u0645\u0627 \u0628\u0646\u0638\u0627\u0645 64 \u0628\u062a (Raspberry Pi OS 64 \u0628\u062a \u0623\u0648 Ubuntu \u0623\u0648 Debian arm64\u061b Raspberry Pi 3 \u0623\u0648 4 \u0623\u0648 5 \u0623\u0648 Zero 2 W) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a.'
         'cp_r_arm_userland32' = '\u0627\u0644\u0646\u0648\u0627\u0629 64 \u0628\u062a \u0644\u0643\u0646 \u0627\u0644\u0646\u0638\u0627\u0645 (userland) 32 \u0628\u062a. \u064a\u062d\u062a\u0627\u062c ToutWAF \u0625\u0644\u0649 \u0646\u0638\u0627\u0645 64 \u0628\u062a: \u0623\u0639\u062f \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0628\u0627\u0633\u062a\u062e\u062f\u0627\u0645 Raspberry Pi OS 64 \u0628\u062a (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) \u0623\u0648 Ubuntu / Debian arm64.'
         'cp_w_pi' = '\u062a\u0645 \u0627\u0643\u062a\u0634\u0627\u0641 Raspberry Pi: \u0644\u0645 \u062a\u064f\u062e\u062a\u0628\u0631 arm64 \u0625\u0644\u0627 \u062a\u062d\u062a \u0627\u0644\u0645\u062d\u0627\u0643\u0627\u0629 \u0648\u0644\u064a\u0633 \u0639\u0644\u0649 \u0623\u062c\u0647\u0632\u0629 \u062d\u0642\u064a\u0642\u064a\u0629. \u0636\u0639 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0639\u0644\u0649 SSD / \u0642\u0631\u0635 USB \u0628\u062f\u0644\u0627 \u0645\u0646 \u0628\u0637\u0627\u0642\u0629 SD \u0648\u062a\u062c\u0646\u0628 \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0627\u0644\u0634\u0627\u0645\u0644 \u0628\u0623\u0642\u0644 \u0645\u0646 2 \u062c\u064a\u062c\u0627\u0628\u0627\u064a\u062a \u0645\u0646 \u0627\u0644\u0630\u0627\u0643\u0631\u0629 (\u0631\u0627\u062c\u0639 docs/install/raspberry-pi.md).'
+        'pf_title' = '\u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0645\u0627 \u064a\u062d\u062a\u0627\u062c\u0647 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632'
+        'pf_ok' = '\u0644\u0627 \u0634\u064a\u0621 \u064a\u0639\u064a\u0642: \u0627\u0644\u0645\u0646\u0627\u0641\u0630 \u0627\u0644\u062a\u064a \u064a\u062d\u062a\u0627\u062c\u0647\u0627 ToutWAF \u062d\u0631\u0629.'
+        'pf_refused' = '\u0644\u0627 \u064a\u0645\u0643\u0646 \u062a\u062b\u0628\u064a\u062a ToutWAF \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0628\u062d\u0627\u0644\u062a\u0647 \u0627\u0644\u062d\u0627\u0644\u064a\u0629. \u0644\u0645 \u064a\u062a\u063a\u064a\u0631 \u0634\u064a\u0621.'
+        'pf_ok_warn' = '\u0644\u0627 \u0634\u064a\u0621 \u064a\u0645\u0646\u0639 \u0627\u0644\u062a\u062b\u0628\u064a\u062a\u060c \u0644\u0643\u0646 \u0627\u0642\u0631\u0623 \u0627\u0644\u0646\u0642\u0627\u0637 \u0623\u0639\u0644\u0627\u0647.'
+        'pf_l_refuse' = '\u0645\u0631\u0641\u0648\u0636'
+        'pf_l_warn' = '\u062a\u0646\u0628\u064a\u0647'
+        'pf_l_info' = '\u0645\u0644\u0627\u062d\u0638\u0629'
+        'pf_port_busy' = '\u0627\u0644\u0645\u0646\u0641\u0630 {0} \u0645\u0633\u062a\u062e\u062f\u0645 \u0628\u0627\u0644\u0641\u0639\u0644 \u0645\u0646 {1}.'
+        'pf_prog_other' = '\u0628\u0631\u0646\u0627\u0645\u062c \u0622\u062e\u0631'
+        'pf_prog_unknown' = '\u0628\u0631\u0646\u0627\u0645\u062c \u0622\u062e\u0631 (\u062a\u0639\u0630\u0651\u0631\u062a \u0642\u0631\u0627\u0621\u0629 \u0627\u0633\u0645\u0647)'
+        'pf_act_web' = '\u064a\u062d\u062a\u0627\u062c ToutWAF \u0625\u0644\u0649 \u0627\u0644\u0645\u0646\u0641\u0630\u064a\u0646 {0} \u0648{1} \u0644\u062d\u0645\u0627\u064a\u0629 \u0645\u0648\u0627\u0642\u0639\u0643. \u0623\u0648\u0642\u0641 \u0647\u0630\u0627 \u0627\u0644\u0628\u0631\u0646\u0627\u0645\u062c \u0623\u0648 \u0627\u0646\u0642\u0644\u0647 \u0625\u0644\u0649 \u0645\u0646\u0627\u0641\u0630 \u0623\u062e\u0631\u0649 (\u064a\u0636\u0639 ToutPanel \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0628\u062c\u0627\u0646\u0628 ToutWAF \u062e\u0627\u062f\u0645 \u0627\u0644\u0648\u064a\u0628 \u0627\u0644\u062e\u0627\u0635 \u0628\u0647 \u0639\u0644\u0649 8080 \u06488443) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a.'
+        'pf_act_console' = '\u062a\u062d\u062a\u0627\u062c \u0644\u0648\u062d\u0629 \u062a\u062d\u0643\u0645 ToutWAF \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0646\u0641\u0630. \u062d\u0631\u0651\u0631\u0647 \u0623\u0648 \u0627\u062e\u062a\u0631 \u0645\u0646\u0641\u0630\u064b\u0627 \u0622\u062e\u0631 \u0644\u0644\u0648\u062d\u0629 (\u064a\u0633\u0623\u0644 \u0627\u0644\u0645\u062b\u0628\u062a \u0639\u0646\u0647 \u0641\u064a \u0642\u0627\u0626\u0645\u062a\u0647) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a.'
+        'pf_act_agent' = '\u064a\u0633\u062a\u062e\u062f\u0645 ToutWAF \u0647\u0630\u0627 \u0627\u0644\u0645\u0646\u0641\u0630 \u0644\u0645\u0633\u062a\u0648\u064a\u0627\u062a \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0648\u0643\u0644\u0627\u0621 \u0627\u0644\u0645\u062a\u0635\u0644\u064a\u0646 \u0628\u0647. \u062d\u0631\u0651\u0631\u0647 \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a.'
+        'pf_act_admin' = '\u064a\u0633\u062a\u062e\u062f\u0645 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0647\u0630\u0627 \u0627\u0644\u0645\u0646\u0641\u0630 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0641\u0642\u0637 \u0644\u0641\u062d\u0635 \u062d\u0627\u0644\u062a\u0647. \u062d\u0631\u0651\u0631\u0647 \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a.'
+        'pf_nostart' = '(\u0644\u0646 \u064a\u064f\u0634\u063a\u064e\u0651\u0644 \u0634\u064a\u0621 \u0627\u0644\u0622\u0646\u060c \u0644\u0630\u0644\u0643 \u064a\u064f\u0643\u062a\u0641\u0649 \u0628\u0627\u0644\u062a\u0646\u0628\u064a\u0647)'
+        'pf_boot' = '{0} \u0645\u062b\u0628\u0651\u062a \u0648\u064a\u0628\u062f\u0623 \u0645\u0639 \u0627\u0644\u062c\u0647\u0627\u0632 \u0631\u063a\u0645 \u0623\u0646\u0647 \u0645\u062a\u0648\u0642\u0641 \u0627\u0644\u0622\u0646. \u0639\u0646\u062f \u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u062a\u0627\u0644\u064a\u0629 \u0633\u064a\u062d\u062c\u0632 \u0627\u0644\u0645\u0646\u0641\u0630\u064a\u0646 {1} \u0648{2} \u0642\u0628\u0644 ToutWAF.'
+        'pf_act_boot' = '\u0639\u0637\u0651\u0644 \u062a\u0634\u063a\u064a\u0644\u0647 \u0645\u0639 \u0627\u0644\u062c\u0647\u0627\u0632 \u0623\u0648 \u0627\u0646\u0642\u0644\u0647 \u0625\u0644\u0649 \u0645\u0646\u0627\u0641\u0630 \u0623\u062e\u0631\u0649 \u0642\u0628\u0644 \u0625\u0639\u0627\u062f\u0629 \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u062c\u0647\u0627\u0632.'
+        'pf_fw_cause' = '\u062c\u062f\u0627\u0631 \u062d\u0645\u0627\u064a\u0629 ({0}) \u0646\u0634\u0637 \u0648\u0644\u0627 \u064a\u0633\u0645\u062d \u0628\u0645\u0631\u0648\u0631 \u0627\u0644\u0645\u0646\u0641\u0630\u064a\u0646 {1} \u0648{2}\u060c \u0648\u0642\u062f \u0637\u064f\u0644\u0628 \u0645\u0646 \u0627\u0644\u0645\u062b\u0628\u062a \u0623\u0644\u0627 \u064a\u063a\u064a\u0651\u0631\u0647.'
+        'pf_fw_action' = '\u0627\u0641\u062a\u062d \u0647\u0630\u064a\u0646 \u0627\u0644\u0645\u0646\u0641\u0630\u064a\u0646 \u0641\u064a \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0623\u0648 \u062f\u0639 \u0627\u0644\u0645\u062b\u0628\u062a \u064a\u0641\u0639\u0644 \u0630\u0644\u0643 (\u0628\u062f\u0648\u0646 \u0627\u0644\u062e\u064a\u0627\u0631 --no-firewall). \u0648\u0625\u0644\u0627 \u0641\u0644\u0646 \u062a\u0643\u0648\u0646 \u0645\u0648\u0627\u0642\u0639\u0643 \u0642\u0627\u0628\u0644\u0629 \u0644\u0644\u0648\u0635\u0648\u0644 \u0645\u0646 \u0627\u0644\u062e\u0627\u0631\u062c.'
+        'pf_fwx_cause' = '\u062c\u062f\u0627\u0631 \u062d\u0645\u0627\u064a\u0629 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 ({0}) \u064a\u0631\u0641\u0636 \u0627\u0644\u0627\u062a\u0635\u0627\u0644\u0627\u062a \u0627\u0644\u0648\u0627\u0631\u062f\u0629 \u0627\u0641\u062a\u0631\u0627\u0636\u064a\u064b\u0627 \u0648\u0644\u064a\u0633 \u0641\u064a\u0647 \u0642\u0627\u0639\u062f\u0629 \u0644\u0644\u0645\u0646\u0641\u0630\u064a\u0646 {1} \u0648{2}.'
+        'pf_fwx_action' = '\u0644\u0627 \u064a\u0639\u062f\u0651\u0644 ToutWAF \u0628\u0646\u0641\u0633\u0647 \u0623\u0628\u062f\u064b\u0627 \u0642\u0648\u0627\u0639\u062f \u0647\u0630\u0627 \u0627\u0644\u0646\u0648\u0639 \u0645\u0646 \u062c\u062f\u0631\u0627\u0646 \u0627\u0644\u062d\u0645\u0627\u064a\u0629: \u0627\u0641\u062a\u062d \u0647\u0630\u064a\u0646 \u0627\u0644\u0645\u0646\u0641\u0630\u064a\u0646 \u0641\u064a \u0625\u0639\u062f\u0627\u062f\u0627\u062a\u0647 \u062b\u0645 \u062a\u062d\u0642\u0642 \u0645\u0646 \u0645\u0648\u0627\u0642\u0639\u0643.'
+        'pf_cp_cause' = '\u062a\u0639\u0630\u0651\u0631 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062a\u062d\u0643\u0645 {0} \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632.'
+        'pf_cp_action' = '\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0639\u0646\u0648\u0627\u0646 \u0648\u0645\u0646 \u0623\u0646 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062a\u062d\u0643\u0645 \u064a\u0639\u0645\u0644 \u0648\u0623\u0646 \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0641\u064a\u0647 \u064a\u0633\u0645\u062d \u0644\u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0628\u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u064a\u0647 (\u0627\u0644\u0645\u0646\u0641\u0630 9444 \u0627\u0641\u062a\u0631\u0627\u0636\u064a\u064b\u0627) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a.'
+        'pf_router_cause' = '\u0644\u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0639\u0646\u0648\u0627\u0646 \u062e\u0627\u0635 ({0}): \u0645\u0646 \u0627\u0644\u0645\u0631\u062c\u062d \u0623\u0646\u0647 \u062e\u0644\u0641 \u0631\u0627\u0648\u062a\u0631.'
+        'pf_router_action' = '\u0628\u0639\u062f \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0633\u064a\u0639\u0631\u0636 ToutWAF \u0627\u0644\u0645\u0646\u0627\u0641\u0630 \u0627\u0644\u062a\u064a \u064a\u062c\u0628 \u062a\u0648\u062c\u064a\u0647\u0647\u0627 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0648\u064a\u0642\u062f\u0651\u0645 \u0645\u0644\u0641\u0627\u062a \u0644\u0644\u0631\u0627\u0648\u062a\u0631\u0627\u062a \u0627\u0644\u0634\u0627\u0626\u0639\u0629. \u0644\u0627 \u0634\u064a\u0621 \u064a\u0644\u0632\u0645 \u062a\u062d\u0636\u064a\u0631\u0647 \u0627\u0644\u0622\u0646.'
+        'pf_skipped' = '\u062a\u0645 \u062a\u062e\u0637\u064a \u0641\u062d\u0635 \u0627\u0644\u0628\u064a\u0626\u0629 \u0628\u0646\u0627\u0621\u064b \u0639\u0644\u0649 \u0637\u0644\u0628\u0643: \u0645\u0627 \u064a\u0639\u064a\u0642 \u0633\u064a\u0624\u062f\u064a \u0625\u0644\u0649 \u0641\u0634\u0644 \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0623\u0648 \u0627\u0644\u062a\u0634\u063a\u064a\u0644 \u0644\u0627\u062d\u0642\u064b\u0627.'
+        's_sysupdate' = '\u062c\u0627\u0631\u064d \u062a\u062d\u062f\u064a\u062b \u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645 (\u0642\u062f \u064a\u0633\u062a\u063a\u0631\u0642 \u0630\u0644\u0643 \u0639\u062f\u0629 \u062f\u0642\u0627\u0626\u0642)'
+        'su_skipped' = '\u0644\u0646 \u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062b \u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648\u0644\u0627\u064b (TOUTWAF_SKIP_SYSUPDATE).'
+        'su_recent' = '\u062a\u0645 \u062a\u062d\u062f\u064a\u062b \u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645 \u0642\u0628\u0644 \u0623\u0642\u0644 \u0645\u0646 6 \u0633\u0627\u0639\u0627\u062a: \u0644\u0646 \u064a\u064f\u0643\u0631\u064e\u0651\u0631 \u0627\u0644\u062a\u062d\u062f\u064a\u062b.'
+        'su_dry' = '\u0633\u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062b \u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648\u0644\u0627\u064b (\u0644\u062a\u062e\u0637\u064a \u0630\u0644\u0643: TOUTWAF_SKIP_SYSUPDATE=1)'
+        'su_nopm' = '\u0644\u0627 \u064a\u0648\u062c\u062f \u0645\u062f\u064a\u0631 \u062d\u0632\u0645 \u0645\u062f\u0639\u0648\u0645 \u0644\u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0646\u0638\u0627\u0645: \u062a\u0645 \u0627\u0644\u062a\u062e\u0637\u064a \u0648\u062a\u0633\u062a\u0645\u0631 \u0639\u0645\u0644\u064a\u0629 \u0627\u0644\u062a\u062b\u0628\u064a\u062a.'
+        'su_failed' = '\u0641\u0634\u0644 \u062a\u062d\u062f\u064a\u062b \u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645 (\u0627\u0644\u0631\u0645\u0632 {0})\u061b \u0633\u062a\u0633\u062a\u0645\u0631 \u0639\u0645\u0644\u064a\u0629 \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0628\u062f\u0648\u0646\u0647. \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644: {1}. \u0627\u0644\u062d\u0644: \u0634\u063a\u0651\u0644 \u0627\u0644\u062a\u062d\u062f\u064a\u062b \u0628\u0646\u0641\u0633\u0643 \u0648\u0627\u0642\u0631\u0623 \u0631\u0633\u0627\u0644\u0629 \u0627\u0644\u062e\u0637\u0623 (\u0645\u0633\u062a\u0648\u062f\u0639 \u0645\u0639\u0637\u0651\u0644\u061f \u0645\u062f\u064a\u0631 \u062d\u0632\u0645 \u0622\u062e\u0631 \u0642\u064a\u062f \u0627\u0644\u062a\u0634\u063a\u064a\u0644\u061f) \u0623\u0648 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631 \u0645\u0639 TOUTWAF_SKIP_SYSUPDATE=1.'
+        'su_reboot' = '\u064a\u0644\u0632\u0645 \u0625\u0639\u0627\u062f\u0629 \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u062e\u0627\u062f\u0645 \u0644\u0625\u0643\u0645\u0627\u0644 \u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0646\u0638\u0627\u0645 (\u0646\u0648\u0627\u0629 \u0623\u0648 \u0645\u0643\u062a\u0628\u0627\u062a \u062c\u062f\u064a\u062f\u0629). \u0644\u0627 \u064a\u0639\u064a\u062f ToutWAF \u062a\u0634\u063a\u064a\u0644\u0647 \u0646\u064a\u0627\u0628\u0629\u064b \u0639\u0646\u0643 \u0623\u0628\u062f\u0627\u064b: \u0627\u0641\u0639\u0644 \u0630\u0644\u0643 \u0639\u0646\u062f\u0645\u0627 \u062a\u0633\u062a\u0637\u064a\u0639.'
+        'q_sysupdate' = '\u0647\u0644 \u062a\u0631\u064a\u062f \u062a\u062d\u062f\u064a\u062b \u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648\u0644\u0627\u064b (\u0645\u0648\u0635\u0649 \u0628\u0647)\u061f'
+        'pr_disk_full' = '\u0627\u0644\u0645\u0633\u0627\u062d\u0629 \u0627\u0644\u062d\u0631\u0629 {0} \u0645\u064a\u063a\u0627\u0628\u0627\u064a\u062a \u0641\u0642\u0637 \u0639\u0644\u0649 {1} (\u0627\u0644\u0645\u0637\u0644\u0648\u0628 {2} \u0645\u064a\u063a\u0627\u0628\u0627\u064a\u062a \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644): \u0644\u0627 \u064a\u0645\u0643\u0646 \u0625\u0643\u0645\u0627\u0644 \u0627\u0644\u062a\u062b\u0628\u064a\u062a.'
+        'pr_disk_full_a' = '\u062d\u0631\u0651\u0631 \u0628\u0639\u0636 \u0627\u0644\u0645\u0633\u0627\u062d\u0629 (\u0630\u0627\u0643\u0631\u0629 \u0627\u0644\u062d\u0632\u0645 \u0627\u0644\u0645\u0624\u0642\u062a\u0629: apt-get clean \u0623\u0648 dnf clean all\u061b \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0627\u0644\u0642\u062f\u064a\u0645\u0629: journalctl --vacuum-size=100M) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631. \u0644\u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0631\u063a\u0645 \u0630\u0644\u0643: TOUTWAF_SKIP_PREREQ=1.'
+        'pr_disk_full_w_a' = '\u062d\u0631\u0651\u0631 \u0628\u0639\u0636 \u0627\u0644\u0645\u0633\u0627\u062d\u0629 (\u062a\u0646\u0638\u064a\u0641 \u0627\u0644\u0642\u0631\u0635\u060c \u0625\u0641\u0631\u0627\u063a \u0633\u0644\u0629 \u0627\u0644\u0645\u062d\u0630\u0648\u0641\u0627\u062a) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631. \u0644\u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0631\u063a\u0645 \u0630\u0644\u0643: $env:TOUTWAF_SKIP_PREREQ=1'
+        'pr_disk_low' = '\u0627\u0644\u0645\u0633\u0627\u062d\u0629 \u0627\u0644\u062d\u0631\u0629 {0} \u0645\u064a\u063a\u0627\u0628\u0627\u064a\u062a \u0641\u0642\u0637 \u0639\u0644\u0649 {1} (\u064a\u064f\u0641\u0636\u064e\u0651\u0644 \u0646\u062d\u0648 {2} \u0645\u064a\u063a\u0627\u0628\u0627\u064a\u062a).'
+        'pr_disk_low_a' = '\u062d\u0631\u0651\u0631 \u0628\u0639\u0636 \u0627\u0644\u0645\u0633\u0627\u062d\u0629 \u0623\u0648 \u0623\u0636\u0641 \u0642\u0631\u0635\u0627\u064b\u061b \u064a\u0645\u0643\u0646 \u0623\u0646 \u064a\u0633\u062a\u0645\u0631 \u0627\u0644\u062a\u062b\u0628\u064a\u062a.'
+        'pr_dns' = '\u0644\u0627 \u064a\u0633\u062a\u0637\u064a\u0639 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u062d\u0644\u0651 \u0627\u0644\u0627\u0633\u0645 {0} (DNS).'
+        'pr_dns_a' = '\u062a\u062d\u0642\u0642 \u0645\u0646 \u062e\u0648\u0627\u062f\u0645 DNS (cat /etc/resolv.conf\u060c resolvectl status) \u0648\u0623\u0636\u0641 \u062e\u0627\u062f\u0645\u0627\u064b \u064a\u0639\u0645\u0644 \u0645\u062b\u0644 nameserver 9.9.9.9 \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631.'
+        'pr_dns_w_a' = '\u062a\u062d\u0642\u0642 \u0645\u0646 \u062e\u0648\u0627\u062f\u0645 DNS \u0628\u0627\u0633\u062a\u062e\u062f\u0627\u0645 ''ipconfig /all'' \u0648\u062d\u062f\u0651\u062f \u062e\u0627\u062f\u0645\u0627\u064b \u064a\u0639\u0645\u0644 (\u0645\u062b\u0644 9.9.9.9) \u0641\u064a \u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0634\u0628\u0643\u0629 \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631.'
+        'pr_clock' = '\u0633\u0627\u0639\u0629 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u062a\u062e\u062a\u0644\u0641 \u0639\u0646 \u062a\u0648\u0642\u064a\u062a \u0627\u0644\u0625\u0646\u062a\u0631\u0646\u062a \u0628\u0645\u0642\u062f\u0627\u0631 {0} \u062b\u0627\u0646\u064a\u0629: \u062a\u0641\u0634\u0644 \u0634\u0647\u0627\u062f\u0627\u062a TLS \u0648\u0627\u0644\u062a\u0648\u0642\u064a\u0639\u0627\u062a \u0639\u0646\u062f\u0645\u0627 \u062a\u0643\u0648\u0646 \u0627\u0644\u0633\u0627\u0639\u0629 \u062e\u0627\u0637\u0626\u0629.'
+        'pr_clock_a' = '\u0642\u0645 \u0628\u0645\u0632\u0627\u0645\u0646\u062a\u0647\u0627: timedatectl set-ntp true (\u0623\u0648 chronyc makestep) \u0648\u062a\u062d\u0642\u0642 \u0628\u0627\u0633\u062a\u062e\u062f\u0627\u0645 timedatectl \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631.'
+        'pr_clock_w_a' = '\u0642\u0645 \u0628\u0645\u0632\u0627\u0645\u0646\u062a\u0647\u0627: w32tm /resync (\u0623\u0648 \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a > \u0627\u0644\u0648\u0642\u062a \u0648\u0627\u0644\u0644\u063a\u0629 > \u0645\u0632\u0627\u0645\u0646\u0629 \u0627\u0644\u0622\u0646) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631.'
+        'pr_ok' = '\u0645\u0633\u0627\u062d\u0629 \u0627\u0644\u0642\u0631\u0635 \u0648DNS \u0648\u0627\u0644\u0633\u0627\u0639\u0629 \u0628\u062d\u0627\u0644\u0629 \u062c\u064a\u062f\u0629.'
     }
 }
 # END CATALOG
@@ -2088,6 +2751,61 @@ function Get-InstalledVersion([string]$exe) {
     } catch { $null = $_ }
     return ''
 }
+# ---- build identity (see install.sh). The public development version keeps ONE name ("0.3.0-dev") from one publication to the next: the build
+# (first 12 hex characters of the published commit) tells two publications apart. '' means unknown; it is shown as "unknown", never as an empty string.
+function ConvertTo-Build([string]$b) {
+    $b = ("$b").Trim().ToLower()
+    if (-not $b -or $b -eq 'unknown' -or $b.Length -gt 40 -or $b -notmatch '^[0-9a-z._-]+$') { return '' }
+    return $b
+}
+function Get-InstalledBuild([string]$exe) {
+    if (-not (Test-Path $exe)) { return '' }
+    try {
+        $o = & $exe --version 2>$null
+        if (-not $o) { $o = & $exe version 2>$null }
+        if ($o -and ("$o" -match '\(build ([^)\s]+)\)')) { return (ConvertTo-Build $Matches[1]) }
+    } catch { $null = $_ }
+    return ''
+}
+# the build of what is installed: the binary's own, else the one the installer recorded in installer.conf for that very version
+function Get-InstalledBuildOrRecorded([string]$exe, [string]$ver) {
+    $b = Get-InstalledBuild $exe
+    if (-not $b -and $ver -and ((Get-ConfValue 'INSTALLED_VERSION') -eq $ver)) { $b = ConvertTo-Build (Get-ConfValue 'INSTALLED_BUILD') }
+    return $b
+}
+function Format-VersionBuild([string]$v, [string]$b) { $b = ConvertTo-Build $b; if (-not $b) { $b = 'unknown' }; return "$v (build $b)" }          # 0.3.0-dev (build a1b2c3d4e5f6)
+function Format-VersionBuildShort([string]$v, [string]$b) { $b = ConvertTo-Build $b; if (-not $b) { $b = 'unknown' }; return "$v, build $b" }   # for "(%s)"
+function Get-InstalledLabel([string]$exe) {
+    $v = Get-InstalledVersion $exe
+    if (-not $v) { return '?' }
+    return (Format-VersionBuild $v (Get-InstalledBuildOrRecorded $exe $v))
+}
+# THE rule (the same in the data plane, the control plane and the console): an update exists when the published version is newer, OR the versions
+# are equal and the published build differs from the installed one. An installed build that is unknown counts as different; a published build the
+# channel does not state cannot differ from anything.  -> newer | rebuilt | older | same
+function Get-UpdateState([string]$curV, [string]$curB, [string]$newV, [string]$newB) {
+    $cb = ConvertTo-Build $curB; $nb = ConvertTo-Build $newB
+    if (Test-SemverLess $curV $newV) { return 'newer' }
+    if (Test-SemverLess $newV $curV) { return 'older' }
+    if ($nb -and $nb -ne $cb) { return 'rebuilt' }
+    return 'same'
+}
+# the rule applied to every installed component this run touches; 'same' only when each one is
+function Get-UpdateVerdict([string]$newV, [string]$newB) {
+    $res = 'same'
+    foreach ($c in @(@((Test-Path $DpExe), $DpExe, 'dp'), @((Test-Path $CpExe), $CpExe, 'cp'))) {
+        if (-not $c[0]) { continue }
+        if ($Component -eq 'dp' -and $c[2] -ne 'dp') { continue }
+        if ($Component -eq 'cp' -and $c[2] -ne 'cp') { continue }
+        $v = Get-InstalledVersion $c[1]
+        if (-not $v) { continue }
+        $st = Get-UpdateState $v (Get-InstalledBuildOrRecorded $c[1] $v) $newV $newB
+        if ($st -eq 'newer') { $res = 'newer' }
+        elseif ($st -eq 'rebuilt' -and $res -ne 'newer') { $res = 'rebuilt' }
+        elseif ($st -eq 'older' -and $res -eq 'same') { $res = 'older' }
+    }
+    return $res
+}
 function Get-LocalIps {
     $ips = @()
     try {
@@ -2303,13 +3021,21 @@ function Invoke-Status {
     Import-ExistingPorts
     if (-not $s.Dp -and -not $s.Cp) { Box-Line (T 'state_none'); Box-Bottom; return 1 }
     $rc = 0
-    if ($s.Dp) { Box-Line ('toutwaf-dp {0}' -f (Get-InstalledVersion $DpExe)) }
-    if ($s.Cp) { Box-Line ('toutwaf-cp {0}' -f (Get-InstalledVersion $CpExe)) }
+    if ($s.Dp) { Box-Line ('toutwaf-dp {0}' -f (Get-InstalledLabel $DpExe)) }
+    if ($s.Cp) { Box-Line ('toutwaf-cp {0}' -f (Get-InstalledLabel $CpExe)) }
     Box-Line ((T 'st_channel' @($script:Channel)) + " ($(Get-ChannelBranch))")
     $cj = Get-ChannelJson
     if ($cj) {
-        $cv = if ($s.Dp) { Get-InstalledVersion $DpExe } else { Get-InstalledVersion $CpExe }
-        if ($cv -and (Test-SemverLess $cv ([string]$cj.version))) { Box-Line ("{0}{1} {2}  -  {3}{4}" -f $script:Ylw, $script:WrM, (T 'st_latest' @([string]$cj.version)), (T 'st_newer'), $script:R) } else { Box-Line (T 'st_latest' @([string]$cj.version)) }
+        $cexe = if ($s.Dp) { $DpExe } else { $CpExe }
+        $cv = Get-InstalledVersion $cexe
+        $nb = Get-ChannelBuild $cj
+        $st = if ($cv) { Get-UpdateState $cv (Get-InstalledBuildOrRecorded $cexe $cv) ([string]$cj.version) $nb } else { 'same' }
+        $lab = Format-VersionBuild ([string]$cj.version) $nb
+        if ($st -eq 'newer') { Box-Line ("{0}{1} {2}  -  {3}{4}" -f $script:Ylw, $script:WrM, (T 'st_latest' @($lab)), (T 'st_newer'), $script:R) }
+        elseif ($st -eq 'rebuilt') { Box-Line ("{0}{1} {2}  -  {3}{4}" -f $script:Ylw, $script:WrM, (T 'st_latest' @($lab)), (T 'st_newbuild' @('-Update')), $script:R) }
+        else { Box-Line (T 'st_latest' @($lab)) }
+    } elseif ($script:ChEmpty) {
+        Box-Line (T 'st_nochannel')
     }
     $ok = "$($script:Grn)$($script:OkM)"; $no = "$($script:Red)$($script:ErM)"
     foreach ($svc in @(@($s.Dp, $DpService), @($s.Cp, $CpService))) {
@@ -2381,14 +3107,77 @@ function Resolve-Channel {
     $script:Channel = $c
 }
 function Get-ChannelBranch { if ($script:Channel -eq 'dev') { return 'dev' } else { return 'main' } }
+# Where releases are read: the project's own GitLab first (public project, raw files), the GitHub copy of the same signed channel when it is unreachable.
+# Release archives stay verified by the signature key of this installer, whichever source served them. -Repo (another GitHub repository) disables both.
+$script:SrcPrimary = if ($env:TOUTWAF_SRC_PRIMARY) { $env:TOUTWAF_SRC_PRIMARY.TrimEnd('/') } else { 'https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw' }
+$script:SrcFallback = "https://raw.githubusercontent.com/$Repo"
+if ($PSBoundParameters.ContainsKey('Repo')) { $script:SrcPrimary = $script:SrcFallback; $script:SrcFallback = '' }
+$script:SrcRoot = ''
 function Get-RepoBase {
     if ($BaseUrl) { return $BaseUrl.TrimEnd('/') }
     if ($env:TOUTWAF_BASE_URL) { return $env:TOUTWAF_BASE_URL.TrimEnd('/') }
-    return "https://raw.githubusercontent.com/$Repo/$(Get-ChannelBranch)"
+    $root = if ($script:SrcRoot) { $script:SrcRoot } else { $script:SrcPrimary }
+    return "$root/$(Get-ChannelBranch)"
+}
+# More than one fallback: the sources are tried in the order primary, fallback, fallback2 (the last one is only set by -ViaRepo).
+$script:SrcFallback2 = ''
+function Step-SrcFallback {
+    $chain = @($script:SrcPrimary, $script:SrcFallback, $script:SrcFallback2) | Where-Object { $_ }
+    $cur = if ($script:SrcRoot) { $script:SrcRoot } else { $script:SrcPrimary }
+    $i = [array]::IndexOf($chain, $cur)
+    if ($i -ge 0 -and ($i + 1) -lt $chain.Count) { $script:SrcRoot = $chain[$i + 1]; return $true }
+    return $false
+}
+# -ViaRepo: ToutWAF's own package repository for Windows (tools/repo/README.md) is tried FIRST. It holds the release layout (channel.json, releases/<version>/),
+# the winget manifests and a signed index.json. The archive is verified exactly as before (SHA256SUMS + Ed25519 signature of this installer), so the repository
+# is a transport, not a trust anchor. If anything is wrong with it the sources stay as they were (GitLab, then GitHub): this switch never blocks an installation.
+$script:RepoWindows = if ($env:TOUTWAF_REPO_WINDOWS_URL) { $env:TOUTWAF_REPO_WINDOWS_URL.TrimEnd('/') } else { 'https://repo.qu3ntin.com/include/toutwaf/Windows/-/raw' }
+function Use-ViaRepo {
+    if ($script:Bound.ContainsKey('Repo')) { Write-Warn '-ViaRepo is ignored with -Repo (another repository was chosen)'; return }
+    $root = $script:RepoWindows
+    $base = "$root/$(Get-ChannelBranch)"
+    try {
+        $idxRaw = (Invoke-WebRequest -UseBasicParsing -Uri "$base/index.json" -TimeoutSec 15).Content
+        $sumRaw = (Invoke-WebRequest -UseBasicParsing -Uri "$base/index.json.sha256" -TimeoutSec 15).Content
+        if ($idxRaw -is [byte[]]) { $idxRaw = [Text.Encoding]::UTF8.GetString($idxRaw) }
+        if ($sumRaw -is [byte[]]) { $sumRaw = [Text.Encoding]::UTF8.GetString($sumRaw) }
+        $want = ((([string]$sumRaw).Trim()) -split '\s+')[0].ToLowerInvariant()
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $got = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$idxRaw)) | ForEach-Object { $_.ToString('x2') })
+        if ($want -ne $got) { throw 'index.json does not match index.json.sha256' }
+        $idx = ([string]$idxRaw) | ConvertFrom-Json
+        if ([string]$idx.channel -ne $script:Channel) { throw "the repository serves the $($idx.channel) channel, not $($script:Channel)" }
+        $asset = "toutwaf-windows-$(Get-Arch).zip"
+        if (@($idx.files | Where-Object { $_.path -eq "releases/$($idx.version)/$asset" }).Count -eq 0) { throw "the repository has no $asset" }
+    } catch {
+        Write-Warn "-ViaRepo: the ToutWAF package repository is not usable ($($_.Exception.Message)); using the direct download instead (GitLab, then GitHub)"
+        return
+    }
+    $script:SrcFallback2 = $script:SrcFallback; $script:SrcFallback = $script:SrcPrimary; $script:SrcPrimary = $root; $script:SrcRoot = ''
+    Write-Info "source: ToutWAF package repository ($base)"
 }
 function Save-InstallerConf {
     if ($DryRun) { return }
-    try { Set-Content -Path $ConfFile -Value ("# written by install.ps1: release channel used by -Update and by the console update-available check (stable = branch main, dev = branch dev)`nCHANNEL=$($script:Channel)" + $(if ((Get-RepoBase) -and ($BaseUrl -or $env:TOUTWAF_BASE_URL)) { "`nBASE_URL=$(Get-RepoBase)" } else { '' })) -Encoding ASCII } catch { Write-InstallLog "installer.conf: $($_.Exception.Message)" }
+    $text = "# written by install.ps1: release channel used by -Update and by the console update-available check (stable = branch main, dev = branch dev)`nCHANNEL=$($script:Channel)"
+    if ((Get-RepoBase) -and ($BaseUrl -or $env:TOUTWAF_BASE_URL)) { $text += "`nBASE_URL=$(Get-RepoBase)" }
+    # what this installation runs (see Save-InstalledRecord): kept as it was until the new binaries are in service
+    $rv = Get-ConfValue 'INSTALLED_VERSION'; $rb = Get-ConfValue 'INSTALLED_BUILD'
+    if ($rv) { $text += "`n# version and build the installer put in service (read by the console when a binary cannot name its own build)`nINSTALLED_VERSION=$rv`nINSTALLED_BUILD=$(if ($rb) { $rb } else { 'unknown' })" }
+    try { Set-Content -Path $ConfFile -Value $text -Encoding ASCII } catch { Write-InstallLog "installer.conf: $($_.Exception.Message)" }
+}
+# remember what is now in service, next to CHANNEL in installer.conf. Installations made before builds existed have no such lines: their build
+# reads as unknown, which counts as different from any published build.
+function Save-InstalledRecord([string]$ver, [string]$build) {
+    if ($DryRun -or -not $ver) { return }
+    try {
+        $lines = @()
+        if (Test-Path $ConfFile) { $lines = @(Get-Content $ConfFile | Where-Object { $_ -notmatch '^(INSTALLED_VERSION|INSTALLED_BUILD)=' -and $_ -notmatch '^# version and build the installer put in service' }) }
+        $b = ConvertTo-Build $build; if (-not $b) { $b = 'unknown' }
+        $lines += '# version and build the installer put in service (read by the console when a binary cannot name its own build)'
+        $lines += "INSTALLED_VERSION=$ver"
+        $lines += "INSTALLED_BUILD=$b"
+        Set-Content -Path $ConfFile -Value $lines -Encoding ASCII
+    } catch { Write-InstallLog "installer.conf: $($_.Exception.Message)" }
 }
 # true when A < B (pre-release < release; "-dev.N" compared numerically)
 function Test-SemverLess([string]$a, [string]$b) {
@@ -2411,20 +3200,33 @@ function Test-SemverLess([string]$a, [string]$b) {
     }
     return $false
 }
+$script:ChEmpty = $false
+$script:ChQuery = ''
 function Get-ChannelJson {
-    # $null when unreachable / not JSON
-    try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri ((Get-RepoBase) + '/channel.json') -TimeoutSec 20
-        $j = $r.Content | ConvertFrom-Json
-        if ($j.PSObject.Properties.Name -contains 'version' -and $j.version) { return $j }
-    } catch { Write-InstallLog "channel.json: $($_.Exception.Message)" }
+    # $null when unreachable / not JSON / without a version ($script:ChEmpty is then $true when channel.json is valid and says that nothing is published)
+    $script:ChEmpty = $false
+    foreach ($attempt in 1, 2, 3) {
+        try {
+            $r = Invoke-WebRequest -UseBasicParsing -Uri ((Get-RepoBase) + '/channel.json' + $script:ChQuery) -TimeoutSec 20
+            $j = $r.Content | ConvertFrom-Json
+            if ($j.PSObject.Properties.Name -contains 'version' -and $j.version) { return $j }
+            if ($j.PSObject.Properties.Name -contains 'channel') { $script:ChEmpty = $true }
+            break
+        } catch {
+            Write-InstallLog "channel.json: $($_.Exception.Message)"
+            # the primary source is unreachable: the GitHub copy of the same signed channel (not when a mirror or another repository was chosen)
+            if (-not $BaseUrl -and -not $env:TOUTWAF_BASE_URL -and (Step-SrcFallback)) { continue }
+            break
+        }
+    }
     return $null
 }
+function Get-ChannelBuild($j) { if ($j -and ($j.PSObject.Properties.Name -contains 'build')) { return (ConvertTo-Build ([string]$j.build)) } else { return '' } }
 # Release signature trust anchor. It lives HERE (in the installer you run), never in channel.json: the copy of the public key that
 # channel.json advertises is informational and must not be trusted. Overridden by TOUTWAF_RELEASE_PUBKEY, then by <ConfDir>\release.pub.
 # RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
-$script:ReleasePubKeyDefault = 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo='
-$script:ReleasePubKeyId = 'f8fc98e4c6e364fa'
+$script:ReleasePubKeyDefault = 'V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA='
+$script:ReleasePubKeyId = 'ebd2a20ce5a5650f'
 $script:SigRequiredFrom = '0.2.0-dev.7'   # releases before this one were published unsigned
 function Test-CustomPubKey { return [bool]($env:TOUTWAF_RELEASE_PUBKEY -or (Test-Path (Join-Path $ConfDir 'release.pub'))) }
 function Get-PubKeyPem([string]$tmp) {
@@ -2454,13 +3256,13 @@ function Get-PubKeyId([string]$pem) {
 # Policy: a bad signature ALWAYS aborts; a missing one aborts for releases >= SigRequiredFrom and only warns for older (unsigned) ones.
 # Windows (.NET, PowerShell 5.1 and 7) has no Ed25519: the check needs openssl.exe. Without it the built-in key cannot be applied: a loud
 # warning says so and nothing is reported as verified (SHA-256 was still checked). A key the admin configured explicitly stays fail-closed.
-function Confirm-ReleaseSignature([string]$relUrl, [string]$tmp) {
+function Confirm-ReleaseSignature([string]$relUrl, [string]$tmp, [string]$query = '') {
     $pem = Get-PubKeyPem $tmp
     $kid = Get-PubKeyId $pem
     $custom = Test-CustomPubKey
     if (-not $custom -and $kid -ne $script:ReleasePubKeyId) { throw "internal error: the built-in release public key has id $kid, expected $($script:ReleasePubKeyId)" }
     $sigPath = Join-Path $tmp 'SHA256SUMS.sig'
-    try { Invoke-WebRequest -UseBasicParsing -Uri "$relUrl/SHA256SUMS.sig" -OutFile $sigPath }
+    try { Invoke-WebRequest -UseBasicParsing -Uri "$relUrl/SHA256SUMS.sig$query" -OutFile $sigPath }
     catch {
         $sc = 0; try { $sc = [int]$_.Exception.Response.StatusCode } catch { $sc = 0 }
         if ($sc -eq 404) {   # not published
@@ -2489,8 +3291,15 @@ $script:ChJson = $null
 function Resolve-Release {
     # sets $script:ResolvedVersion
     $pinned = ($Version -ne 'latest')
+    if ($ViaRepo -and -not $BaseUrl -and -not $env:TOUTWAF_BASE_URL) { Use-ViaRepo }
     $script:ChJson = Get-ChannelJson
+    $script:NewBuild = ''
     if (-not $script:ChJson) {
+        if ($script:ChEmpty -and -not $pinned) {
+            # not a network problem: the channel is reachable and says that no version is published on it. Say that, and what to do.
+            $other = if ($script:Channel -eq 'dev') { 'stable' } else { 'dev' }
+            throw (T 'e_nover' @($script:Channel, $other, $other))
+        }
         if (-not $pinned) { throw "cannot read $(Get-RepoBase)/channel.json (channel $($script:Channel)): check the network, use -BaseUrl, -Version or -ZipPath" }
         Write-Warn 'cannot read channel.json: yanked / minimum-installer checks skipped'
     }
@@ -2501,40 +3310,77 @@ function Resolve-Release {
     $yanked = @(); if ($script:ChJson -and ($script:ChJson.PSObject.Properties.Name -contains 'yanked') -and $script:ChJson.yanked) { $yanked = @($script:ChJson.yanked) }
     if ($yanked -contains $v -and -not $Force) { throw (T 'e_yanked' @($v)) }
     $script:ResolvedVersion = $v
+    if ($script:ChJson -and ([string]$script:ChJson.version) -eq $v) { $script:NewBuild = Get-ChannelBuild $script:ChJson }
 }
 
+# The public mirror (raw.githubusercontent.com) caches for a few minutes, and a development version is republished under the SAME path: right after a
+# publication an installer could read the new channel.json with the old SHA256SUMS. Every file of a release directory is therefore asked for with a
+# cache-bypass parameter that belongs to the publication, "?b=<build>" (the build read in channel.json). No build announced (older channel.json, a version
+# pinned that is not the channel's): no parameter. A file mirror has no cache: no parameter either.
+function Get-ReleaseQuery {
+    $b = ''
+    if ($script:ChJson -and ([string]$script:ChJson.version) -eq $script:ResolvedVersion) { $b = Get-ChannelBuild $script:ChJson }
+    if ($b -and ((Get-RepoBase) -match '^https?://')) { return "?b=$b" }
+    return ''
+}
+# One more read of channel.json, with its own cache-bypass parameter "?t=<date>", after the files of a release disagreed with each other.
+function Update-ChannelOnce {
+    if ((Get-RepoBase) -match '^https?://') { $script:ChQuery = '?t=' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+    try { $j = Get-ChannelJson } finally { $script:ChQuery = '' }
+    if (-not $j) { return $false }
+    $script:ChJson = $j
+    if ($Version -eq 'latest') { $script:ResolvedVersion = [string]$j.version }
+    if (([string]$j.version) -eq $script:ResolvedVersion) { $script:NewBuild = Get-ChannelBuild $j }
+    return $true
+}
 function Get-Release([string]$tmp) {
     $arch = Get-Arch
     $zip = $ZipPath
     $resolved = 'local'
     if (-not $zip) {
-        $resolved = $script:ResolvedVersion
-        $rel = (Get-RepoBase) + "/releases/$resolved"
         $name = "toutwaf-windows-$arch.zip"
         $zip = Join-Path $tmp $name
-        Invoke-WebRequest -UseBasicParsing -Uri "$rel/$name" -OutFile $zip
-        Invoke-WebRequest -UseBasicParsing -Uri "$rel/SHA256SUMS" -OutFile (Join-Path $tmp 'SHA256SUMS')
-        $line = Get-Content (Join-Path $tmp 'SHA256SUMS') | Where-Object { $_ -match ([regex]::Escape($name) + '$') } | Select-Object -First 1
-        if (-not $line) { throw "No checksum published for $name" }
-        $want = ($line -split '\s+')[0].ToLower()
-        $got = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
-        if ($want -ne $got) { throw "Checksum mismatch for $name (SHA256SUMS)" }
-        if ($script:ChJson -and [string]$script:ChJson.version -eq $resolved) {
-            $a = @($script:ChJson.assets | Where-Object { $_.name -eq $name }) | Select-Object -First 1
-            if ($a -and $a.sha256 -and ([string]$a.sha256).ToLower() -ne $got) { throw "Checksum mismatch for $name (channel.json)" }
+        $attempt = 1
+        while ($true) {
+            $resolved = $script:ResolvedVersion
+            $rel = (Get-RepoBase) + "/releases/$resolved"
+            $q = Get-ReleaseQuery
+            Invoke-WebRequest -UseBasicParsing -Uri "$rel/$name$q" -OutFile $zip
+            Invoke-WebRequest -UseBasicParsing -Uri "$rel/SHA256SUMS$q" -OutFile (Join-Path $tmp 'SHA256SUMS')
+            $line = Get-Content (Join-Path $tmp 'SHA256SUMS') | Where-Object { $_ -match ([regex]::Escape($name) + '$') } | Select-Object -First 1
+            if (-not $line) { throw "No checksum published for $name" }
+            $want = ($line -split '\s+')[0].ToLower()
+            $got = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+            $which = ''
+            if ($want -ne $got) { $which = 'SHA256SUMS' }
+            elseif ($script:ChJson -and [string]$script:ChJson.version -eq $resolved) {
+                $a = @($script:ChJson.assets | Where-Object { $_.name -eq $name }) | Select-Object -First 1
+                if ($a -and $a.sha256 -and ([string]$a.sha256).ToLower() -ne $got) { $which = 'channel.json' }
+            }
+            if (-not $which) { break }
+            # the files do not agree with each other. Once: read channel.json again past the cache, then start over; the second time: stop, saying why and what to do
+            if ($attempt -eq 1 -and (Update-ChannelOnce)) { $attempt = 2; Write-Warn (T 'w_mirror' @($name)); continue }
+            throw (T 'e_mismatch' @($name, $which))
         }
         Write-Info (T 's_sha')
-        Confirm-ReleaseSignature $rel $tmp
+        Confirm-ReleaseSignature $rel $tmp $q
     } elseif (-not (Test-Path $zip)) { throw "Zip not found: $zip" }
     $stage = Join-Path $tmp 'stage'
     Expand-Archive -Path $zip -DestinationPath $stage -Force
     # layout: toutwaf-<version>-windows-<arch>\bin\*.exe (a flat archive works too)
     $all = @(Get-ChildItem -Path $stage -Recurse -Filter 'toutwaf*.exe')
-    # the host agent builds (agent-dist) are served by the control plane, they are not installed as programs
-    $bins = @($all | Where-Object { $_.FullName -notmatch '[\\/]agent-dist[\\/]' })
+    # the host agent builds (agent-dist) and the ToutWAF Antivirus programs (av-dist) are served by the control plane, they are not installed as programs
+    $bins = @($all | Where-Object { $_.FullName -notmatch '[\\/](agent-dist|av-dist)[\\/]' })
     if ($bins.Count -eq 0) { throw 'No binaries found in the release archive' }
     $agentDist = Get-ChildItem -Path $stage -Recurse -Directory -Filter 'agent-dist' | Select-Object -First 1
-    return @{ Version = $resolved; Bins = $bins; AgentDist = $(if ($agentDist) { $agentDist.FullName } else { '' }) }
+    $avDist = Get-ChildItem -Path $stage -Recurse -Directory -Filter 'av-dist' | Select-Object -First 1
+    # the archive says what it holds: VERSION and BUILD next to bin\ (older archives have no BUILD)
+    $idFiles = @(Get-ChildItem -Path $stage -Recurse -File | Where-Object { $_.FullName -notmatch '[\\/](agent-dist|av-dist)[\\/]' })
+    $vf = $idFiles | Where-Object { $_.Name -ceq 'VERSION' } | Select-Object -First 1
+    $bf = $idFiles | Where-Object { $_.Name -ceq 'BUILD' } | Select-Object -First 1
+    $archVer = if ($vf) { (Get-Content $vf.FullName -TotalCount 1).Trim() } else { '' }
+    $archBuild = if ($bf) { ConvertTo-Build (Get-Content $bf.FullName -TotalCount 1) } else { '' }
+    return @{ Version = $resolved; ArchiveVersion = $archVer; ArchiveBuild = $archBuild; Bins = $bins; AgentDist = $(if ($agentDist) { $agentDist.FullName } else { '' }); AVDist = $(if ($avDist) { $avDist.FullName } else { '' }) }
 }
 
 function Set-Acls {
@@ -2685,9 +3531,24 @@ function Invoke-InstallFlow([string]$action) {
     New-Item -ItemType Directory -Path $tmp | Out-Null
     $script:DbBackup = ''
     try {
+        $script:NewBuild = ''
         if (-not $ZipPath) { Resolve-Release }
+        if ($action -eq 'update' -and -not $ZipPath -and -not $Force) {
+            # THE rule, before anything is downloaded: same version AND same build as the channel's = nothing to do. (A channel that does not state
+            # its build cannot tell: the archive is downloaded and its files are compared, as before.)
+            $verdict = Get-UpdateVerdict $script:ResolvedVersion $script:NewBuild
+            if ($verdict -eq 'same' -and $script:NewBuild) {
+                Write-Out ('  {0}{1}{2} {3}' -f $script:Grn, $script:OkM, $script:R, (T 'up_to_date' @((Format-VersionBuildShort $script:ResolvedVersion $script:NewBuild))))
+                return $null
+            }
+            if ($verdict -eq 'rebuilt') {
+                $curExe = if (Test-Path $DpExe) { $DpExe } else { $CpExe }
+                Write-Out ('  {0} {1}' -f $script:Bul, (T 'up_rebuilt' @((Get-InstalledLabel $curExe), (Format-VersionBuild $script:ResolvedVersion $script:NewBuild))))
+            }
+        }
         $verLabel = if ($ZipPath) { 'local' } else { $script:ResolvedVersion }
         Invoke-Step (T 's_fetch' @($verLabel, (Get-Arch))) { $script:Rel = Get-Release $tmp }
+        $newBuild = if ($script:Rel.ArchiveBuild) { $script:Rel.ArchiveBuild } else { $script:NewBuild }
         $bins = $script:Rel.Bins
         $state = Get-InstallState
         $backup = Join-Path $DataRoot 'backup'
@@ -2702,14 +3563,20 @@ function Invoke-InstallFlow([string]$action) {
             $curV = if ($state.Dp) { Get-InstalledVersion $DpExe } else { Get-InstalledVersion $CpExe }
             if ($curV -and -not $ZipPath -and (Test-SemverLess $script:ResolvedVersion $curV) -and -not $Force) { throw (T 'e_downgrade' @($script:ResolvedVersion, $script:Channel, $curV)) }
             if ($same -and -not $Force) {
-                $cur = if ($state.Dp) { Get-InstalledVersion $DpExe } else { Get-InstalledVersion $CpExe }
-                Write-Out ('  {0}{1}{2} {3}' -f $script:Grn, $script:OkM, $script:R, (T 'up_to_date' @($cur)))
+                $curExe = if ($state.Dp) { $DpExe } else { $CpExe }
+                $cur = Get-InstalledVersion $curExe
+                $curB = Get-InstalledBuildOrRecorded $curExe $cur
+                if (-not $cur) { $cur = if ($script:Rel.ArchiveVersion) { $script:Rel.ArchiveVersion } else { $script:Rel.Version } }
+                if (-not $curB) { $curB = $newBuild }
+                Write-Out ('  {0}{1}{2} {3}' -f $script:Grn, $script:OkM, $script:R, (T 'up_to_date' @((Format-VersionBuildShort $cur $curB))))
+                # the files are the archive's: whatever the binaries cannot say of themselves, the archive does
+                Save-InstalledRecord $cur $curB
                 return $null
             }
             New-Item -ItemType Directory -Path $backup -Force | Out-Null
             Invoke-Step (T 's_backup') { Backup-BeforeUpdate $backup $state }
         }
-        $oldDp = Get-InstalledVersion $DpExe
+        $oldDp = Get-InstalledLabel $DpExe; if ($oldDp -eq '?') { $oldDp = '' }
         Invoke-Step (T 's_user') {
             if (-not (Test-Path $ConfDir)) { New-Item -ItemType Directory -Path $ConfDir -Force | Out-Null }
             foreach ($d in @($InstallDir, $ConfDir, $DataDir, $LogDir, $CertsDir, (Join-Path $DataDir 'spool'), $CpDataDir, $backup)) {
@@ -2735,6 +3602,14 @@ function Invoke-InstallFlow([string]$action) {
             New-Item -ItemType Directory -Path $agentDst -Force | Out-Null
             Copy-Item -Path (Join-Path $script:Rel.AgentDist 'toutwaf-agent-*') -Destination $agentDst -Force
             Write-Info "host agent builds installed in $agentDst"
+        }
+        # the antivirus programs are withdrawn from the product: installed only on explicit request (TOUTWAF_WITH_ANTIVIRUS=1)
+        if ($Component -ne 'dp' -and $script:Rel.AVDist -and $env:TOUTWAF_WITH_ANTIVIRUS -eq '1') {
+            # the programs the console hands to the machines its antivirus installer sets up (replaced at every update)
+            $avDst = Join-Path $CpDataDir 'av-dist'
+            New-Item -ItemType Directory -Path $avDst -Force | Out-Null
+            Copy-Item -Path (Join-Path $script:Rel.AVDist 'toutwaf-av-*') -Destination $avDst -Force
+            Write-Info "ToutWAF Antivirus programs installed in $avDst"
         }
         Invoke-Step (T 's_cfg') { Write-Configs }
         Invoke-Step (T 's_units') {
@@ -2762,9 +3637,84 @@ function Invoke-InstallFlow([string]$action) {
                 }
             }
         } else { Write-Out '  services installed but not started (-NoStart)' }
+        # the new binaries are in place: remember their version and build (the binary's own when it names one, else what the archive / channel says)
+        $recExe = if ($Component -ne 'dp' -and (Test-Path $CpExe)) { $CpExe } else { $DpExe }
+        $recV = Get-InstalledVersion $recExe; $recB = Get-InstalledBuild $recExe
+        if (-not $recV) { $recV = if ($script:Rel.Version -and $script:Rel.Version -ne 'local') { $script:Rel.Version } else { $script:Rel.ArchiveVersion } }
+        if (-not $recB) { $recB = $newBuild }
+        Save-InstalledRecord $recV $recB
         return @{ OldDp = $oldDp }
     }
     finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+}
+
+# ------------------------------------------------------------------------------------------------ prerequisites of the machine
+# Said BEFORE anything is changed, each problem with its cause and its fix (the same words and thresholds as install.sh and as the link command the
+# console gives for a web server). Only a disk that is really full stops the installation (exit 4; $env:TOUTWAF_SKIP_PREREQ=1 goes on anyway): an
+# unresolvable name or a wrong clock is a warning. Windows is never updated from here (an update of Windows restarts the machine). Read-only.
+function Get-PrereqHost([string]$url) {
+    if (-not $url) { return '' }
+    try { $u = [Uri]$url } catch { return '' }
+    if (-not $u.IsAbsoluteUri -or $u.IsFile -or $u.HostNameType -ne [UriHostNameType]::Dns) { return '' }
+    return $u.DnsSafeHost
+}
+function Get-PrereqFindings {
+    # returns objects with Level (refuse | warn), Cause and Action
+    $out = New-Object System.Collections.ArrayList
+    $refuse = if ($env:TOUTWAF_SKIP_PREREQ -eq '1') { 'warn' } else { 'refuse' }
+    # 1. disk space where the programs, the data and the download go (MIN: below it the installation could not finish; WARN: comfortable)
+    $seen = @{}
+    foreach ($e in @(@($InstallDir, 300, 1024), @($DataRoot, 300, 1024), @([IO.Path]::GetTempPath(), 100, 300))) {
+        try {
+            $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath([string]$e[0]))
+            if (-not $root -or $root.StartsWith('\\') -or $seen.ContainsKey($root)) { continue }
+            $seen[$root] = $true
+            $mb = [int]((New-Object IO.DriveInfo -ArgumentList $root).AvailableFreeSpace / 1MB)
+            if ($mb -lt $e[1]) { [void]$out.Add(@{ Level = $refuse; Cause = (T 'pr_disk_full' @($mb, $root, $e[1])); Action = (T 'pr_disk_full_w_a') }) }
+            elseif ($mb -lt $e[2]) { [void]$out.Add(@{ Level = 'warn'; Cause = (T 'pr_disk_low' @($mb, $root, $e[2])); Action = (T 'pr_disk_low_a') }) }
+        } catch { $null = $_ }
+    }
+    # 2. DNS and 3. the clock, for the places the installation downloads from (nothing to resolve when it installs from a local archive)
+    $hosts = New-Object System.Collections.ArrayList
+    if (-not $ZipPath) {
+        $mirror = if ($BaseUrl) { $BaseUrl } else { $env:TOUTWAF_BASE_URL }
+        if ($mirror) { [void]$hosts.Add((Get-PrereqHost $mirror)) }
+        else { [void]$hosts.Add((Get-PrereqHost $script:SrcPrimary)); [void]$hosts.Add((Get-PrereqHost $script:SrcFallback)) }
+    }
+    [void]$hosts.Add((Get-PrereqHost $CpUrl))
+    $done = @{}; $first = ''
+    foreach ($h in $hosts) {
+        if (-not $h -or $done.ContainsKey($h)) { continue }
+        $done[$h] = $true
+        try { [void][System.Net.Dns]::GetHostAddresses($h); if (-not $first -and -not $ZipPath) { $first = $h } }
+        catch { [void]$out.Add(@{ Level = 'warn'; Cause = (T 'pr_dns' @($h)); Action = (T 'pr_dns_w_a') }) }
+    }
+    if ($first) {
+        try {
+            $r = Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://$first/" -TimeoutSec 10
+            $d = [DateTimeOffset]::Parse([string]$r.Headers['Date'], [Globalization.CultureInfo]::InvariantCulture)
+            $skew = [int][Math]::Abs(([DateTimeOffset]::UtcNow - $d).TotalSeconds)
+            if ($skew -gt 300) { [void]$out.Add(@{ Level = 'warn'; Cause = (T 'pr_clock' @($skew)); Action = (T 'pr_clock_w_a') }) }
+        } catch { $null = $_ }
+    }
+    return $out
+}
+function Test-Prerequisites {
+    # prints the findings; $false only for a full disk
+    $f = @(Get-PrereqFindings)
+    if ($f.Count -eq 0) { return $true }
+    $stop = (@($f | Where-Object { $_.Level -eq 'refuse' })).Count -gt 0
+    if ($Quiet -and -not $stop) { foreach ($x in $f) { Write-InstallLog ('[prereq] ' + $x.Cause) }; return $true }
+    Write-Host ''
+    Write-Host ('  ' + (Paint $script:B (T 'pf_title')))
+    foreach ($x in $f) {
+        if ($x.Level -eq 'refuse') { $lab = T 'pf_l_refuse'; $col = $script:Red } else { $lab = T 'pf_l_warn'; $col = $script:Ylw }
+        Write-Host ('  {0} {1}' -f (Paint $col "[$lab]"), $x.Cause)
+        Write-Host ('      ' + $x.Action)
+        Write-InstallLog ('[prereq] ' + $x.Cause)
+    }
+    if ($stop) { Write-Host ''; Write-Host ('  ' + (T 'pf_refused')); Write-Host '' }
+    return (-not $stop)
 }
 
 # ------------------------------------------------------------------------------------------------ interactive menu / options
@@ -2772,8 +3722,8 @@ function Show-Menu {
     Write-Banner
     $s = Get-InstallState
     $st = ''
-    if ($s.Dp) { $st += "toutwaf-dp $(Get-InstalledVersion $DpExe)  " }
-    if ($s.Cp) { $st += "toutwaf-cp $(Get-InstalledVersion $CpExe)  " }
+    if ($s.Dp) { $st += "toutwaf-dp $(Get-InstalledLabel $DpExe)  " }
+    if ($s.Cp) { $st += "toutwaf-cp $(Get-InstalledLabel $CpExe)  " }
     if ($st) { Write-Out ('  ' + (T 'state_installed' @($st))) } else { Write-Out ('  ' + (T 'state_none')) }
     Write-Host ''
     Box-Top (T 'menu_title')
@@ -2876,12 +3826,14 @@ function Invoke-Main {
     Write-Banner
     Write-Out ('  {0}os=windows arch={1} component={2} channel={3}{4}' -f $script:D, (Get-Arch), $Component, $script:Channel, $script:R)
     if ($compat.Status -ne 'unsupported') { Write-Out ('  {0}{1}{2} {3}' -f $script:Grn, $script:OkM, $script:R, $script:CompatLine) }
+    # disk space, DNS and the clock, with the fix of each problem: only a full disk stops (exit 4; $env:TOUTWAF_SKIP_PREREQ=1 goes on anyway)
+    if (-not $DryRun -and -not (Test-Prerequisites)) { return 4 }
     $pub = ''
     if ($Component -ne 'dp') { $pub = Get-PublicIp }
     $res = Invoke-InstallFlow $action
     Write-Host ''
     if ($null -eq $res) { return 0 }
-    $newDp = Get-InstalledVersion $DpExe
+    $newDp = Get-InstalledLabel $DpExe; if ($newDp -eq '?') { $newDp = '' }
     $tail = ''
     if ($newDp) { $tail = "  toutwaf-dp $newDp"; if ($res.OldDp) { $tail += " (was $($res.OldDp))" } }
     Write-Out ('  {0}{1}{2} {3}{4}' -f $script:Grn, $script:OkM, $script:R, (T 'done'), $tail)

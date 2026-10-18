@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.2.0-dev.7** · canal **stable** · 2026-10-05
+**Version 0.3.1** · build `df5926fd12ee` · canal **stable** · 2026-10-18
 
 </div>
 
@@ -22,7 +22,7 @@ ToutWAF se place **devant vos sites web et vos API** et examine chaque requête 
 
 Il s'installe sur **votre propre serveur** (Linux ou Windows), sans service cloud : vos données de trafic restent chez vous.
 
-> **Canal stable.** Les versions de test sont sur la branche [`dev`](https://github.com/qu3ntin01/toutwaf/tree/dev).
+> **Canal stable.** Cette branche ne reçoit **qu'une version dont tout a été testé** : tous les systèmes, tous les paquets, de bout en bout, sans aucune fonction expérimentale. Rien d'autre n'y arrive ; seule la dernière version stable y reste. La version de développement est sur la branche [`dev`](https://github.com/qu3ntin01/toutwaf/tree/dev).
 
 > Ce dépôt publie uniquement les **installeurs et les binaires** de ToutWAF. Il ne contient pas de code source.
 
@@ -202,7 +202,9 @@ La page **Mises à jour** (menu Administration) affiche la version installée, l
 
 ## Édition gratuite
 
-Sans licence, ToutWAF fonctionne en **édition gratuite** : **5 sites protégés, 1 nœud, 2 utilisateurs, 1 organisation et 50 millions de requêtes par mois**. Dépasser le quota mensuel est signalé « hors quota » dans la console. Au-delà, l'ajout est refusé tant qu'aucune licence n'est installée. Tout le reste décrit ici est le même produit ; pour des limites plus élevées, contactez votre fournisseur ToutWAF.
+Sans licence ni inscription, ToutWAF fonctionne en **édition gratuite (Free)**, gratuite, y compris à titre professionnel : **jusqu'à 3 sites protégés, 1 nœud, 2 utilisateurs, 1 organisation et 5 millions de requêtes autorisées par mois** (les attaques bloquées ne sont pas comptées). Une inscription gratuite, **facultative** (adresse e-mail confirmée, Administration > Licence), fait passer l'installation en **Free+** : **5 sites et 15 millions de requêtes autorisées par mois** (mêmes autres limites ; les quotas ne s'additionnent pas). Les plafonds s'appliquent à l'ensemble de l'installation, pas à chaque serveur. Le volume mensuel est annoncé, jamais appliqué par une coupure : avertissement à 80 % puis à 100 %, puis, si le dépassement dure, demande de passage à une offre payante avec une période de grâce annoncée (30 jours par défaut). Le trafic, la protection et la console ne sont jamais interrompus ; seule la création d'un nouveau site au-delà du plafond est refusée, avec la limite et le nombre utilisé. La protection WAF, l'authentification à deux facteurs et les mises à jour de sécurité sont dans toutes les offres.
+
+Plus de sites ou de nœuds (Pro : 15 sites et 2 nœuds ; Agency : 50 sites et 5 nœuds ; Enterprise : plafonds selon devis) et les fonctions avancées sont sous licence : équilibrage de charge avancé, plusieurs organisations (locataires, MSSP), connexion d'entreprise (OIDC, SAML, SCIM), intégrations SIEM / SOAR / tickets / renseignement sur les menaces et sauvegardes hors site. Elles restent visibles dans la console, verrouillées, avec un lien vers les offres ; elles ne sont jamais cachées. À l'expiration d'une licence payante : 48 h de grâce (tout fonctionne, avec des avertissements), puis 48 h de lecture seule (le trafic et la protection continuent, rien ne peut être créé ni modifié), puis la protection WAF est désactivée : le trafic continue de passer, non sécurisé, et seul le renouvellement reste possible dans le panel ; le renouvellement rétablit tout immédiatement. Free et Free + ne sont pas concernées. Tout le reste décrit ici est le même produit ; pour des limites plus élevées ou les fonctions avancées, contactez votre fournisseur ToutWAF.
 
 ## Limites connues
 
@@ -217,22 +219,24 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 - Les traductions de la console et des messages d'erreur ont été rédigées avec l'aide d'outils automatiques et n'ont pas encore été relues par des locuteurs natifs.
 - Aucune certification (ANSSI, PCI DSS, ISO 27001) n'est revendiquée.
 
+Cibles non compilées pour cette version :
+- `linux-arm64` : disabled in settings
+- `windows-amd64` : disabled in settings
+- `windows-arm64` : disabled in settings
 
 ## Versions et téléchargements
 
-**Version 0.2.0-dev.7**
+**Version 0.3.1**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 42.4 MiB | `7a92338b0fdb748566ab4ef40a58b119a66c631225678e7b4e573aefd925f18b` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 38.7 MiB | `9aa1c5cab0217601b6c701c67ade1adb6ab8b032aa117cdcbc34cacfa52f80c4` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 43.1 MiB | `11ca947d2c28b2839b77f1f225d73b888cf42616d21356be0ea7de7e8f5131a5` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 39.0 MiB | `1d8a11019c6c4d817cc9d98bcc38cdc77ffd8d5d673a558e09b93cd8f4427046` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 90.1 MiB | `98fa5e867cd67107aa52a21fba3fb32271cd0f6fd9c9f2cd973b0fb59dabbf28` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.2.0-dev.7` | 2026-10-05T14:28:05Z | **actuelle** | `releases/0.2.0-dev.7/` |
+| `0.3.1` | 2026-10-18T07:59:16Z | **actuelle** | `releases/0.3.1/` |
+| `0.2.0-dev.7` | 2026-10-05T14:28:05Z | disponible | `releases/0.2.0-dev.7/` |
 | `0.2.0-dev.6` | 2026-10-04T18:03:29Z | disponible | `releases/0.2.0-dev.6/` |
 | `0.2.0-dev.5` | 2026-10-03T17:20:42Z | disponible | `releases/0.2.0-dev.5/` |
 | `0.2.0-dev.4` | 2026-10-03T13:59:43Z | disponible | `releases/0.2.0-dev.4/` |
@@ -245,7 +249,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.2.0-dev.7 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.3.1 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Vérifier une version
@@ -253,7 +257,7 @@ cd releases/0.2.0-dev.7 && sha256sum -c SHA256SUMS --ignore-missing
 À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `f8fc98e4c6e364fa`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
 
 ```sh
-V=0.2.0-dev.7; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+V=0.3.1; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
