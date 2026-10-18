@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "version": "0.3.1",
+  "build": "df5926fd12ee",
+  "channel": "stable",
+  "released_at": "2026-10-18T07:59:16Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 94479498,
+      "sha256": "98fa5e867cd67107aa52a21fba3fb32271cd0f6fd9c9f2cd973b0fb59dabbf28"
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-arm64",
+      "reason": "disabled in settings"
+    }
+  ],
+  "notes": "- Staging build for internal verification. It is not a release and has not been published."
+}
