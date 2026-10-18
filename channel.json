@@ -1,8 +1,8 @@
 {
   "channel": "dev",
-  "version": "0.3.2-dev",
-  "build": "f876c108062b",
-  "released_at": "2026-10-18T10:42:15Z",
+  "version": "0.3.3-dev",
+  "build": "f7cbf0205867",
+  "released_at": "2026-10-18T15:01:19Z",
   "min_installer": "2",
   "notes_url": "CHANGELOG.md",
   "assets": [
@@ -10,8 +10,8 @@
       "name": "toutwaf-linux-amd64.tar.gz",
       "os": "linux",
       "arch": "amd64",
-      "size": 94682126,
-      "sha256": "0cb8e79bd73d84ff74f5a6125b27e47d5a00ab9438add6df03b8e28126abb5c6"
+      "size": 98779844,
+      "sha256": "6a1256cdf556bc21d406d71a9227653fa6a31e963f2d689522527a090f25c6db"
     }
   ],
   "yanked": [],
@@ -55,6 +55,11 @@
       "version": "0.3.2-dev",
       "released_at": "2026-10-18T10:42:15Z",
       "path": "releases/0.3.2-dev/"
+    },
+    {
+      "version": "0.3.3-dev",
+      "released_at": "2026-10-18T15:01:19Z",
+      "path": "releases/0.3.3-dev/"
     }
   ],
   "public_key": "V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=",

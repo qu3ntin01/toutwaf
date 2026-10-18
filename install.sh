@@ -4041,15 +4041,15 @@ cmd_uninstall() {
   # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
-  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-dp.service toutwaf-cp.service; do
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-dp.service toutwaf-cp.service; do
     if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
     run rm -f "$(p /etc/systemd/system/$s)"
   done
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl stop toutwaf-upgrade-rollback.timer toutwaf-upgrade-rollback.service >>"$LOG" 2>&1 || true; fi   # transient units of an update in progress
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl daemon-reload; fi
-  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
+  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
   run rm -f "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"
-  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs; do
     for d in /usr/local/bin "$(secure_link_dir)"; do
       [ -n "$d" ] || continue
       l="$(p "$d/$b")"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
@@ -4454,7 +4454,7 @@ link_cli() {
   if [ -n "$sd" ] && [ "$sd" != "$BIN_DIR" ] && [ "$sd" != /usr/local/bin ]; then dirs="$dirs $sd"; fi
   for d in $dirs; do
     run install -d -m 0755 "$(p "$d")"
-    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do
+    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs; do
       [ -e "$(p "$BIN_DIR/$b")" ] || continue
       l="$(p "$d/$b")"
       if [ -L "$l" ] || [ ! -e "$l" ]; then run ln -sfn "$BIN_DIR/$b" "$l"; fi
@@ -4727,6 +4727,7 @@ EOF
 #   toutwaf-blocklist put the large blocklists into the kernel (nftables, one table of its own)  (console: Lists > Kernel blocking)
 #   toutwaf-vpn       put the files of the VPN module on the machine, start / stop the tunnels, read their state (console: VPN)
 #   toutwaf-fw        load the nftables rules of the Firewall module with a root rollback timer, read them back (console: Firewall)
+#   toutwaf-jobs      run the privileged jobs of the scheduled tasks: a FIXED list (log rotation, journal vacuum), no command from the request (console: Scheduled tasks)
 # The scripts carry a "toutwaf-<name>-proto: N" marker that the control plane checks before offering the button.
 emit_helper() {   # NAME  (template on stdin)
   local dst tmp; dst="$(p "$BIN_DIR/$1")"; tmp="$dst.new"
@@ -5596,6 +5597,29 @@ case "${1:-}" in
   *) echo "usage: toutwaf-fw apply|rollback TRIAL|boot" >&2; exit 2;;
 esac
 TW_FW_TPL
+  emit_helper toutwaf-jobs <<'TW_JOBS_TPL'
+#!/usr/bin/env bash
+# toutwaf-jobs-proto: 1
+#
+# toutwaf-jobs apply            (root; toutwaf-jobs.service) run the pending @DATA_DIR@/jobs-request
+#
+# The scheduled tasks of the console can ask for a privileged job. The control plane runs without any privilege, so it leaves a small
+# request file (JOB, VERB, DAYS) and this helper runs it. The request is written by the unprivileged service account, so for root it
+# is untrusted input. All the work is done by `toutwafctl jobs-host`, which checks it again:
+#   * the verb must be one of a FIXED list written in the program (logrotate, journal_vacuum); the command line of each verb is written
+#     there too: a request cannot name a program, a path, an option or a shell;
+#   * the only number (days of the journal to keep) is checked against its bounds;
+#   * the answer (exit code, clipped output) goes back in @DATA_DIR@/jobs/<job>.res.json.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; BIN_DIR='@BIN_DIR@'
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-jobs must run as root" >&2; exit 1; }
+CTL="$BIN_DIR/toutwafctl"
+[ -x "$CTL" ] || { echo "toutwaf-jobs: $CTL is missing" >&2; exit 1; }
+case "${1:-}" in
+  apply) exec "$CTL" jobs-host apply --data-dir "$DATA_DIR";;
+  *) echo "usage: toutwaf-jobs apply" >&2; exit 2;;
+esac
+TW_JOBS_TPL
   cat >"$sd/toutwaf-upgrade.path" <<EOF
 [Unit]
 Description=ToutWAF upgrade requests (data plane update_engine, console Updates page)
@@ -5766,6 +5790,31 @@ TimeoutStartSec=1min
 
 [Install]
 WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-jobs.path" <<EOF
+[Unit]
+Description=ToutWAF privileged job requests (console Scheduled tasks)
+
+[Path]
+PathExists=$DATA_DIR/jobs-request
+Unit=toutwaf-jobs.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-jobs.service" <<EOF
+[Unit]
+Description=ToutWAF privileged jobs helper (requested by the control plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-jobs apply
+TimeoutStartSec=6min
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
 EOF
   fi
   return 0
@@ -5987,6 +6036,7 @@ start_services() {
   if want_cp; then systemctl enable --now toutwaf-blocklist.path >/dev/null 2>&1 || warn "could not enable toutwaf-blocklist.path"; fi
   if want_cp; then systemctl enable --now toutwaf-vpn.path >/dev/null 2>&1 || warn "could not enable toutwaf-vpn.path"; fi
   if want_cp; then systemctl enable --now toutwaf-fw.path >/dev/null 2>&1 || warn "could not enable toutwaf-fw.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-jobs.path >/dev/null 2>&1 || warn "could not enable toutwaf-jobs.path"; fi
   if want_cp; then
     systemctl enable toutwaf-cp >/dev/null 2>&1 || true
     if svc_active toutwaf-cp && [ "$CHANGED" = 0 ]; then :; else
@@ -6088,7 +6138,7 @@ do_install_flow() {
       say "  $BUL services installed but not started (--no-start)"
     fi
     if [ "$NO_ENABLE" = 1 ]; then
-      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
+      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
     fi
   fi
   record_installed_now

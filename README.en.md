@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.3.2-dev** · build `f876c108062b` · channel **dev (pre-release)** · 2026-10-18
+**Version 0.3.3-dev** · build `f7cbf0205867` · channel **dev (pre-release)** · 2026-10-18
 
 </div>
 
@@ -227,16 +227,17 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.3.2-dev**
+**Version 0.3.3-dev**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 90.3 MiB | `0cb8e79bd73d84ff74f5a6125b27e47d5a00ab9438add6df03b8e28126abb5c6` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 94.2 MiB | `6a1256cdf556bc21d406d71a9227653fa6a31e963f2d689522527a090f25c6db` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.3.2-dev` | 2026-10-18T10:42:15Z | **current** | `releases/0.3.2-dev/` |
+| `0.3.3-dev` | 2026-10-18T15:01:19Z | **current** | `releases/0.3.3-dev/` |
+| `0.3.2-dev` | 2026-10-18T10:42:15Z | available | `releases/0.3.2-dev/` |
 | `0.3.1-dev` | 2026-10-18T07:32:26Z | available | `releases/0.3.1-dev/` |
 | `0.3.0-dev` | 2026-10-18T02:02:18Z | available | `releases/0.3.0-dev/` |
 | `0.2.0-dev.9` | 2026-10-06T19:53:00Z | available | `releases/0.2.0-dev.9/` |
@@ -252,7 +253,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.3.2-dev && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.3.3-dev && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Verify a release
@@ -260,7 +261,7 @@ cd releases/0.3.2-dev && sha256sum -c SHA256SUMS --ignore-missing
 From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `ebd2a20ce5a5650f`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=`. To verify by hand (OpenSSL 3 or later):
 
 ```sh
-V=0.3.2-dev; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
+V=0.3.3-dev; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
