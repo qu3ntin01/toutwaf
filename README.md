@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.3.0-dev** · build `5471236be0d4` · canal **bêta (dev)** · 2026-10-14
+**Version 0.3.0-dev** · build `765fc9bbd8d8` · canal **bêta (dev)** · 2026-10-18
 
 </div>
 
@@ -202,9 +202,9 @@ La page **Mises à jour** (menu Administration) affiche la version installée, l
 
 ## Édition gratuite
 
-Sans licence, ToutWAF fonctionne en **édition gratuite**, gratuite pour un usage personnel raisonnable : **jusqu'à 3 sites protégés, 1 nœud, 2 utilisateurs, 1 organisation et 50 millions de requêtes par mois**. Dépasser le quota mensuel est signalé « hors quota » dans la console. Au-delà, l'ajout est refusé, avec la limite et le nombre utilisé, tant qu'aucune licence n'est installée.
+Sans licence ni inscription, ToutWAF fonctionne en **édition gratuite (Free)**, gratuite, y compris à titre professionnel : **jusqu'à 3 sites protégés, 1 nœud, 2 utilisateurs, 1 organisation et 5 millions de requêtes autorisées par mois** (les attaques bloquées ne sont pas comptées). Une inscription gratuite, **facultative** (adresse e-mail confirmée, Administration > Licence), fait passer l'installation en **Free+** : **5 sites et 15 millions de requêtes autorisées par mois** (mêmes autres limites ; les quotas ne s'additionnent pas). Les plafonds s'appliquent à l'ensemble de l'installation, pas à chaque serveur. Le volume mensuel est annoncé, jamais appliqué par une coupure : avertissement à 80 % puis à 100 %, puis, si le dépassement dure, demande de passage à une offre payante avec une période de grâce annoncée (30 jours par défaut). Le trafic, la protection et la console ne sont jamais interrompus ; seule la création d'un nouveau site au-delà du plafond est refusée, avec la limite et le nombre utilisé. La protection WAF, l'authentification à deux facteurs et les mises à jour de sécurité sont dans toutes les offres.
 
-Plus de sites, l'usage en entreprise et les fonctions avancées sont sous licence : équilibrage de charge avancé, plusieurs organisations (locataires, MSSP), connexion d'entreprise (OIDC, SAML, SCIM), intégrations SIEM / SOAR / tickets / renseignement sur les menaces et sauvegardes hors site. Elles restent visibles dans la console, verrouillées, avec un lien vers les offres ; elles ne sont jamais cachées. À l'expiration d'une licence, une période de grâce de 14 jours s'applique, puis seule la *nouvelle configuration* de ces fonctions est refusée : la protection déjà en place continue de fonctionner. Tout le reste décrit ici est le même produit ; pour des limites plus élevées ou les fonctions avancées, contactez votre fournisseur ToutWAF.
+Plus de sites ou de nœuds (Pro : 15 sites et 2 nœuds ; Agency : 50 sites et 5 nœuds ; Enterprise : plafonds selon devis) et les fonctions avancées sont sous licence : équilibrage de charge avancé, plusieurs organisations (locataires, MSSP), connexion d'entreprise (OIDC, SAML, SCIM), intégrations SIEM / SOAR / tickets / renseignement sur les menaces et sauvegardes hors site. Elles restent visibles dans la console, verrouillées, avec un lien vers les offres ; elles ne sont jamais cachées. À l'expiration d'une licence payante : 48 h de grâce (tout fonctionne, avec des avertissements), puis 48 h de lecture seule (le trafic et la protection continuent, rien ne peut être créé ni modifié), puis la protection WAF est désactivée : le trafic continue de passer, non sécurisé, et seul le renouvellement reste possible dans le panel ; le renouvellement rétablit tout immédiatement. Free et Free + ne sont pas concernées. Tout le reste décrit ici est le même produit ; pour des limites plus élevées ou les fonctions avancées, contactez votre fournisseur ToutWAF.
 
 ## Limites connues
 
@@ -219,6 +219,10 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 - Les traductions de la console et des messages d'erreur ont été rédigées avec l'aide d'outils automatiques et n'ont pas encore été relues par des locuteurs natifs.
 - Aucune certification (ANSSI, PCI DSS, ISO 27001) n'est revendiquée.
 
+Cibles non compilées pour cette version :
+- `linux-arm64` : disabled in settings
+- `windows-amd64` : disabled in settings
+- `windows-arm64` : disabled in settings
 
 ## Versions et téléchargements
 
@@ -226,15 +230,12 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 81.4 MiB | `74e70464210bd8197f130a8ce27242435223e6ee1ab2c7566d4d4796c98efaf3` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 73.6 MiB | `e8e4d6c54f4a5c2c0fe398ae0c4178e003390a62e3daea8eb7b79074be50947d` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 82.3 MiB | `a5ef087ace0f73dc5d501e7672cc21f4e01ce4fc3cb01f3ad09e51fb3ed2ec99` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 74.1 MiB | `f5bfab14531f363ae95fa67c7ead375b1f8ff71eb45799394ce78c813a92e93e` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 90.4 MiB | `af5e728f015ec77dc9505e571c9f79fec45be782a0cb4ec4199c995637fce472` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.3.0-dev` | 2026-10-14T23:23:46Z | **actuelle** | `releases/0.3.0-dev/` |
+| `0.3.0-dev` | 2026-10-18T02:02:18Z | **actuelle** | `releases/0.3.0-dev/` |
 | `0.2.0-dev.9` | 2026-10-06T19:53:00Z | disponible | `releases/0.2.0-dev.9/` |
 | `0.2.0-dev.8` | 2026-10-05T17:24:59Z | disponible | `releases/0.2.0-dev.8/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | disponible | `releases/0.2.0-dev.7/` |

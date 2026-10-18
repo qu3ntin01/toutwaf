@@ -3,7 +3,7 @@
 # (Debian 11+, Ubuntu 20.04+, Mint, ...; arm64 with a 64-bit OS, e.g. Raspberry Pi OS 64-bit, emulation-tested only), SUSE (Leap 15.6+/16, Tumbleweed, SLES), Arch family. Full list + status: docs/install/platforms.md
 # (generated from deploy/platforms.json). The system is checked BEFORE anything is changed: --check-compat, --skip-os-check.
 #
-#   curl -fsSL https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/install.sh | sudo bash
+#   curl -fsSL https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/main/install.sh | sudo bash
 #       -> interactive menu (reads the keyboard from /dev/tty, so it works when piped)
 #   curl -fsSL <url> | sudo bash -s -- --install --yes --public-host example.com
 #       -> unattended "direct" install (see --help for every option)
@@ -49,6 +49,10 @@ CP_URL=""; NODE_TOKEN=""; ENROLL_TOKEN=""; NODE_GROUP=""; CP_CA=""
 CP_PORT=9443; HTTP_PORT=80; HTTPS_PORT=443; PUBLIC_HOST=""; CHANNEL="${TOUTWAF_CHANNEL:-}"
 OPEN_FW=""                                      # "" = default: open what is needed when firewalld / ufw is active; 1 = same, explicit; 0 = never touch the firewall
 CONSOLE_FROM=""                                 # restrict the console port to this address / CIDR ("" = reachable from anywhere)
+# The firewall MODULE (ToutWAF manages this machine's nftables rules) is NOT the system-firewall option above (OPEN_FW opens the ports ToutWAF needs
+# in firewalld / ufw). "" = not decided (asked in the interactive mode, default NO); 1 = switch the module on at the end of the installation
+# (no rule is applied: every change goes through the trial with automatic rollback in the console); 0 = explicitly not.
+FW_MODULE=""; case "${TOUTWAF_WITH_FIREWALL:-}" in 1|yes|true|on) FW_MODULE=1;; 0|no|false|off) FW_MODULE=0;; esac
 OPEN_CP_PORT=0; NO_SELINUX=0; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
 QUIET=0; NO_COLOR_FLAG=0; ACCEPT_DEFAULTS=0
 CHECK_COMPAT=0                                  # --check-compat: print the compatibility verdict, change nothing (exit 0 compatible, 3 not)
@@ -1158,6 +1162,76 @@ nl|sum_node_hint|Om deze node via de console te beheren: Nodes > Node toevoegen,
 ru|sum_node_hint|Чтобы управлять этим узлом из консоли: Узлы > Добавить узел, затем задайте control_plane.url / enroll_token в %s.
 zh|sum_node_hint|要在控制台管理此节点：节点 > 添加节点，然后在 %s 中设置 control_plane.url / enroll_token。
 ar|sum_node_hint|لإدارة هذه العقدة من لوحة التحكم: العقد > إضافة عقدة، ثم اضبط control_plane.url / enroll_token في %s.
+en|q_fwmodule|Do you also want ToutWAF to manage this machine's firewall?
+fr|q_fwmodule|Voulez-vous aussi que ToutWAF gère le pare-feu de cette machine ?
+es|q_fwmodule|¿Quiere que ToutWAF gestione también el cortafuegos de esta máquina?
+de|q_fwmodule|Soll ToutWAF auch die Firewall dieses Rechners verwalten?
+it|q_fwmodule|Vuoi che ToutWAF gestisca anche il firewall di questa macchina?
+pt|q_fwmodule|Quer que o ToutWAF também faça a gestão da firewall desta máquina?
+nl|q_fwmodule|Wilt u dat ToutWAF ook de firewall van deze machine beheert?
+ru|q_fwmodule|Хотите, чтобы ToutWAF также управлял брандмауэром этой машины?
+zh|q_fwmodule|是否也让 ToutWAF 管理本机的防火墙？
+ar|q_fwmodule|هل تريد أن يدير ToutWAF جدار الحماية لهذا الجهاز أيضا؟
+en|fwmod_n1|Optional module, off unless you say yes. Nothing is applied during the installation: you review every change in the console.
+fr|fwmod_n1|Module optionnel, éteint sauf si vous répondez oui. Rien n'est appliqué pendant l'installation : vous relisez chaque changement dans la console.
+es|fwmod_n1|Módulo opcional, apagado salvo que diga sí. No se aplica nada durante la instalación: revisa cada cambio en la consola.
+de|fwmod_n1|Optionales Modul, aus, außer Sie sagen ja. Während der Installation wird nichts angewendet: Sie prüfen jede Änderung in der Konsole.
+it|fwmod_n1|Modulo opzionale, spento salvo risposta affermativa. Durante l'installazione non viene applicato nulla: ogni modifica si rivede nella console.
+pt|fwmod_n1|Módulo opcional, desligado salvo se disser que sim. Nada é aplicado durante a instalação: revê cada alteração na consola.
+nl|fwmod_n1|Optionele module, uit tenzij u ja zegt. Tijdens de installatie wordt niets toegepast: u controleert elke wijziging in de console.
+ru|fwmod_n1|Необязательный модуль, выключен, если вы не ответите «да». Во время установки ничего не применяется: каждое изменение вы проверяете в консоли.
+zh|fwmod_n1|可选模块，除非回答“是”否则保持关闭。安装期间不会应用任何规则：每项更改都在控制台中审核。
+ar|fwmod_n1|وحدة اختيارية، متوقفة ما لم تجب بنعم. لا يُطبَّق شيء أثناء التثبيت: تراجع كل تغيير في لوحة التحكم.
+en|fwmod_n2|Every change runs as a trial with a countdown and rolls back by itself unless you keep it; an anti-lockout guard refuses any rule that would cut SSH or the console.
+fr|fwmod_n2|Chaque changement passe par un essai avec compte à rebours et revient en arrière tout seul si vous ne le gardez pas ; un garde-fou anti-lockout refuse toute règle qui couperait SSH ou la console.
+es|fwmod_n2|Cada cambio se prueba con cuenta atrás y se revierte solo si no lo conserva; una protección anti-bloqueo rechaza toda regla que cortaría SSH o la consola.
+de|fwmod_n2|Jede Änderung läuft als Test mit Countdown und wird von selbst zurückgenommen, wenn Sie sie nicht behalten; ein Aussperrschutz lehnt jede Regel ab, die SSH oder die Konsole kappen würde.
+it|fwmod_n2|Ogni modifica passa da una prova con conto alla rovescia e torna indietro da sola se non la conservi; una protezione anti-lockout rifiuta ogni regola che taglierebbe SSH o la console.
+pt|fwmod_n2|Cada alteração passa por um ensaio com contagem decrescente e volta atrás sozinha se não a mantiver; uma proteção anti-bloqueio recusa qualquer regra que cortaria o SSH ou a consola.
+nl|fwmod_n2|Elke wijziging draait als proef met aftelling en wordt vanzelf teruggedraaid als u haar niet behoudt; een anti-lockout-beveiliging weigert elke regel die SSH of de console zou afsnijden.
+ru|fwmod_n2|Каждое изменение проходит пробный период с обратным отсчётом и откатывается само, если вы его не сохраните; защита от блокировки отклоняет любое правило, которое отрезало бы SSH или консоль.
+zh|fwmod_n2|每项更改都先试用并倒计时，若不保留会自动回退；防锁死保护会拒绝任何可能切断 SSH 或控制台的规则。
+ar|fwmod_n2|كل تغيير يمر بتجربة مع عد تنازلي ويتراجع تلقائيا ما لم تحتفظ به؛ وتمنع حماية مضادة للإقفال أي قاعدة قد تقطع SSH أو لوحة التحكم.
+en|fwmod_n3|This is not the question above, which only opens the ports ToutWAF needs in the system firewall (--no-firewall).
+fr|fwmod_n3|Ce n'est pas la question précédente, qui ouvre seulement les ports dont ToutWAF a besoin dans le pare-feu du système (--no-firewall).
+es|fwmod_n3|No es la pregunta anterior, que solo abre los puertos que ToutWAF necesita en el cortafuegos del sistema (--no-firewall).
+de|fwmod_n3|Das ist nicht die Frage davor, die nur die von ToutWAF benötigten Ports in der System-Firewall öffnet (--no-firewall).
+it|fwmod_n3|Non è la domanda precedente, che apre solo le porte necessarie a ToutWAF nel firewall di sistema (--no-firewall).
+pt|fwmod_n3|Não é a pergunta anterior, que apenas abre as portas de que o ToutWAF precisa na firewall do sistema (--no-firewall).
+nl|fwmod_n3|Dit is niet de vorige vraag, die alleen de poorten opent die ToutWAF nodig heeft in de systeemfirewall (--no-firewall).
+ru|fwmod_n3|Это не предыдущий вопрос, который лишь открывает нужные ToutWAF порты в системном брандмауэре (--no-firewall).
+zh|fwmod_n3|这不同于上一个问题（它只在系统防火墙中放行 ToutWAF 需要的端口，对应 --no-firewall）。
+ar|fwmod_n3|هذا ليس السؤال السابق الذي يفتح فقط المنافذ التي يحتاجها ToutWAF في جدار حماية النظام (--no-firewall).
+en|s_fwmod|Enabling the firewall module (no rule applied)
+fr|s_fwmod|Activation du module pare-feu (aucune règle appliquée)
+es|s_fwmod|Activando el módulo de cortafuegos (ninguna regla aplicada)
+de|s_fwmod|Firewall-Modul wird aktiviert (keine Regel angewendet)
+it|s_fwmod|Attivazione del modulo firewall (nessuna regola applicata)
+pt|s_fwmod|A ativar o módulo de firewall (nenhuma regra aplicada)
+nl|s_fwmod|Firewallmodule wordt ingeschakeld (geen regel toegepast)
+ru|s_fwmod|Включение модуля брандмауэра (правила не применяются)
+zh|s_fwmod|正在启用防火墙模块（不应用任何规则）
+ar|s_fwmod|تفعيل وحدة جدار الحماية (دون تطبيق أي قاعدة)
+en|fwmod_done|Firewall module enabled. Nothing was applied: open Firewall in the console to review and try rules.
+fr|fwmod_done|Module pare-feu activé. Rien n'a été appliqué : ouvrez Pare-feu dans la console pour relire et essayer des règles.
+es|fwmod_done|Módulo de cortafuegos activado. No se aplicó nada: abra Cortafuegos en la consola para revisar y probar reglas.
+de|fwmod_done|Firewall-Modul aktiviert. Es wurde nichts angewendet: Öffnen Sie Firewall in der Konsole, um Regeln zu prüfen und zu testen.
+it|fwmod_done|Modulo firewall attivato. Non è stato applicato nulla: apri Firewall nella console per rivedere e provare le regole.
+pt|fwmod_done|Módulo de firewall ativado. Nada foi aplicado: abra Firewall na consola para rever e testar regras.
+nl|fwmod_done|Firewallmodule ingeschakeld. Er is niets toegepast: open Firewall in de console om regels te bekijken en te proberen.
+ru|fwmod_done|Модуль брандмауэра включён. Ничего не применено: откройте «Брандмауэр» в консоли, чтобы проверить и опробовать правила.
+zh|fwmod_done|防火墙模块已启用。未应用任何规则：请在控制台打开“防火墙”来审核并试用规则。
+ar|fwmod_done|تم تفعيل وحدة جدار الحماية. لم يُطبَّق شيء: افتح «جدار الحماية» في لوحة التحكم لمراجعة القواعد وتجربتها.
+en|fwmod_fail|Could not enable the firewall module (%s). The installation goes on; switch it on later in Settings > Modules.
+fr|fwmod_fail|Impossible d'activer le module pare-feu (%s). L'installation continue ; activez-le plus tard dans Paramètres > Modules.
+es|fwmod_fail|No se pudo activar el módulo de cortafuegos (%s). La instalación continúa; actívelo después en Ajustes > Módulos.
+de|fwmod_fail|Das Firewall-Modul konnte nicht aktiviert werden (%s). Die Installation läuft weiter; aktivieren Sie es später unter Einstellungen > Module.
+it|fwmod_fail|Impossibile attivare il modulo firewall (%s). L'installazione prosegue; attivalo più tardi in Impostazioni > Moduli.
+pt|fwmod_fail|Não foi possível ativar o módulo de firewall (%s). A instalação continua; ative-o depois em Definições > Módulos.
+nl|fwmod_fail|Het firewallmodule kon niet worden ingeschakeld (%s). De installatie gaat door; schakel het later in via Instellingen > Modules.
+ru|fwmod_fail|Не удалось включить модуль брандмауэра (%s). Установка продолжается; включите его позже в «Настройки > Модули».
+zh|fwmod_fail|无法启用防火墙模块（%s）。安装继续；稍后可在“设置 > 模块”中启用。
+ar|fwmod_fail|تعذّر تفعيل وحدة جدار الحماية (%s). يستمر التثبيت؛ فعّلها لاحقا من الإعدادات > الوحدات.
 en|s_link|Linking the data plane to the console
 fr|s_link|Liaison du plan de données à la console
 es|s_link|Vinculando el plano de datos a la consola
@@ -2048,6 +2122,206 @@ nl|pf_skipped|De controle van de omgeving is op uw verzoek overgeslagen: wat in 
 ru|pf_skipped|Проверка окружения пропущена по вашей просьбе: то, что мешает, приведёт к сбою установки или запуска позже.
 zh|pf_skipped|已按您的要求跳过环境检查：存在的阻碍将导致之后的安装或启动失败。
 ar|pf_skipped|تم تخطي فحص البيئة بناءً على طلبك: ما يعيق سيؤدي إلى فشل التثبيت أو التشغيل لاحقًا.
+en|s_sysupdate|Updating the system packages (this can take several minutes)
+fr|s_sysupdate|Mise à jour des paquets système (cela peut prendre plusieurs minutes)
+es|s_sysupdate|Actualizando los paquetes del sistema (puede tardar varios minutos)
+de|s_sysupdate|Systempakete werden aktualisiert (das kann einige Minuten dauern)
+it|s_sysupdate|Aggiornamento dei pacchetti di sistema (può richiedere qualche minuto)
+pt|s_sysupdate|A atualizar os pacotes do sistema (pode demorar alguns minutos)
+nl|s_sysupdate|Systeempakketten worden bijgewerkt (dit kan enkele minuten duren)
+ru|s_sysupdate|Обновление системных пакетов (это может занять несколько минут)
+zh|s_sysupdate|正在更新系统软件包（可能需要几分钟）
+ar|s_sysupdate|جارٍ تحديث حزم النظام (قد يستغرق ذلك عدة دقائق)
+en|su_skipped|The system packages are not updated first (TOUTWAF_SKIP_SYSUPDATE).
+fr|su_skipped|Les paquets système ne sont pas mis à jour au préalable (TOUTWAF_SKIP_SYSUPDATE).
+es|su_skipped|Los paquetes del sistema no se actualizan antes (TOUTWAF_SKIP_SYSUPDATE).
+de|su_skipped|Die Systempakete werden nicht vorher aktualisiert (TOUTWAF_SKIP_SYSUPDATE).
+it|su_skipped|I pacchetti di sistema non vengono aggiornati prima (TOUTWAF_SKIP_SYSUPDATE).
+pt|su_skipped|Os pacotes do sistema não são atualizados antes (TOUTWAF_SKIP_SYSUPDATE).
+nl|su_skipped|De systeempakketten worden niet eerst bijgewerkt (TOUTWAF_SKIP_SYSUPDATE).
+ru|su_skipped|Системные пакеты предварительно не обновляются (TOUTWAF_SKIP_SYSUPDATE).
+zh|su_skipped|不会先更新系统软件包（TOUTWAF_SKIP_SYSUPDATE）。
+ar|su_skipped|لن يتم تحديث حزم النظام أولاً (TOUTWAF_SKIP_SYSUPDATE).
+en|su_recent|The system packages were updated less than 6 hours ago: not repeated.
+fr|su_recent|Les paquets système ont été mis à jour il y a moins de 6 heures : pas de nouvelle mise à jour.
+es|su_recent|Los paquetes del sistema se actualizaron hace menos de 6 horas: no se repite.
+de|su_recent|Die Systempakete wurden vor weniger als 6 Stunden aktualisiert: keine Wiederholung.
+it|su_recent|I pacchetti di sistema sono stati aggiornati meno di 6 ore fa: non si ripete.
+pt|su_recent|Os pacotes do sistema foram atualizados há menos de 6 horas: não se repete.
+nl|su_recent|De systeempakketten zijn minder dan 6 uur geleden bijgewerkt: niet herhaald.
+ru|su_recent|Системные пакеты обновлялись менее 6 часов назад: повторно не обновляются.
+zh|su_recent|系统软件包在 6 小时内已更新过，不再重复。
+ar|su_recent|تم تحديث حزم النظام قبل أقل من 6 ساعات: لن يُكرَّر التحديث.
+en|su_dry|the system packages would be updated first (skip it with TOUTWAF_SKIP_SYSUPDATE=1)
+fr|su_dry|les paquets système seraient d'abord mis à jour (à éviter avec TOUTWAF_SKIP_SYSUPDATE=1)
+es|su_dry|los paquetes del sistema se actualizarían primero (se omite con TOUTWAF_SKIP_SYSUPDATE=1)
+de|su_dry|die Systempakete würden zuerst aktualisiert (überspringen mit TOUTWAF_SKIP_SYSUPDATE=1)
+it|su_dry|i pacchetti di sistema verrebbero aggiornati per primi (si salta con TOUTWAF_SKIP_SYSUPDATE=1)
+pt|su_dry|os pacotes do sistema seriam atualizados primeiro (para saltar: TOUTWAF_SKIP_SYSUPDATE=1)
+nl|su_dry|de systeempakketten zouden eerst worden bijgewerkt (overslaan met TOUTWAF_SKIP_SYSUPDATE=1)
+ru|su_dry|сначала были бы обновлены системные пакеты (пропустить: TOUTWAF_SKIP_SYSUPDATE=1)
+zh|su_dry|将先更新系统软件包（使用 TOUTWAF_SKIP_SYSUPDATE=1 可跳过）
+ar|su_dry|سيتم تحديث حزم النظام أولاً (لتخطي ذلك: TOUTWAF_SKIP_SYSUPDATE=1)
+en|su_nopm|No supported package manager to update the system packages: skipped, the installation goes on.
+fr|su_nopm|Aucun gestionnaire de paquets pris en charge pour mettre le système à jour : étape ignorée, l'installation continue.
+es|su_nopm|No hay un gestor de paquetes compatible para actualizar el sistema: se omite y la instalación continúa.
+de|su_nopm|Kein unterstützter Paketmanager für die Systemaktualisierung: übersprungen, die Installation läuft weiter.
+it|su_nopm|Nessun gestore di pacchetti supportato per aggiornare il sistema: saltato, l'installazione continua.
+pt|su_nopm|Nenhum gestor de pacotes suportado para atualizar o sistema: ignorado, a instalação continua.
+nl|su_nopm|Geen ondersteunde pakketbeheerder om het systeem bij te werken: overgeslagen, de installatie gaat door.
+ru|su_nopm|Нет поддерживаемого менеджера пакетов для обновления системы: шаг пропущен, установка продолжается.
+zh|su_nopm|没有受支持的包管理器可用于更新系统：已跳过，安装继续。
+ar|su_nopm|لا يوجد مدير حزم مدعوم لتحديث النظام: تم التخطي وتستمر عملية التثبيت.
+en|su_failed|The update of the system packages failed (exit %s); the installation goes on without it. Details: %s. Fix: run the update yourself and read its error (broken repository? another package manager running?), or run this command again with TOUTWAF_SKIP_SYSUPDATE=1.
+fr|su_failed|La mise à jour des paquets système a échoué (code %s) ; l'installation continue sans elle. Détails : %s. Correction : lancez la mise à jour vous-même et lisez son erreur (dépôt cassé ? un autre gestionnaire de paquets en cours ?), ou relancez cette commande avec TOUTWAF_SKIP_SYSUPDATE=1.
+es|su_failed|La actualización de los paquetes del sistema ha fallado (código %s); la instalación continúa sin ella. Detalles: %s. Solución: ejecute usted mismo la actualización y lea su error (¿repositorio roto? ¿otro gestor de paquetes en ejecución?), o vuelva a ejecutar este comando con TOUTWAF_SKIP_SYSUPDATE=1.
+de|su_failed|Die Aktualisierung der Systempakete ist fehlgeschlagen (Code %s); die Installation läuft ohne sie weiter. Details: %s. Abhilfe: Führen Sie die Aktualisierung selbst aus und lesen Sie die Fehlermeldung (defektes Repository? läuft ein anderer Paketmanager?), oder starten Sie diesen Befehl erneut mit TOUTWAF_SKIP_SYSUPDATE=1.
+it|su_failed|L'aggiornamento dei pacchetti di sistema non è riuscito (codice %s); l'installazione continua senza. Dettagli: %s. Soluzione: esegui tu l'aggiornamento e leggi l'errore (repository guasto? un altro gestore di pacchetti in esecuzione?), oppure rilancia questo comando con TOUTWAF_SKIP_SYSUPDATE=1.
+pt|su_failed|A atualização dos pacotes do sistema falhou (código %s); a instalação continua sem ela. Detalhes: %s. Solução: execute a atualização e leia o erro (repositório danificado? outro gestor de pacotes em execução?), ou volte a executar este comando com TOUTWAF_SKIP_SYSUPDATE=1.
+nl|su_failed|Het bijwerken van de systeempakketten is mislukt (code %s); de installatie gaat zonder verder. Details: %s. Oplossing: voer de update zelf uit en lees de foutmelding (kapotte repository? draait er een andere pakketbeheerder?), of voer dit commando opnieuw uit met TOUTWAF_SKIP_SYSUPDATE=1.
+ru|su_failed|Не удалось обновить системные пакеты (код %s); установка продолжается без этого. Подробности: %s. Что делать: запустите обновление вручную и прочитайте ошибку (повреждён репозиторий? работает другой менеджер пакетов?) либо повторите эту команду с TOUTWAF_SKIP_SYSUPDATE=1.
+zh|su_failed|系统软件包更新失败（退出码 %s）；安装将在不更新的情况下继续。详情：%s。处理方法：请自行运行更新并查看错误（软件源损坏？另一个包管理器正在运行？），或加上 TOUTWAF_SKIP_SYSUPDATE=1 重新运行此命令。
+ar|su_failed|فشل تحديث حزم النظام (الرمز %s)؛ ستستمر عملية التثبيت بدونه. التفاصيل: %s. الحل: شغّل التحديث بنفسك واقرأ رسالة الخطأ (مستودع معطّل؟ مدير حزم آخر قيد التشغيل؟) أو أعد تشغيل هذا الأمر مع TOUTWAF_SKIP_SYSUPDATE=1.
+en|su_reboot|A restart of this server is needed to finish the system update (new kernel or libraries). ToutWAF never restarts it for you: do it when you can.
+fr|su_reboot|Un redémarrage de ce serveur est nécessaire pour terminer la mise à jour du système (nouveau noyau ou nouvelles bibliothèques). ToutWAF ne le redémarre jamais à votre place : faites-le dès que possible.
+es|su_reboot|Hace falta reiniciar este servidor para terminar la actualización del sistema (nuevo kernel o bibliotecas). ToutWAF nunca lo reinicia por usted: hágalo cuando pueda.
+de|su_reboot|Zum Abschluss der Systemaktualisierung ist ein Neustart dieses Servers nötig (neuer Kernel oder neue Bibliotheken). ToutWAF startet ihn nie für Sie neu: Tun Sie es, wenn es passt.
+it|su_reboot|Serve riavviare questo server per completare l'aggiornamento del sistema (nuovo kernel o librerie). ToutWAF non lo riavvia mai al posto tuo: fallo quando puoi.
+pt|su_reboot|É preciso reiniciar este servidor para concluir a atualização do sistema (novo kernel ou bibliotecas). O ToutWAF nunca o reinicia por si: faça-o quando puder.
+nl|su_reboot|Een herstart van deze server is nodig om de systeemupdate af te ronden (nieuwe kernel of bibliotheken). ToutWAF herstart hem nooit voor u: doe het wanneer het kan.
+ru|su_reboot|Для завершения обновления системы нужно перезагрузить этот сервер (новое ядро или библиотеки). ToutWAF никогда не перезагружает его за вас: сделайте это, когда сможете.
+zh|su_reboot|需要重启此服务器才能完成系统更新（新内核或库）。ToutWAF 绝不会替您重启：请在方便时自行重启。
+ar|su_reboot|يلزم إعادة تشغيل هذا الخادم لإكمال تحديث النظام (نواة أو مكتبات جديدة). لا يعيد ToutWAF تشغيله نيابةً عنك أبداً: افعل ذلك عندما تستطيع.
+en|q_sysupdate|Update the system packages first (recommended)?
+fr|q_sysupdate|Mettre d'abord à jour les paquets système (recommandé) ?
+es|q_sysupdate|¿Actualizar primero los paquetes del sistema (recomendado)?
+de|q_sysupdate|Zuerst die Systempakete aktualisieren (empfohlen)?
+it|q_sysupdate|Aggiornare prima i pacchetti di sistema (consigliato)?
+pt|q_sysupdate|Atualizar primeiro os pacotes do sistema (recomendado)?
+nl|q_sysupdate|Eerst de systeempakketten bijwerken (aanbevolen)?
+ru|q_sysupdate|Сначала обновить системные пакеты (рекомендуется)?
+zh|q_sysupdate|先更新系统软件包（推荐）？
+ar|q_sysupdate|هل تريد تحديث حزم النظام أولاً (موصى به)؟
+en|pr_disk_full|Only %s MB are free on %s (at least %s MB are needed): the installation could not finish.
+fr|pr_disk_full|Seulement %s Mo sont libres sur %s (il en faut au moins %s Mo) : l'installation ne pourrait pas se terminer.
+es|pr_disk_full|Solo quedan %s MB libres en %s (se necesitan al menos %s MB): la instalación no podría terminar.
+de|pr_disk_full|Nur %s MB sind frei auf %s (mindestens %s MB werden benötigt): Die Installation könnte nicht abgeschlossen werden.
+it|pr_disk_full|Solo %s MB liberi su %s (ne servono almeno %s MB): l'installazione non potrebbe concludersi.
+pt|pr_disk_full|Apenas %s MB livres em %s (são precisos pelo menos %s MB): a instalação não poderia terminar.
+nl|pr_disk_full|Slechts %s MB vrij op %s (minstens %s MB nodig): de installatie zou niet kunnen worden voltooid.
+ru|pr_disk_full|Свободно только %s МБ на %s (нужно не менее %s МБ): установка не сможет завершиться.
+zh|pr_disk_full|仅剩 %s MB 可用空间，位于 %s（至少需要 %s MB）：安装无法完成。
+ar|pr_disk_full|المساحة الحرة %s ميغابايت فقط على %s (المطلوب %s ميغابايت على الأقل): لا يمكن إكمال التثبيت.
+en|pr_disk_full_a|Free some space (package cache: apt-get clean or dnf clean all; old logs: journalctl --vacuum-size=100M), then run this command again. To go on anyway: TOUTWAF_SKIP_PREREQ=1.
+fr|pr_disk_full_a|Libérez de la place (cache des paquets : apt-get clean ou dnf clean all ; anciens journaux : journalctl --vacuum-size=100M), puis relancez cette commande. Pour continuer malgré tout : TOUTWAF_SKIP_PREREQ=1.
+es|pr_disk_full_a|Libere espacio (caché de paquetes: apt-get clean o dnf clean all; registros antiguos: journalctl --vacuum-size=100M) y vuelva a ejecutar este comando. Para continuar de todos modos: TOUTWAF_SKIP_PREREQ=1.
+de|pr_disk_full_a|Schaffen Sie Platz (Paket-Cache: apt-get clean oder dnf clean all; alte Logs: journalctl --vacuum-size=100M) und führen Sie diesen Befehl erneut aus. Trotzdem fortfahren: TOUTWAF_SKIP_PREREQ=1.
+it|pr_disk_full_a|Libera spazio (cache dei pacchetti: apt-get clean o dnf clean all; vecchi log: journalctl --vacuum-size=100M), poi rilancia questo comando. Per proseguire comunque: TOUTWAF_SKIP_PREREQ=1.
+pt|pr_disk_full_a|Liberte espaço (cache de pacotes: apt-get clean ou dnf clean all; registos antigos: journalctl --vacuum-size=100M) e volte a executar este comando. Para continuar mesmo assim: TOUTWAF_SKIP_PREREQ=1.
+nl|pr_disk_full_a|Maak ruimte vrij (pakketcache: apt-get clean of dnf clean all; oude logs: journalctl --vacuum-size=100M) en voer dit commando opnieuw uit. Toch doorgaan: TOUTWAF_SKIP_PREREQ=1.
+ru|pr_disk_full_a|Освободите место (кэш пакетов: apt-get clean или dnf clean all; старые журналы: journalctl --vacuum-size=100M) и повторите эту команду. Чтобы всё равно продолжить: TOUTWAF_SKIP_PREREQ=1.
+zh|pr_disk_full_a|请释放一些空间（软件包缓存：apt-get clean 或 dnf clean all；旧日志：journalctl --vacuum-size=100M），然后重新运行此命令。如要强行继续：TOUTWAF_SKIP_PREREQ=1。
+ar|pr_disk_full_a|حرّر بعض المساحة (ذاكرة الحزم المؤقتة: apt-get clean أو dnf clean all؛ السجلات القديمة: journalctl --vacuum-size=100M) ثم أعد تشغيل هذا الأمر. للمتابعة رغم ذلك: TOUTWAF_SKIP_PREREQ=1.
+en|pr_disk_full_w_a|Free some space (Disk Cleanup, empty the recycle bin), then run this command again. To go on anyway: $env:TOUTWAF_SKIP_PREREQ=1
+fr|pr_disk_full_w_a|Libérez de la place (Nettoyage de disque, vidage de la corbeille), puis relancez cette commande. Pour continuer malgré tout : $env:TOUTWAF_SKIP_PREREQ=1
+es|pr_disk_full_w_a|Libere espacio (Liberador de espacio en disco, vaciar la papelera) y vuelva a ejecutar este comando. Para continuar de todos modos: $env:TOUTWAF_SKIP_PREREQ=1
+de|pr_disk_full_w_a|Schaffen Sie Platz (Datenträgerbereinigung, Papierkorb leeren) und führen Sie diesen Befehl erneut aus. Trotzdem fortfahren: $env:TOUTWAF_SKIP_PREREQ=1
+it|pr_disk_full_w_a|Libera spazio (Pulizia disco, svuota il cestino), poi rilancia questo comando. Per proseguire comunque: $env:TOUTWAF_SKIP_PREREQ=1
+pt|pr_disk_full_w_a|Liberte espaço (Limpeza do Disco, esvaziar a reciclagem) e volte a executar este comando. Para continuar mesmo assim: $env:TOUTWAF_SKIP_PREREQ=1
+nl|pr_disk_full_w_a|Maak ruimte vrij (Schijfopruiming, prullenbak legen) en voer dit commando opnieuw uit. Toch doorgaan: $env:TOUTWAF_SKIP_PREREQ=1
+ru|pr_disk_full_w_a|Освободите место (Очистка диска, очистка корзины) и повторите эту команду. Чтобы всё равно продолжить: $env:TOUTWAF_SKIP_PREREQ=1
+zh|pr_disk_full_w_a|请释放一些空间（磁盘清理、清空回收站），然后重新运行此命令。如要强行继续：$env:TOUTWAF_SKIP_PREREQ=1
+ar|pr_disk_full_w_a|حرّر بعض المساحة (تنظيف القرص، إفراغ سلة المحذوفات) ثم أعد تشغيل هذا الأمر. للمتابعة رغم ذلك: $env:TOUTWAF_SKIP_PREREQ=1
+en|pr_disk_low|Only %s MB are free on %s (about %s MB are comfortable).
+fr|pr_disk_low|Seulement %s Mo sont libres sur %s (environ %s Mo sont confortables).
+es|pr_disk_low|Solo quedan %s MB libres en %s (unos %s MB son lo cómodo).
+de|pr_disk_low|Nur %s MB sind frei auf %s (etwa %s MB sind komfortabel).
+it|pr_disk_low|Solo %s MB liberi su %s (circa %s MB sono comodi).
+pt|pr_disk_low|Apenas %s MB livres em %s (cerca de %s MB são confortáveis).
+nl|pr_disk_low|Slechts %s MB vrij op %s (ongeveer %s MB is comfortabel).
+ru|pr_disk_low|Свободно только %s МБ на %s (комфортно — около %s МБ).
+zh|pr_disk_low|仅剩 %s MB 可用空间，位于 %s（约 %s MB 较为宽裕）。
+ar|pr_disk_low|المساحة الحرة %s ميغابايت فقط على %s (يُفضَّل نحو %s ميغابايت).
+en|pr_disk_low_a|Free some space or add disk space; the installation can go on.
+fr|pr_disk_low_a|Libérez de la place ou ajoutez du disque ; l'installation peut continuer.
+es|pr_disk_low_a|Libere espacio o añada disco; la instalación puede continuar.
+de|pr_disk_low_a|Schaffen Sie Platz oder fügen Sie Speicher hinzu; die Installation kann weiterlaufen.
+it|pr_disk_low_a|Libera spazio o aggiungi disco; l'installazione può proseguire.
+pt|pr_disk_low_a|Liberte espaço ou adicione disco; a instalação pode continuar.
+nl|pr_disk_low_a|Maak ruimte vrij of voeg schijfruimte toe; de installatie kan doorgaan.
+ru|pr_disk_low_a|Освободите место или добавьте диск; установка может продолжаться.
+zh|pr_disk_low_a|请释放空间或增加磁盘；安装可以继续。
+ar|pr_disk_low_a|حرّر بعض المساحة أو أضف قرصاً؛ يمكن أن يستمر التثبيت.
+en|pr_dns|This machine cannot resolve the name %s (DNS).
+fr|pr_dns|Cette machine ne parvient pas à résoudre le nom %s (DNS).
+es|pr_dns|Esta máquina no puede resolver el nombre %s (DNS).
+de|pr_dns|Dieser Rechner kann den Namen %s nicht auflösen (DNS).
+it|pr_dns|Questa macchina non riesce a risolvere il nome %s (DNS).
+pt|pr_dns|Esta máquina não consegue resolver o nome %s (DNS).
+nl|pr_dns|Deze machine kan de naam %s niet omzetten (DNS).
+ru|pr_dns|Эта машина не может разрешить имя %s (DNS).
+zh|pr_dns|这台机器无法解析名称 %s（DNS）。
+ar|pr_dns|لا يستطيع هذا الجهاز حلّ الاسم %s (DNS).
+en|pr_dns_a|Check the DNS servers (cat /etc/resolv.conf, resolvectl status), add a working one such as nameserver 9.9.9.9, then run this command again.
+fr|pr_dns_a|Vérifiez les serveurs DNS (cat /etc/resolv.conf, resolvectl status), ajoutez-en un qui fonctionne, par exemple nameserver 9.9.9.9, puis relancez cette commande.
+es|pr_dns_a|Compruebe los servidores DNS (cat /etc/resolv.conf, resolvectl status), añada uno que funcione, por ejemplo nameserver 9.9.9.9, y vuelva a ejecutar este comando.
+de|pr_dns_a|Prüfen Sie die DNS-Server (cat /etc/resolv.conf, resolvectl status), tragen Sie einen funktionierenden ein, z. B. nameserver 9.9.9.9, und führen Sie diesen Befehl erneut aus.
+it|pr_dns_a|Controlla i server DNS (cat /etc/resolv.conf, resolvectl status), aggiungine uno funzionante, ad esempio nameserver 9.9.9.9, poi rilancia questo comando.
+pt|pr_dns_a|Verifique os servidores DNS (cat /etc/resolv.conf, resolvectl status), adicione um que funcione, por exemplo nameserver 9.9.9.9, e volte a executar este comando.
+nl|pr_dns_a|Controleer de DNS-servers (cat /etc/resolv.conf, resolvectl status), voeg een werkende toe, bijvoorbeeld nameserver 9.9.9.9, en voer dit commando opnieuw uit.
+ru|pr_dns_a|Проверьте DNS-серверы (cat /etc/resolv.conf, resolvectl status), добавьте рабочий, например nameserver 9.9.9.9, и повторите эту команду.
+zh|pr_dns_a|请检查 DNS 服务器（cat /etc/resolv.conf、resolvectl status），添加一个可用的服务器，例如 nameserver 9.9.9.9，然后重新运行此命令。
+ar|pr_dns_a|تحقق من خوادم DNS (cat /etc/resolv.conf، resolvectl status) وأضف خادماً يعمل مثل nameserver 9.9.9.9 ثم أعد تشغيل هذا الأمر.
+en|pr_dns_w_a|Check the DNS servers with 'ipconfig /all', set a working one (for example 9.9.9.9) in the network adapter settings, then run this command again.
+fr|pr_dns_w_a|Vérifiez les serveurs DNS avec 'ipconfig /all', indiquez-en un qui fonctionne (par exemple 9.9.9.9) dans les paramètres de la carte réseau, puis relancez cette commande.
+es|pr_dns_w_a|Compruebe los servidores DNS con 'ipconfig /all', indique uno que funcione (por ejemplo 9.9.9.9) en la configuración del adaptador de red y vuelva a ejecutar este comando.
+de|pr_dns_w_a|Prüfen Sie die DNS-Server mit 'ipconfig /all', tragen Sie in den Einstellungen des Netzwerkadapters einen funktionierenden ein (z. B. 9.9.9.9) und führen Sie diesen Befehl erneut aus.
+it|pr_dns_w_a|Controlla i server DNS con 'ipconfig /all', imposta un server funzionante (ad esempio 9.9.9.9) nelle impostazioni della scheda di rete, poi rilancia questo comando.
+pt|pr_dns_w_a|Verifique os servidores DNS com 'ipconfig /all', defina um que funcione (por exemplo 9.9.9.9) nas definições do adaptador de rede e volte a executar este comando.
+nl|pr_dns_w_a|Controleer de DNS-servers met 'ipconfig /all', stel een werkende in (bijvoorbeeld 9.9.9.9) bij de instellingen van de netwerkadapter en voer dit commando opnieuw uit.
+ru|pr_dns_w_a|Проверьте DNS-серверы командой 'ipconfig /all', укажите рабочий (например, 9.9.9.9) в настройках сетевого адаптера и повторите эту команду.
+zh|pr_dns_w_a|请用 'ipconfig /all' 检查 DNS 服务器，在网络适配器设置中填入一个可用的服务器（例如 9.9.9.9），然后重新运行此命令。
+ar|pr_dns_w_a|تحقق من خوادم DNS باستخدام 'ipconfig /all' وحدّد خادماً يعمل (مثل 9.9.9.9) في إعدادات بطاقة الشبكة ثم أعد تشغيل هذا الأمر.
+en|pr_clock|The clock of this machine is %s seconds away from the Internet time: TLS certificates and signatures fail when the clock is wrong.
+fr|pr_clock|L'horloge de cette machine est décalée de %s secondes par rapport à l'heure d'Internet : les certificats TLS et les signatures échouent quand l'horloge est fausse.
+es|pr_clock|El reloj de esta máquina está desfasado %s segundos respecto a la hora de Internet: los certificados TLS y las firmas fallan cuando el reloj es incorrecto.
+de|pr_clock|Die Uhr dieses Rechners weicht um %s Sekunden von der Internetzeit ab: TLS-Zertifikate und Signaturen schlagen fehl, wenn die Uhr falsch geht.
+it|pr_clock|L'orologio di questa macchina è sfasato di %s secondi rispetto all'ora di Internet: certificati TLS e firme falliscono se l'orologio è sbagliato.
+pt|pr_clock|O relógio desta máquina está desfasado %s segundos em relação à hora da Internet: os certificados TLS e as assinaturas falham quando o relógio está errado.
+nl|pr_clock|De klok van deze machine wijkt %s seconden af van de internettijd: TLS-certificaten en handtekeningen mislukken bij een verkeerde klok.
+ru|pr_clock|Часы этой машины расходятся с интернет-временем на %s с: сертификаты TLS и подписи не проходят проверку при неверных часах.
+zh|pr_clock|这台机器的时钟与互联网时间相差 %s 秒：时钟不准时，TLS 证书和签名校验会失败。
+ar|pr_clock|ساعة هذا الجهاز تختلف عن توقيت الإنترنت بمقدار %s ثانية: تفشل شهادات TLS والتوقيعات عندما تكون الساعة خاطئة.
+en|pr_clock_a|Synchronise it: timedatectl set-ntp true (or chronyc makestep), check with timedatectl, then run this command again.
+fr|pr_clock_a|Synchronisez-la : timedatectl set-ntp true (ou chronyc makestep), vérifiez avec timedatectl, puis relancez cette commande.
+es|pr_clock_a|Sincronícelo: timedatectl set-ntp true (o chronyc makestep), compruebe con timedatectl y vuelva a ejecutar este comando.
+de|pr_clock_a|Synchronisieren Sie sie: timedatectl set-ntp true (oder chronyc makestep), prüfen Sie mit timedatectl und führen Sie diesen Befehl erneut aus.
+it|pr_clock_a|Sincronizzalo: timedatectl set-ntp true (o chronyc makestep), verifica con timedatectl, poi rilancia questo comando.
+pt|pr_clock_a|Sincronize-o: timedatectl set-ntp true (ou chronyc makestep), verifique com timedatectl e volte a executar este comando.
+nl|pr_clock_a|Synchroniseer de klok: timedatectl set-ntp true (of chronyc makestep), controleer met timedatectl en voer dit commando opnieuw uit.
+ru|pr_clock_a|Синхронизируйте часы: timedatectl set-ntp true (или chronyc makestep), проверьте через timedatectl и повторите эту команду.
+zh|pr_clock_a|请同步时钟：timedatectl set-ntp true（或 chronyc makestep），用 timedatectl 检查，然后重新运行此命令。
+ar|pr_clock_a|قم بمزامنتها: timedatectl set-ntp true (أو chronyc makestep) وتحقق باستخدام timedatectl ثم أعد تشغيل هذا الأمر.
+en|pr_clock_w_a|Synchronise it: w32tm /resync (or Settings > Time and language > Sync now), then run this command again.
+fr|pr_clock_w_a|Synchronisez-la : w32tm /resync (ou Paramètres > Heure et langue > Synchroniser maintenant), puis relancez cette commande.
+es|pr_clock_w_a|Sincronícelo: w32tm /resync (o Configuración > Hora e idioma > Sincronizar ahora) y vuelva a ejecutar este comando.
+de|pr_clock_w_a|Synchronisieren Sie sie: w32tm /resync (oder Einstellungen > Zeit und Sprache > Jetzt synchronisieren) und führen Sie diesen Befehl erneut aus.
+it|pr_clock_w_a|Sincronizzalo: w32tm /resync (oppure Impostazioni > Ora e lingua > Sincronizza ora), poi rilancia questo comando.
+pt|pr_clock_w_a|Sincronize-o: w32tm /resync (ou Definições > Hora e idioma > Sincronizar agora) e volte a executar este comando.
+nl|pr_clock_w_a|Synchroniseer de klok: w32tm /resync (of Instellingen > Tijd en taal > Nu synchroniseren) en voer dit commando opnieuw uit.
+ru|pr_clock_w_a|Синхронизируйте часы: w32tm /resync (или Параметры > Время и язык > Синхронизировать) и повторите эту команду.
+zh|pr_clock_w_a|请同步时钟：w32tm /resync（或 设置 > 时间和语言 > 立即同步），然后重新运行此命令。
+ar|pr_clock_w_a|قم بمزامنتها: w32tm /resync (أو الإعدادات > الوقت واللغة > مزامنة الآن) ثم أعد تشغيل هذا الأمر.
+en|pr_ok|Disk space, DNS and the clock are fine.
+fr|pr_ok|L'espace disque, le DNS et l'horloge sont en ordre.
+es|pr_ok|El espacio en disco, el DNS y el reloj están en orden.
+de|pr_ok|Speicherplatz, DNS und Uhr sind in Ordnung.
+it|pr_ok|Spazio su disco, DNS e orologio sono a posto.
+pt|pr_ok|O espaço em disco, o DNS e o relógio estão em ordem.
+nl|pr_ok|Schijfruimte, DNS en klok zijn in orde.
+ru|pr_ok|Место на диске, DNS и часы в порядке.
+zh|pr_ok|磁盘空间、DNS 和时钟均正常。
+ar|pr_ok|مساحة القرص وDNS والساعة بحالة جيدة.
 # END CATALOG
 TW_CATALOG
 }
@@ -2784,6 +3058,136 @@ env_run_check() {   # --check-env: the verdict, nothing is changed; exit 0 (noth
   return 0
 }
 
+# ------------------------------------------------------------------------------------------------ prerequisites of the machine, then the system update
+# Said BEFORE anything is changed, each problem with its cause and its fix (the same words and thresholds as the link command the console gives for a web
+# server). Only a disk that is really full refuses (exit 4; TOUTWAF_SKIP_PREREQ=1 goes on anyway): an unresolvable name or a wrong clock is a warning.
+# Then the packages of the system are updated (Linux, a real installation only) unless TOUTWAF_SKIP_SYSUPDATE=1 (--skip-sysupdate). That never blocks (a
+# failure is a warning), it is not repeated within 6 hours, and the machine is never restarted. Read-only checks: running them again changes nothing.
+# BEGIN prereq (extracted by tests/prereq-test.sh: keep the markers)
+SKIP_PREREQ="${TOUTWAF_SKIP_PREREQ:-0}"
+SKIP_SYSUPDATE="${TOUTWAF_SKIP_SYSUPDATE:-${TOUTWAF_NO_SYSTEM_UPDATE:-0}}"
+prereq_dir() {   # the nearest existing directory of a path: a path that does not exist yet lives on the file system of its parent
+  local d="$1"
+  while [ -n "$d" ] && [ "$d" != / ] && [ ! -d "$d" ]; do d="$(dirname "$d")"; done
+  printf '%s' "${d:-/}"
+}
+prereq_host() {   # URL -> its host NAME (nothing for an IP address, a file:// URL or an empty URL)
+  local h
+  case "$1" in ""|file://*|*://\[*) return 0;; esac
+  h="${1#*://}"; h="${h%%/*}"; h="${h##*@}"; h="${h%%:*}"
+  case "$h" in ""|*[!A-Za-z0-9.-]*|*[!0-9.]*) ;; *) return 0;; esac   # only digits and dots: an IP address
+  case "$h" in ""|*[!A-Za-z0-9.-]*) return 0;; esac
+  printf '%s' "$h"
+}
+prereq_resolves() {   # NAME -> 0 when it resolves (or when this machine has no tool to ask)
+  local to=()
+  have timeout && to=(timeout 15)
+  if have getent; then "${to[@]+"${to[@]}"}" getent ahosts "$1" >/dev/null 2>&1
+  elif have host; then "${to[@]+"${to[@]}"}" host "$1" >/dev/null 2>&1
+  elif have nslookup; then "${to[@]+"${to[@]}"}" nslookup "$1" >/dev/null 2>&1
+  else return 0; fi
+}
+prereq_check() {   # fills EC_LV / EC_CA / EC_AC; changes nothing
+  EC_LV=(); EC_CA=(); EC_AC=()
+  local refuse=refuse e d min wrn free mnt seen=" " h hosts=() n ds t0 skew
+  [ "$SKIP_PREREQ" = 0 ] || refuse=warn
+  # 1. disk space where the programs, the data and the download go (MIN: below it the installation could not finish; WARN: comfortable)
+  for e in "$BIN_DIR:300:1024" "$DATA_DIR:300:1024" "$TMP:100:300"; do
+    d="$(prereq_dir "${e%%:*}")"; min="${e#*:}"; wrn="${min#*:}"; min="${min%%:*}"
+    mnt="$(df -P "$d" 2>/dev/null | awk 'NR==2 {print $6}' || true)"; free="$(df -Pm "$d" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+    case "$free" in ""|*[!0-9]*) continue;; esac
+    case "$seen" in *" ${mnt:-$d} "*) continue;; esac
+    seen+="${mnt:-$d} "
+    if [ "$free" -lt "$min" ]; then ec_add "$refuse" "$(t pr_disk_full "$free" "${mnt:-$d}" "$min")" "$(t pr_disk_full_a)"
+    elif [ "$free" -lt "$wrn" ]; then ec_add warn "$(t pr_disk_low "$free" "${mnt:-$d}" "$wrn")" "$(t pr_disk_low_a)"; fi
+  done
+  # 2. DNS and 3. the clock, for the places the installation downloads from (nothing to resolve when it installs from a local archive)
+  if [ -z "$TARBALL" ]; then
+    if [ -n "$BASE_URL" ]; then hosts+=("$(prereq_host "$BASE_URL")"); else hosts+=("$(prereq_host "$SRC_PRIMARY")" "$(prereq_host "$SRC_FALLBACK")"); fi
+  fi
+  hosts+=("$(prereq_host "$CP_URL")")
+  seen=" "; ds=""
+  for h in ${hosts[@]+"${hosts[@]}"}; do
+    [ -n "$h" ] || continue
+    case "$seen" in *" $h "*) continue;; esac
+    seen+="$h "
+    if prereq_resolves "$h"; then
+      [ -n "$ds" ] || [ -n "$TARBALL" ] || ds="$h"
+    else
+      ec_add warn "$(t pr_dns "$h")" "$(t pr_dns_a)"
+    fi
+  done
+  if [ -n "$ds" ] && have curl; then   # the date of a server of the download against ours
+    n="$(curl -skI --connect-timeout 5 -m 10 "https://$ds/" 2>/dev/null | sed -n 's/^[Dd]ate: *//p' | head -n1 | tr -d '\r' || true)"
+    if [ -n "$n" ] && t0="$(date -d "$n" +%s 2>/dev/null)"; then
+      skew=$(( $(date +%s) - t0 )); [ "$skew" -ge 0 ] || skew=$(( -skew ))
+      if [ "$skew" -gt 300 ]; then ec_add warn "$(t pr_clock "$skew")" "$(t pr_clock_a)"; fi
+    fi
+  fi
+  return 0
+}
+prereq_gate() {   # before an installation or an update; exits 4 only for a full disk. Nothing is changed or downloaded in staging or dry-run
+  { [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; } || return 0
+  prereq_check
+  [ "${#EC_LV[@]}" -gt 0 ] || return 0
+  if [ "$(ec_refusals)" -gt 0 ]; then
+    ec_print 2
+    printf '\n  %s\n\n' "$(t pf_refused)" >&2
+    exit 4
+  fi
+  [ "$QUIET" = 1 ] || ec_print 1
+  return 0
+}
+SYSUPD=skipped
+sysupdate_do() {   # the update itself, run as a step (output goes to the log); never fails
+  local pm="" rc=0 to=() fam="${FAMILY:-${FAMILY_GUESS:-}}" stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}"
+  have timeout && to=(timeout "${TOUTWAF_UPDATE_TIMEOUT:-1800}")
+  case "$(pf_fam "$fam" 3)" in
+    dnf) if have dnf; then pm=dnf; elif have yum; then pm=yum; fi;;
+    apt) have apt-get && pm=apt;;
+    zypper) have zypper && pm=zypper;;
+  esac
+  if [ -z "$pm" ] && [ "$(pf_fam "$fam" 3)" != pacman ]; then   # the family is unknown: whatever is installed (Arch is a rolling release: never updated from here)
+    if have dnf; then pm=dnf; elif have yum; then pm=yum; elif have apt-get; then pm=apt; elif have zypper; then pm=zypper; fi
+  fi
+  if [ -z "$pm" ]; then warn "$(t su_nopm)"; return 0; fi
+  log "System update with $pm"
+  case "$pm" in
+    dnf) "${to[@]+"${to[@]}"}" dnf -y update || rc=$?;;
+    yum) "${to[@]+"${to[@]}"}" yum -y update || rc=$?;;
+    apt) export DEBIAN_FRONTEND=noninteractive
+         { "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 update \
+             && "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y upgrade; } || rc=$?;;
+    zypper) "${to[@]+"${to[@]}"}" zypper --non-interactive update || rc=$?;;
+  esac
+  if [ "$rc" = 0 ]; then
+    SYSUPD=ok; { mkdir -p "$(dirname "$stamp")" && : >"$stamp"; } 2>/dev/null || true
+  else
+    SYSUPD=failed; warn "$(t su_failed "$rc" "$LOG")"
+  fi
+  if { have needs-restarting && ! needs-restarting -r >/dev/null 2>&1; } || [ -f /var/run/reboot-required ]; then warn "$(t su_reboot)"; fi
+  return 0
+}
+sysupdate_run() {   # before the prerequisites are installed: a failed or skipped update never changes what follows
+  SYSUPD=skipped
+  { [ "$STAGING" = 0 ] && [ "$ACTION" = install ]; } || return 0
+  if [ "$SKIP_SYSUPDATE" = 1 ]; then say "  $BUL $(t su_skipped)"; return 0; fi
+  if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) $(t su_dry)"; return 0; fi
+  local stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}"
+  if [ "${TOUTWAF_FORCE_SYSTEM_UPDATE:-}" != 1 ] && [ -n "$(find "$stamp" -mmin -360 2>/dev/null || true)" ]; then say "  $BUL $(t su_recent)"; return 0; fi
+  step "$(t s_sysupdate)" sysupdate_do
+  return 0
+}
+# END prereq
+prereq_run_check() {   # --check-prereq: the verdict on the disk space, DNS and the clock, nothing is changed; exit 0 (nothing refuses) or 4
+  prereq_check
+  if [ "${#EC_LV[@]}" -eq 0 ]; then printf '\n  %s\n  %s %s\n\n' "$(paint "$B" "$(t pf_title)")" "$(paint "$GRN" "$OKM")" "$(t pr_ok)"; return 0; fi
+  if [ "$(ec_refusals)" -gt 0 ]; then ec_print 2; printf '\n  %s\n\n' "$(t pf_refused)" >&2; return 4; fi
+  ec_print 1
+  printf '\n  %s %s\n\n' "$(paint "$GRN" "$OKM")" "$(t pf_ok_warn)"
+  return 0
+}
+
 # ------------------------------------------------------------------------------------------------ interactive input
 TTY_DEV=""
 if [ -t 0 ] && [ -t 1 ]; then TTY_DEV=/dev/stdin
@@ -2810,6 +3214,103 @@ ask_yn() {  # VAR label default(1|0)
 }
 
 # ------------------------------------------------------------------------------------------------ usage
+# ------------------------------------------------------------------------------------------------ --via-repo (ToutWAF's own package repository)
+# BEGIN via-repo (extracted by tools/tests/build-repos-test.sh: keep the markers)
+# --via-repo adds ToutWAF's package repository to dnf / apt (signed .repo / .list), DOWNLOADS the package `toutwaf` without installing it (apt-get
+# download / dnf download: no maintainer script runs), unpacks it to read the staged signed release archive, verifies SHA256SUMS and the Ed25519
+# release signature of this installer, and only then installs the package (it only stages the archive under /usr/share/toutwaf/release, nothing is
+# started). The repository key is checked against REPO_KEY_FPR, a fingerprint FROZEN in this installer: while it is empty --via-repo is refused (never
+# trust on first use) and the normal download (GitLab, then GitHub) takes over. ANY problem leaves the system as it was: this option never blocks an
+# installation. See tools/repo/README.md.
+VIA_REPO="${TOUTWAF_VIA_REPO:-0}"
+REPO_LINUX="${TOUTWAF_REPO_LINUX_URL:-https://repo.qu3ntin.com/include/toutwaf/linux/-/raw}"   # + /main (stable) or /dev
+REPO_KEY_FPR=""                               # 40-hex fingerprint of the repository key, frozen here at release time (no environment override); empty = --via-repo refused
+VIA_REPO_EL="9 10"                            # Enterprise Linux majors the repository serves
+VIA_PAYLOAD="${TOUTWAF_VIA_PAYLOAD:-/usr/share/toutwaf/release}"
+via_repo_fail() { warn "--via-repo: $*; using the direct download instead (GitLab, then GitHub)"; return 1; }
+via_repo_stage() {   # DIR (the unpacked package payload) -> BASE_URL = a file:// tree in the release layout; 1 when the payload is unusable or not signed by the release key
+  local d="$1" asset="toutwaf-linux-$ARCH.tar.gz" pv want got tree="$TMP/viarepo" f vrc=0
+  for f in "$asset" SHA256SUMS SHA256SUMS.sig channel.json; do [ -s "$d/$f" ] || { via_repo_fail "the package has no $f"; return 1; }; done
+  CH_JSON="$(cat "$d/channel.json")"; pv="$(ch_str version | tr -d '[:space:]')"; CH_JSON=""
+  [ -n "$pv" ] && [[ "$pv" =~ ^[0-9A-Za-z.+~-]+$ ]] || { via_repo_fail "the package carries no valid version"; return 1; }
+  if [ "$VERSION" != latest ] && [ "$pv" != "${VERSION#v}" ]; then via_repo_fail "the repository holds $pv, not $VERSION"; return 1; fi
+  want="$(grep " $asset\$" "$d/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"; got="$(sha256sum "$d/$asset" | awk '{print $1}')"
+  [ -n "$want" ] && [ "$want" = "$got" ] || { via_repo_fail "the packaged $asset does not match its SHA256SUMS"; return 1; }
+  mkdir -p "$tree/releases/$pv" && cp "$d/channel.json" "$tree/" && cp "$d/$asset" "$d/SHA256SUMS" "$d/SHA256SUMS.sig" "$tree/releases/$pv/" || { via_repo_fail "cannot stage the package"; return 1; }
+  # the Ed25519 signature is checked HERE, before the package is installed. verify_signature dies on a bad one: in a subshell whose die only logs
+  # and exits, so that a bad package means "use the direct download" and not "the installation failed"
+  cp "$d/SHA256SUMS" "$TMP/SHA256SUMS" || { via_repo_fail "cannot stage the package"; return 1; }
+  ( die() { printf 'via-repo: %s\n' "$*" >>"$LOG"; exit 1; }; RESOLVED_VERSION="$pv"; verify_signature "file://$tree/releases/$pv" "" ) || vrc=$?
+  [ "$vrc" = 0 ] || { via_repo_fail "the Ed25519 release signature of the package could not be verified (see $LOG)"; return 1; }
+  BASE_URL="file://$tree"
+  return 0
+}
+via_repo_unpack() {   # PKGFILE DESTDIR: unpack a .deb / .rpm WITHOUT running anything from it
+  case "$1" in
+    *.deb) have dpkg-deb && dpkg-deb -x "$1" "$2" >>"$LOG" 2>&1;;
+    *.rpm) have rpm2cpio && have cpio && (cd "$2" && rpm2cpio "$1" | cpio -idm --quiet) >>"$LOG" 2>&1;;
+    *) return 1;;
+  esac
+}
+via_repo_try() {
+  local pm="" base branch suite maj="" rarch probe keyurl key="$TMP/toutwaf-repo.key" fpr want="toutwaf" cfg="" keydst="" v pkgdir="$TMP/viapkg" pkg="" ex="$TMP/viaroot"
+  local to=(); have timeout && to=(timeout 900)
+  [ "$STAGING" = 0 ] || return 1
+  if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) --via-repo: would add the ToutWAF package repository ($REPO_LINUX), download the package 'toutwaf', verify its release signature, then install it and install from it; any failure falls back to the direct download"; return 1; fi
+  [[ "$REPO_KEY_FPR" =~ ^[0-9A-Fa-f]{40}$ ]] || { via_repo_fail "this installer carries no pinned fingerprint of the repository key yet, so the repository is not trusted"; return 1; }
+  have curl || { via_repo_fail "curl is missing"; return 1; }
+  have gpg || { via_repo_fail "gpg is needed to check the repository key fingerprint"; return 1; }
+  case "$ARCH" in amd64) rarch=x86_64;; arm64) rarch=aarch64;; *) via_repo_fail "architecture '$ARCH' has no package"; return 1;; esac
+  suite=stable; branch=main; if [ "$CHANNEL" = dev ]; then suite=dev; branch=dev; fi
+  base="${REPO_LINUX%/}/$branch"
+  if have apt-get && [ "$(pf_fam "${FAMILY:-${FAMILY_GUESS:-}}" 3)" = apt ]; then pm=apt
+  elif have dnf; then
+    case "$OS_ID" in almalinux|rocky|rhel|centos|ol) maj="${OS_VER%%.*}";; esac
+    case " $VIA_REPO_EL " in *" ${maj:-x} "*) pm=dnf;; esac
+  fi
+  [ -n "$pm" ] || { via_repo_fail "this system is not covered by the package repository (AlmaLinux / Rocky / RHEL $VIA_REPO_EL, Debian family)"; return 1; }
+  if [ "$pm" = apt ]; then probe="$base/deb/dists/$suite/InRelease"; keyurl="$base/toutwaf.gpg"; keydst=/usr/share/keyrings/toutwaf.gpg; cfg=/etc/apt/sources.list.d/toutwaf.list
+  else probe="$base/rpm/el$maj/$rarch/repodata/repomd.xml"; keyurl="$base/toutwaf.asc"; keydst=/etc/pki/rpm-gpg/RPM-GPG-KEY-toutwaf; cfg=/etc/yum.repos.d/toutwaf.repo; fi
+  curl -fsSL --connect-timeout 8 --max-time 25 -o "$TMP/via-probe" "$probe" 2>>"$LOG" || { via_repo_fail "the ToutWAF repository is not reachable ($probe)"; return 1; }
+  curl -fsSL --connect-timeout 8 --max-time 25 -o "$key" "$keyurl" 2>>"$LOG" || { via_repo_fail "cannot download the repository key ($keyurl)"; return 1; }
+  fpr="$(gpg --batch --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+  [ "$(printf '%s' "$fpr" | tr 'a-f' 'A-F')" = "$(printf '%s' "$REPO_KEY_FPR" | tr -d ' ' | tr 'a-f' 'A-F')" ] || { via_repo_fail "the repository key fingerprint (${fpr:-unreadable}) is not the expected one"; return 1; }
+  # the repository definition is generated here from this installer's own constants, never downloaded
+  run install -d -m 0755 "$(p "$(dirname "$keydst")")" "$(p "$(dirname "$cfg")")" || { via_repo_fail "cannot create $(dirname "$cfg")"; return 1; }
+  run install -m 0644 "$key" "$(p "$keydst")" || { via_repo_fail "cannot write $keydst"; return 1; }
+  if [ "$pm" = apt ]; then
+    printf '# ToutWAF package repository (%s channel), written by install.sh --via-repo\ndeb [signed-by=%s] %s/deb %s main\n' "$suite" "$keydst" "$base" "$suite" >"$(p "$cfg")" \
+      || { via_repo_fail "cannot write $cfg"; return 1; }
+  else
+    printf '# ToutWAF package repository (%s channel), written by install.sh --via-repo\n[toutwaf]\nname=ToutWAF (%s)\nbaseurl=%s/rpm/el%s/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=file://%s\nskip_if_unavailable=1\nmetadata_expire=1h\n' \
+      "$suite" "$suite" "$base" "$maj" "$keydst" >"$(p "$cfg")" || { via_repo_fail "cannot write $cfg"; return 1; }
+  fi
+  if [ "$VERSION" != latest ]; then v="$(printf '%s' "${VERSION#v}" | sed 's/-/~/')"; if [ "$pm" = apt ]; then want="toutwaf=$v-*"; else want="toutwaf-$v"; fi; fi
+  info "downloading the package $want from the ToutWAF repository ($pm, $suite); it is installed only after its release signature is verified"
+  mkdir -p "$pkgdir" "$ex" || { rm -f "$(p "$cfg")"; via_repo_fail "cannot create a work directory"; return 1; }
+  if [ "$pm" = apt ]; then
+    "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 update -qq >>"$LOG" 2>&1 </dev/null || true   # another repository may be unhappy: that is not ours to fix
+    ( cd "$pkgdir" && DEBIAN_FRONTEND=noninteractive "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 download "$want" ) >>"$LOG" 2>&1 </dev/null \
+      || { rm -f "$(p "$cfg")"; via_repo_fail "apt-get could not download $want from the ToutWAF repository"; return 1; }
+  else
+    "${to[@]+"${to[@]}"}" dnf download -y --refresh --destdir "$pkgdir" "$want" >>"$LOG" 2>&1 </dev/null || { rm -f "$(p "$cfg")"; via_repo_fail "dnf could not download $want from the ToutWAF repository"; return 1; }
+  fi
+  for v in "$pkgdir"/*.deb "$pkgdir"/*.rpm; do [ -f "$v" ] && { pkg="$v"; break; }; done
+  [ -n "$pkg" ] || { rm -f "$(p "$cfg")"; via_repo_fail "no package was downloaded"; return 1; }
+  via_repo_unpack "$pkg" "$ex" || { rm -f "$(p "$cfg")"; via_repo_fail "cannot unpack the package to check it (dpkg-deb, or rpm2cpio and cpio, are needed)"; return 1; }
+  via_repo_stage "$ex$VIA_PAYLOAD" || { rm -f "$(p "$cfg")"; return 1; }
+  # verified: only now does the package manager install it (its maintainer scripts run from here on)
+  if [ "$pm" = apt ]; then
+    DEBIAN_FRONTEND=noninteractive "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends "$pkg" >>"$LOG" 2>&1 </dev/null \
+      || { rm -f "$(p "$cfg")"; via_repo_fail "apt-get could not install the verified package"; return 1; }
+  else
+    "${to[@]+"${to[@]}"}" dnf install -y "$pkg" >>"$LOG" 2>&1 </dev/null || { rm -f "$(p "$cfg")"; via_repo_fail "dnf could not install the verified package"; return 1; }
+  fi
+  say "  $BUL source: ToutWAF package repository ($pm, $suite channel)"
+  return 0
+}
+# END via-repo
+
 usage() {
   cat <<EOF
 ToutWAF installer v$INSTALLER_VERSION
@@ -2827,6 +3328,8 @@ Options:
   --channel stable|dev       release channel: stable = branch main, dev = branch dev (remembered in <home>/conf/installer.conf)
   --tarball FILE             install from a local release tarball (offline)
   --base-url URL             mirror of the release tree (expects <URL>/channel.json and <URL>/releases/<version>/..., see deploy/RELEASE-LAYOUT.md)
+  --via-repo                 install from ToutWAF's own package repository (adds a signed dnf .repo / apt .list, installs the package \`toutwaf\`);
+                             when it is unreachable or the system is not covered, falls back to the direct download (GitLab, then GitHub)
   --cp-url URL               enrol the data plane with this control plane (e.g. https://cp:9444)
   --enroll-token TOKEN       one-time enrolment token (console: Nodes > Add node)
   --node-token TOKEN         existing node token instead of enrolment
@@ -2838,6 +3341,11 @@ Options:
                              console port. The data-plane API port (9444) is never opened by the installer.
   --console-from CIDR        only allow this address / network to reach the console port (e.g. 203.0.113.0/24); default: anywhere
   --no-firewall              never touch the firewall (nftables / iptables hosts are never modified either: the commands are printed)
+  --with-firewall            ALSO let ToutWAF manage this machine's firewall (the optional Firewall module, off by default; also
+                             TOUTWAF_WITH_FIREWALL=1). It only switches the module on: no rule is applied by the installation, and every
+                             later change runs as a trial with automatic rollback and an anti-lockout guard (SSH and the console stay reachable).
+                             Not the same as the options above, which only decide whether the installer opens the ports ToutWAF needs.
+  --no-firewall-module       do not enable the Firewall module (the default; skips the question of the interactive mode)
   --no-selinux --no-sysctl --no-start --no-enable
   --check-compat             print whether this system is compatible (and the list of compatible distributions), change nothing;
                              exit 0 when compatible, 3 when not
@@ -2845,7 +3353,10 @@ Options:
   --check-env                print what this machine lacks for the installation (ports held by another program, a web server that starts at
                              boot, firewall, unreachable control plane) with the cause and what to do, and change nothing;
                              exit 0 when nothing refuses, 4 when the installation would be refused
+  --check-prereq             check the disk space, DNS and the clock (cause and fix of each problem), change nothing; exit 0, or 4 when the disk is full
   --skip-env-check           install although that check refuses (at your own risk: what is in the way fails later)
+  --skip-sysupdate           do not update the system packages first (same as TOUTWAF_SKIP_SYSUPDATE=1); the update is never blocking: a failure is a warning.
+                             Disk space, DNS and the clock are checked first; only a full disk stops (TOUTWAF_SKIP_PREREQ=1 goes on anyway)
   --home DIR                 installation home (default /var/toutwaf, or TOUTWAF_HOME): bin/ conf/ data/ logs/ below it; CLIs are linked in
                              /usr/local/bin. An existing installation keeps its paths and is never moved unless you pass --home.
   --bin-dir DIR | --install-dir DIR   where the binaries go (default HOME/bin; /usr/local/bin for an installation made before HOME existed)
@@ -2872,6 +3383,7 @@ while [ $# -gt 0 ]; do
     --channel) CHANNEL="$2"; shift 2;;
     --tarball) TARBALL="$2"; shift 2;;
     --base-url) BASE_URL="$2"; shift 2;;
+    --via-repo) VIA_REPO=1; shift;;
     --cp-url) CP_URL="$2"; shift 2;;
     --enroll-token) ENROLL_TOKEN="$2"; shift 2;;
     --node-token) NODE_TOKEN="$2"; shift 2;;
@@ -2885,6 +3397,8 @@ while [ $# -gt 0 ]; do
     --open-cp-port) OPEN_CP_PORT=1; shift;;
     --console-from) CONSOLE_FROM="$2"; shift 2;;
     --no-firewall) OPEN_FW=0; shift;;
+    --with-firewall|--with-firewall-module) FW_MODULE=1; shift;;
+    --no-firewall-module) FW_MODULE=0; shift;;
     --no-selinux) NO_SELINUX=1; shift;;
     --no-sysctl) NO_SYSCTL=1; shift;;
     --no-start) NO_START=1; shift;;
@@ -2892,7 +3406,9 @@ while [ $# -gt 0 ]; do
     --check-compat) CHECK_COMPAT=1; shift;;
     --skip-os-check) SKIP_OS_CHECK=1; shift;;
     --check-env) ACTION=checkenv; shift;;
+    --check-prereq) ACTION=checkprereq; shift;;
     --skip-env-check) SKIP_ENV_CHECK=1; shift;;
+    --skip-sysupdate) SKIP_SYSUPDATE=1; shift;;
     --home) HOME_DIR="$2"; HOME_EXPLICIT=1; shift 2;;
     --bin-dir|--install-dir) BIN_DIR="$2"; BIN_EXPLICIT=1; shift 2;;
     --force) FORCE=1; shift;;
@@ -2953,7 +3469,7 @@ if [ "$CHECK_COMPAT" = 1 ]; then
   [ "$CP_STATUS" != unsupported ] || exit 3
   exit 0
 fi
-if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ "$ACTION" != checkenv ] && [ "$(id -u)" -ne 0 ]; then die "$(t root_required)"; fi
+if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ "$ACTION" != checkenv ] && [ "$ACTION" != checkprereq ] && [ "$(id -u)" -ne 0 ]; then die "$(t root_required)"; fi
 TMP="$(mktemp -d)"; LOG="$TMP/install.log"
 # persist_log: from now on the log goes to /var/log/toutwaf-install.log (called once the compatibility gate has passed, so that a refused
 # run leaves nothing behind)
@@ -3314,6 +3830,33 @@ link_local_dp() {
   return 0
 }
 
+# ------------------------------------------------------------------------------------------------ optional firewall module
+# "Also let ToutWAF manage this machine's firewall": switches the Firewall module on (setting modules.firewall.enabled) and nothing else. No rule
+# is loaded: the first change the administrator makes in the console goes through the trial (countdown, automatic rollback, anti-lockout guard).
+# Never blocking: a failure is a warning and the module can be switched on later in Settings > Modules.
+FW_MODULE_RESULT=""
+enable_firewall_module() {
+  [ "$FW_MODULE" = 1 ] || return 0
+  want_cp || return 0
+  [ "$DRY_RUN" = 0 ] || return 0      # (the step line already says what would be done)
+  local exe errf out msg rc=0 cfgargs=()
+  exe="$(cp_exe)"
+  if [ ! -x "$exe" ]; then FW_MODULE_RESULT=failed; warn "$(t fwmod_fail "$exe")"; return 0; fi
+  [ -f "$(p "$CONF_DIR/toutwaf-cp.yaml")" ] && cfgargs=(--config "$(p "$CONF_DIR/toutwaf-cp.yaml")")
+  errf="$(mktemp 2>/dev/null || true)"; [ -n "$errf" ] || errf=/dev/null
+  out="$("$exe" module enable firewall --data "$(p "$DATA_DIR")" ${cfgargs[@]+"${cfgargs[@]}"} --json 2>"$errf" </dev/null)" || rc=$?
+  if [ "$STAGING" = 0 ]; then chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; fi   # the offline run may have created database files as root
+  if [ "$errf" != /dev/null ]; then cat "$errf" >>"$LOG" 2>/dev/null; fi
+  if [ "$rc" -ne 0 ]; then
+    msg="$(tr '\n\t' '  ' <"$errf" 2>/dev/null | cut -c1-300)"; [ "$errf" = /dev/null ] || rm -f "$errf"
+    FW_MODULE_RESULT=failed; warn "$(t fwmod_fail "${msg:-toutwaf-cp module rc=$rc}")"
+    return 0
+  fi
+  [ "$errf" = /dev/null ] || rm -f "$errf"
+  FW_MODULE_RESULT=on; info "firewall module: enabled ($out)"
+  return 0
+}
+
 # ------------------------------------------------------------------------------------------------ summary
 SUMMARY_PORTS=""
 build_ports() {   # lines: port|proto|purpose   (deduplicated by port/proto)
@@ -3498,14 +4041,15 @@ cmd_uninstall() {
   # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
-  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-dp.service toutwaf-cp.service; do
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-dp.service toutwaf-cp.service; do
     if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
     run rm -f "$(p /etc/systemd/system/$s)"
   done
+  if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl stop toutwaf-upgrade-rollback.timer toutwaf-upgrade-rollback.service >>"$LOG" 2>&1 || true; fi   # transient units of an update in progress
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl daemon-reload; fi
-  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
+  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
   run rm -f "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"
-  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist; do
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do
     for d in /usr/local/bin "$(secure_link_dir)"; do
       [ -n "$d" ] || continue
       l="$(p "$d/$b")"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
@@ -3518,7 +4062,7 @@ cmd_uninstall() {
     run firewall-cmd --reload >/dev/null 2>&1 || true
   fi
   if [ "$PURGE" = 1 ]; then
-    run rm -rf "$(p "$CONF_DIR")" "$(p "$DATA_DIR")" "$(p "$LOG_DIR")"
+    run rm -rf "$(p "$CONF_DIR")" "$(p "$DATA_DIR")" "$(p "$LOG_DIR")" "$(p "${DATA_DIR}-upgrade")"   # the last one holds copies of the database kept by the update helper: only --purge removes it
     if [ "$LAYOUT" = home ]; then rmdir "$(p "$BIN_DIR")" "$(p "$HOME_DIR")" 2>/dev/null || true; fi
     run rm -f "$LAYOUT_FILE"   # only when empty: the parent directory and foreign content stay
     if [ "$STAGING" = 0 ] && have userdel; then run userdel "$SVC_USER" >/dev/null 2>&1 || true; fi
@@ -3537,7 +4081,15 @@ pkg_install() {
   case "$pm" in
     dnf) run dnf install -y "$@";;
     yum) run yum install -y "$@";;
-    apt) run apt-get update -qq; DEBIAN_FRONTEND=noninteractive run apt-get install -y --no-install-recommends "$@";;
+    apt)   # another apt / dpkg (unattended-upgrades, cloud-init) may hold the lock for a while: wait for it, and try once more after a failure
+      local try=1 rc
+      while :; do
+        run apt-get -o DPkg::Lock::Timeout=300 update -qq || true   # a repository that is unhappy is not ours to fix: the install tells
+        rc=0; DEBIAN_FRONTEND=noninteractive run apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends "$@" || rc=$?
+        [ "$rc" = 0 ] && return 0
+        [ "$try" -ge 2 ] && return "$rc"
+        try=$((try + 1)); log "apt-get failed (rc $rc): trying once more"; sleep "${TOUTWAF_PKG_RETRY_DELAY:-15}"
+      done;;
     zypper) run zypper --non-interactive install --no-recommends "$@";;
     pacman)
       # never "pacman -Sy <pkg>": a partial upgrade breaks Arch. The package databases must already be synchronised.
@@ -3846,6 +4398,8 @@ create_user() {
   [ "$STAGING" = 1 ] && return 0
   local NOLOGIN; NOLOGIN="$(command -v nologin 2>/dev/null || true)"
   [ -x "$NOLOGIN" ] || { for NOLOGIN in /usr/sbin/nologin /sbin/nologin /usr/bin/nologin /bin/false; do [ -x "$NOLOGIN" ] && break; done; }
+  # The system group is also what lets `toutwafctl` sign in locally without a password: its members (added by the administrator with
+  # `usermod -aG toutwaf USER`, never by this installer) may open <data>/ctl.sock. Each machine has its own group.
   getent group "$SVC_USER" >/dev/null || run groupadd --system "$SVC_USER"
   id "$SVC_USER" >/dev/null 2>&1 || run useradd --system --gid "$SVC_USER" --home-dir "$DATA_DIR" --no-create-home --shell "$NOLOGIN" --comment "ToutWAF service account" "$SVC_USER"
 }
@@ -3900,7 +4454,7 @@ link_cli() {
   if [ -n "$sd" ] && [ "$sd" != "$BIN_DIR" ] && [ "$sd" != /usr/local/bin ]; then dirs="$dirs $sd"; fi
   for d in $dirs; do
     run install -d -m 0755 "$(p "$d")"
-    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist; do
+    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do
       [ -e "$(p "$BIN_DIR/$b")" ] || continue
       l="$(p "$d/$b")"
       if [ -L "$l" ] || [ ! -e "$l" ]; then run ln -sfn "$BIN_DIR/$b" "$l"; fi
@@ -4171,6 +4725,8 @@ EOF
 #   toutwaf-upgrade   download + verify + install a release, health check, automatic rollback  (console: Updates; DP: update_engine)
 #   toutwaf-firewall  open the ports ToutWAF needs in firewalld / ufw                            (console: Settings > Firewall; this installer)
 #   toutwaf-blocklist put the large blocklists into the kernel (nftables, one table of its own)  (console: Lists > Kernel blocking)
+#   toutwaf-vpn       put the files of the VPN module on the machine, start / stop the tunnels, read their state (console: VPN)
+#   toutwaf-fw        load the nftables rules of the Firewall module with a root rollback timer, read them back (console: Firewall)
 # The scripts carry a "toutwaf-<name>-proto: N" marker that the control plane checks before offering the button.
 emit_helper() {   # NAME  (template on stdin)
   local dst tmp; dst="$(p "$BIN_DIR/$1")"; tmp="$dst.new"
@@ -4185,32 +4741,98 @@ write_helpers() {
 #
 # toutwaf-upgrade request   (called by toutwaf-dp with TW_DESIRED_ENGINE_VERSION) record a data-plane upgrade request
 # toutwaf-upgrade apply     (root; called by toutwaf-upgrade.service) perform the pending request
+# toutwaf-upgrade recover   (root; called by toutwaf-upgrade-guard.service at boot) finish or undo an update that was interrupted
 #
 # The control plane (user toutwaf, read-only sandbox) and the data plane cannot upgrade anything themselves: they only write
 # @DATA_DIR@/upgrade-request (KEY=VALUE). toutwaf-upgrade.path notices it and starts toutwaf-upgrade.service, which runs
 # this script as root. Everything in the request file is untrusted input here and is validated again, key by key.
 # Progress and the outcome are written to @DATA_DIR@/upgrade-status (STATE=queued|running|succeeded|failed|rolled_back)
 # and @DATA_DIR@/upgrade.log, which the control plane reads back (also after its own restart).
+#
+# `apply` hands the update to `toutwafctl upgrade-host apply` (docs/design/update-resilience.md): that program copies itself to a
+# root-only versioned directory and runs from the copy, downloads and verifies everything (Ed25519 signature, SHA-256, disk space,
+# compatibility, the new programs start, the database migration works on a copy) BEFORE it stops or replaces anything, saves the
+# current version, arms a transient systemd timer that rolls back by itself, runs the installer, watches the health for a
+# configurable window (5 minutes) and rolls back when it fails. This script is only the entry point and, for an installation whose
+# toutwafctl predates `upgrade-host` (the first update after the feature arrives), the fallback below: the former behaviour, but with
+# bounded steps, a heartbeat, the sources of install.sh (GitLab first, GitHub next, the direct address of upgrade.conf last) and a
+# status that can never be left at "running".
 set -uo pipefail
 DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; BIN_DIR='@BIN_DIR@'; REPO='@REPO@'; SVC_USER='@SVC_USER@'
-REQ="$DATA_DIR/upgrade-request"; STATUS="$DATA_DIR/upgrade-status"; LOGF="$DATA_DIR/upgrade.log"
+STATE_DIR="${DATA_DIR}-upgrade"
+REQ="$DATA_DIR/upgrade-request"; STATUS="$DATA_DIR/upgrade-status"; LOGF="$DATA_DIR/upgrade.log"; INSTLOG="$DATA_DIR/upgrade-installer.log"
+CTL="$BIN_DIR/toutwafctl"
+# the download sources, as in install.sh
+SRC_PRIMARY="${TOUTWAF_SRC_PRIMARY:-https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw}"; SRC_FALLBACK="https://raw.githubusercontent.com/$REPO"
+if [ -n "${TOUTWAF_REPO:-}" ]; then SRC_PRIMARY="$SRC_FALLBACK"; SRC_FALLBACK=""; fi
+# the service account owns $DATA_DIR and can swap any name in it at any moment: root reads its request and writes its answers only through these
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
 
 valid_version() { [[ "$1" == latest ]] || [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]{0,40})?$ ]]; }
 valid_channel() { [[ "$1" == stable || "$1" == dev ]]; }
 valid_comp()    { [[ "$1" == all || "$1" == cp || "$1" == dp ]]; }
 valid_job()     { [[ -z "$1" || "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
-req_get() { sed -n "s/^$1=//p" "$REQ" 2>/dev/null | tail -n1 | tr -d '\r'; }
+req_get() { sed -n "s/^$1=//p" "$priv" 2>/dev/null | tail -n1 | tr -d '\r'; }
 conf_get() { sed -n "s/^$1=//p" "$CONF_DIR/installer.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
-own() { chown "$SVC_USER:$SVC_USER" "$1" 2>/dev/null || true; chmod 0644 "$1" 2>/dev/null || true; }
+uconf_get() { sed -n "s/^$1=//p" "$CONF_DIR/upgrade.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
+# the resilient implementation is there when the installed toutwafctl answers its self-test
+have_host() { [ -x "$CTL" ] && "$CTL" upgrade-host selftest 2>/dev/null | grep -qx 'toutwaf-upgrade-host 1'; }
 
 S_STATE=""; S_PHASE=""; S_CHANNEL=""; S_FROM=""; S_TO=""; S_FROM_BUILD=""; S_TO_BUILD=""; S_JOB=""; S_MSG=""; S_STARTED=""; S_FINISHED=""
+FINAL=0; BEAT_PID=""; inst=""; out=""; priv=""; plogf=""; pinst=""
+# the status is a new file of root's renamed over the old name (put_file): a link left there by the service account is replaced, never followed
 write_status() {
-  local tmp; tmp="$(mktemp "$STATUS.XXXXXX")" || return 0
-  { printf 'STATE=%s\nPHASE=%s\nCHANNEL=%s\nFROM=%s\nTO=%s\nFROM_BUILD=%s\nTO_BUILD=%s\nJOB=%s\nSTARTED=%s\nFINISHED=%s\n' "$S_STATE" "$S_PHASE" "$S_CHANNEL" "$S_FROM" "$S_TO" "$S_FROM_BUILD" "$S_TO_BUILD" "$S_JOB" "$S_STARTED" "$S_FINISHED"
-    printf 'MESSAGE=%s\n' "$(printf '%s' "$S_MSG" | tr -d '\000-\037' | cut -c1-300)"; } >"$tmp"
-  own "$tmp"; mv -f "$tmp" "$STATUS"
+  { printf 'STATE=%s\nPHASE=%s\nCHANNEL=%s\nFROM=%s\nTO=%s\nFROM_BUILD=%s\nTO_BUILD=%s\nJOB=%s\nSTARTED=%s\nFINISHED=%s\nHEARTBEAT=%s\n' "$S_STATE" "$S_PHASE" "$S_CHANNEL" "$S_FROM" "$S_TO" "$S_FROM_BUILD" "$S_TO_BUILD" "$S_JOB" "$S_STARTED" "$S_FINISHED" "$(date +%s)"
+    printf 'MESSAGE=%s\n' "$(printf '%s' "$S_MSG" | tr -d '\000-\037' | cut -c1-300)"; } | put_file "$STATUS" || true
 }
-plog() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$LOGF"; }
+# the log is kept in a private file of root's and published (a new file renamed over $LOGF) after every line: nothing is appended through a name of the account
+plog() { [ -n "$plogf" ] || return 0; printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$plogf"; put_file "$LOGF" <"$plogf" 2>/dev/null || true; }
 cur_version() {
   local v=""
   if [ -x "$BIN_DIR/toutwaf-cp" ]; then v="$("$BIN_DIR/toutwaf-cp" version 2>/dev/null | awk 'NR==1{print $2}')"; fi
@@ -4225,7 +4847,23 @@ cur_build() {
   printf '%s' "${b:-unknown}"
 }
 fail() {   # message
-  S_STATE=failed; S_MSG="$1"; S_FINISHED="$(date +%s)"; write_status; plog "ERROR $1"; exit 1
+  S_STATE=failed; S_PHASE=Failed; S_MSG="$1"; S_FINISHED="$(date +%s)"; FINAL=1; write_status; plog "ERROR $1"; exit 1
+}
+# whatever happens, the status never stays at "running": a helper that is killed or crashes says so on its way out (a SIGKILL is covered by the
+# heartbeat: the console treats a status that stops beating as dead after a few minutes)
+on_exit() {
+  local rc=$?
+  [ -z "$BEAT_PID" ] || kill "$BEAT_PID" 2>/dev/null
+  if [ "$FINAL" = 0 ] && [ "$S_STATE" = running ]; then
+    S_STATE=failed; S_PHASE=Failed; S_FINISHED="$(date +%s)"
+    S_MSG="${S_MSG:-the update helper stopped unexpectedly (exit $rc): see 'journalctl -u toutwaf-upgrade'}"
+    write_status; plog "ERROR $S_MSG"
+  fi
+  [ -z "$inst" ] || rm -f "$inst"
+  [ -z "$out" ] || rm -f "$out"
+  [ -z "$priv" ] || rm -f "$priv"
+  [ -z "$plogf" ] || rm -f "$plogf"
+  [ -z "$pinst" ] || rm -f "$pinst"
 }
 
 case "${1:-request}" in
@@ -4236,54 +4874,84 @@ case "${1:-request}" in
     printf 'PROTO=2\nCOMPONENT=dp\nCHANNEL=%s\nVERSION=%s\nALLOW_DOWNGRADE=0\nJOB=\n' "$(conf_get CHANNEL | grep -x -e stable -e dev || echo stable)" "$v" >"$tmp"
     mv -f "$tmp" "$REQ"
     echo "toutwaf-upgrade: upgrade to $v requested (applied by toutwaf-upgrade.service)";;
+  recover)
+    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-upgrade recover must run as root" >&2; exit 1; }
+    have_host || exit 0
+    exec "$CTL" upgrade-host recover --data-dir "$DATA_DIR" --conf-dir "$CONF_DIR" --bin-dir "$BIN_DIR" --state-dir "$STATE_DIR" --svc-user "$SVC_USER";;
   apply)
     [ "$(id -u)" -eq 0 ] || { echo "toutwaf-upgrade apply must run as root" >&2; exit 1; }
-    [ -f "$REQ" ] || exit 0
+    [ -e "$REQ" ] || [ -L "$REQ" ] || exit 0
+    # the resilient path: the request file is read (and consumed) by the Go program, from its staged copy
+    if have_host; then
+      exec "$CTL" upgrade-host apply --data-dir "$DATA_DIR" --conf-dir "$CONF_DIR" --bin-dir "$BIN_DIR" --state-dir "$STATE_DIR" --svc-user "$SVC_USER"
+    fi
+    # ---- the fallback: this installation's toutwafctl does not know `upgrade-host` yet
+    trap on_exit EXIT
+    priv="$(mktemp)"; plogf="$(mktemp)"; pinst="$(mktemp)"
+    # the request is copied by copy_safe (a regular file of the account, one name, nobody else can write it, at most 4 KiB, no link, no FIFO) and removed
+    take_request "$REQ" "$priv" 4096; trc=$?
+    [ "$trc" -ne 1 ] || exit 0
+    if [ "$trc" -ne 0 ]; then S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"; fail "invalid update request"; fi
     # legacy request (protocol 1): one line holding the version
-    if grep -q '=' "$REQ"; then
+    if grep -q '=' "$priv"; then
       comp="$(req_get COMPONENT)"; chan="$(req_get CHANNEL)"; ver="$(req_get VERSION)"; dg="$(req_get ALLOW_DOWNGRADE)"; job="$(req_get JOB)"
     else
-      ver="$(head -n1 "$REQ" | tr -d '\r')"; comp=dp; chan="$(conf_get CHANNEL)"; dg=0; job=""
+      ver="$(head -n1 "$priv" | tr -d '\r')"; comp=dp; chan="$(conf_get CHANNEL)"; dg=0; job=""
     fi
-    rm -f "$REQ"
-    : >"$LOGF"; own "$LOGF"
+    : >"$plogf"; : >"$pinst"; put_file "$LOGF" </dev/null; put_file "$INSTLOG" </dev/null
     S_JOB="$job"; S_CHANNEL="$chan"; S_TO="$ver"; S_FROM="$(cur_version)"; S_FROM_BUILD="$(cur_build)"; S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"
     valid_comp "$comp" && valid_channel "$chan" && valid_version "$ver" && valid_job "$job" || { S_JOB=""; fail "invalid update request"; }
     [ "$dg" = 1 ] || dg=0
     write_status
-    plog "update requested: component=$comp channel=$chan version=$ver downgrade_allowed=$dg"
+    # a heartbeat for as long as this helper lives, whatever the installer is doing
+    ( while sleep 10; do touch -h "$STATUS" 2>/dev/null; [ -s "$pinst" ] && put_file "$INSTLOG" <"$pinst" 2>/dev/null; done ) & BEAT_PID=$!
+    plog "update requested: component=$comp channel=$chan version=$ver downgrade_allowed=$dg (fallback helper: this toutwafctl has no upgrade-host)"
     br=main; [ "$chan" = dev ] && br=dev
     base="$(conf_get BASE_URL)"; case "$base" in http://*|https://*) ;; *) base="";; esac
-    url="${TOUTWAF_INSTALLER_URL:-${base:+$base/install.sh}}"; url="${url:-$SRC_PRIMARY/$br/install.sh}"
-    inst="$(mktemp)"; trap 'rm -f "$inst"' EXIT
-    S_PHASE="Downloading the installer"; write_status; plog "$S_PHASE ($url)"
-    { curl -fsSL --retry 3 --connect-timeout 15 -o "$inst" "$url" 2>>"$LOGF" && head -c2 "$inst" | grep -q '^#!'; } \
-      || { [ -z "$base" ] && [ -z "${TOUTWAF_INSTALLER_URL:-}" ] && [ -n "$SRC_FALLBACK" ] && url="$SRC_FALLBACK/$br/install.sh" \
-           && curl -fsSL --retry 3 --connect-timeout 15 -o "$inst" "$url" 2>>"$LOGF" && head -c2 "$inst" | grep -q '^#!'; } \
-      || fail "cannot download the installer from $url"
+    # the installer comes from the first source that answers: a mirror, or GitLab, then GitHub, then the direct address of upgrade.conf
+    urls=()
+    if [ -n "${TOUTWAF_INSTALLER_URL:-}" ]; then urls+=("$TOUTWAF_INSTALLER_URL")
+    elif [ -n "$base" ]; then urls+=("$base/install.sh")
+    else
+      urls+=("$SRC_PRIMARY/$br/install.sh"); [ -z "$SRC_FALLBACK" ] || urls+=("$SRC_FALLBACK/$br/install.sh")
+    fi
+    direct="$(uconf_get DIRECT_URL)"; case "$direct" in http://*|https://*) urls+=("${direct%/}/install.sh");; esac
+    inst="$(mktemp)"
+    S_PHASE="Downloading the installer"; write_status
+    got=0
+    for url in "${urls[@]}"; do
+      plog "$S_PHASE ($url)"
+      if curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$inst" "$url" 2>>"$plogf" && head -c2 "$inst" | grep -q '^#!'; then got=1; break; fi
+      plog "this source does not answer; trying the next one"
+    done
+    [ "$got" = 1 ] || fail "cannot download the installer from any source (${urls[*]}). Nothing was changed; check the network of this server or set DIRECT_URL in $CONF_DIR/upgrade.conf"
     args=(--update --component "$comp" --channel "$chan" --yes --no-color --quiet)
     [ "$ver" = latest ] || args+=(--version "$ver")
     [ -z "$base" ] || args+=(--base-url "$base")
     [ "$dg" = 1 ] && args+=(--force)
     S_PHASE="Running the installer"; write_status
     out="$(mktemp)"
-    TOUTWAF_PROGRESS_FILE="$LOGF" bash "$inst" "${args[@]}" >"$out" 2>&1 </dev/null; rc=$?
+    to=(); command -v timeout >/dev/null 2>&1 && to=(timeout 1200)
+    TOUTWAF_PROGRESS_FILE="$pinst" "${to[@]+"${to[@]}"}" bash "$inst" "${args[@]}" >"$out" 2>&1 </dev/null; rc=$?
     # the installer's own messages (errors, rollback notices) go to the log too
-    sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -v '^[[:space:]]*$' | tail -n 40 | while IFS= read -r l; do plog "$l"; done
+    sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -v '^[[:space:]]*$' | tail -n 40 | while IFS= read -r l; do plog "$l"; printf '%s\n' "$l" >>"$pinst"; done
+    put_file "$INSTLOG" <"$pinst" 2>/dev/null || true
     S_TO="$(cur_version)"; [ -n "$S_TO" ] || S_TO="$ver"
     S_TO_BUILD="$(cur_build)"
     S_FINISHED="$(date +%s)"
+    FINAL=1
     if [ "$rc" -eq 0 ]; then
       S_STATE=succeeded; S_PHASE="Done"; S_MSG=""; plog "update finished: now running ${S_TO} (build ${S_TO_BUILD})"
     else
       msg="$(sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -iE 'error|fail|did not|refus|downgrad|checksum|signature|withdrawn|yanked' | tail -n1 | sed 's/^[^[:alnum:]]*//')"
+      [ "$rc" -ne 124 ] || msg="the installer did not finish within 20 minutes"
       S_MSG="${msg:-installer exited with status $rc}"
-      if grep -qi 'rolled back to the previous version' "$out" "$LOGF" 2>/dev/null; then S_STATE=rolled_back; else S_STATE=failed; fi
+      if grep -qi 'rolled back to the previous version' "$out" "$plogf" 2>/dev/null; then S_STATE=rolled_back; else S_STATE=failed; fi
       S_PHASE="Failed"; plog "ERROR update failed (rc=$rc): $S_MSG"
     fi
-    write_status; rm -f "$out"
+    write_status
     exit "$rc";;
-  *) echo "usage: toutwaf-upgrade [request|apply]" >&2; exit 2;;
+  *) echo "usage: toutwaf-upgrade [request|apply|recover]" >&2; exit 2;;
 esac
 TW_UPGRADE_TPL
   emit_helper toutwaf-firewall <<'TW_FIREWALL_TPL'
@@ -4327,7 +4995,53 @@ valid_src()  {
 fam() { [[ "$1" == *:* ]] && echo ipv6 || echo ipv4; }
 conf_get() { sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -n1 | tr -d '\r"'"'"; }
 in_list() { local x="$1"; shift; local i; for i in "$@"; do [ "$i" = "$x" ] && return 0; done; return 1; }
-own() { chown "$SVC_USER:$SVC_USER" "$1" 2>/dev/null || true; chmod 0644 "$1" 2>/dev/null || true; }
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
 
 CONF_DP=""; CONF_CONSOLE=""; CONF_AGENT=""
 load_conf() {
@@ -4378,10 +5092,8 @@ scan_open() {
 
 JOB=""
 write_status() {   # RESULT MESSAGE
-  local tmp; tmp="$(mktemp "$STATUS.XXXXXX")" || return 0
   { printf 'BACKEND=%s\nACTIVE=%s\nOPEN=%s\nTOOLS=%s\nCHECKED=%s\nRESULT=%s\nJOB=%s\n' "$BACKEND" "$ACTIVE" "$OPEN" "$TOOLS" "$(date +%s)" "$1" "$JOB"
-    printf 'MESSAGE=%s\n' "$(printf '%s' "$2" | tr -d '\000-\037' | cut -c1-300)"; } >"$tmp"
-  own "$tmp"; mv -f "$tmp" "$STATUS"
+    printf 'MESSAGE=%s\n' "$(printf '%s' "$2" | tr -d '\000-\037' | cut -c1-300)"; } | put_file "$STATUS"
 }
 
 # ---- commands (printed for hosts we do not drive, and by `print`) -----------------------------------------------------------
@@ -4519,9 +5231,11 @@ case "${1:-}" in
     do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM"; exit $?;;
   apply)
     [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
-    [ -f "$REQ" ] || exit 0
-    # take a private copy first: the service account can rewrite the file while we read it
-    cp "$REQ" "$TMPOPEN.req" 2>/dev/null; rm -f "$REQ"; trap 'rm -f "$TMPOPEN" "$TMPOPEN.req"' EXIT
+    # a private copy first (the service account can rewrite the file while we read it, or put a link or a FIFO in its place)
+    trap 'rm -f "$TMPOPEN" "$TMPOPEN.req"' EXIT
+    take_request "$REQ" "$TMPOPEN.req" 4096; rc=$?
+    [ "$rc" -ne 1 ] || exit 0
+    [ "$rc" -eq 0 ] || { detect; scan_open; write_status error "the request file is not a regular file of the service account"; exit 1; }
     rq() { sed -n "s/^$1=//p" "$TMPOPEN.req" | tail -n1 | tr -d '\r'; }
     JOB="$(rq JOB)"; valid_job "$JOB" || JOB=""
     load_conf; detect
@@ -4589,7 +5303,8 @@ TW_FIREWALL_TPL
 #   * only ONE table is ever touched, "inet toutwaf_block" (replaced atomically in one transaction), only the TCP ports of the data
 #     plane recorded by the installer in @CONF_DIR@/firewall.conf are filtered, and an "allow" set (the addresses the owner trusts)
 #     is accepted before anything is dropped;
-#   * no shell is started from the data: the only programs run are nft, awk, sed, sha256sum, cp, mktemp and chown.
+#   * no shell is started from the data: the only programs run are nft, awk, sed, sha256sum, dd, cat, stat, mktemp and mv; the files of the
+#     service account are opened without following a link or waiting for a writer, and the answers are new files renamed in place (hostio).
 # The table lives in the kernel only: it is gone after a reboot, and the control plane asks for it again when it starts. The
 # data plane enforces the same lists itself, so a missing table loses speed, never protection.
 set -uo pipefail
@@ -4599,7 +5314,53 @@ RUNDIR=/run/toutwaf-blocklist; STATE="$RUNDIR/state"
 TABLE=toutwaf_block; MAX_BLOCK=3000000; MAX_ALLOW=4096; MAX_BYTES=134217728
 have() { command -v "$1" >/dev/null 2>&1; }
 valid_job() { [[ -z "$1" || "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
-own() { chmod 0644 "$1" 2>/dev/null || true; chown "$SVC_USER:$SVC_USER" "$1" 2>/dev/null || true; }
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
 conf_get() { sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -n1 | tr -d '\r"'"'"; }
 
 JOB=""; TMP=""
@@ -4628,13 +5389,11 @@ table_present() { CHAIN="$(nft list chain inet "$TABLE" prerouting 2>/dev/null)"
 dropped() { printf '%s\n' "$CHAIN" | sed -n 's/.*counter packets \([0-9][0-9]*\) bytes [0-9]* drop.*/\1/p' | awk '{s += $1} END {print s + 0}'; }
 
 write_status() {   # RESULT MESSAGE
-  local tmp present=0 pk=0 res="$1"
+  local present=0 pk=0 res="$1"
   if have nft && table_present; then present=1; pk="$(dropped)"; load_state; else S_B4=0; S_B6=0; S_A4=0; S_A6=0; S_REJ=0; S_PORTS=""; S_SRC=""; fi
-  tmp="$(mktemp "$STATUS.XXXXXX")" || return 0
   { printf 'BACKEND=nftables\nAPPLIED=%s\nBLOCK4=%s\nBLOCK6=%s\nALLOW4=%s\nALLOW6=%s\nREJECTED=%s\nPORTS=%s\nSRC=%s\nDROPPED=%s\nCHECKED=%s\nRESULT=%s\nJOB=%s\n' \
       "$present" "$S_B4" "$S_B6" "$S_A4" "$S_A6" "$S_REJ" "$S_PORTS" "$S_SRC" "$pk" "$(date +%s)" "$res" "$JOB"
-    printf 'MESSAGE=%s\n' "$(printf '%s' "$2" | tr -d '\000-\037' | cut -c1-300)"; } >"$tmp"
-  own "$tmp"; mv -f "$tmp" "$STATUS"
+    printf 'MESSAGE=%s\n' "$(printf '%s' "$2" | tr -d '\000-\037' | cut -c1-300)"; } | put_file "$STATUS"
 }
 
 # ---- the check of every line -----------------------------------------------------------------------------------------------------
@@ -4680,16 +5439,13 @@ BEGIN {
 END { printf "%d %d %d %d\n", ok4, ok6, bad, res }
 '
 
-# copy_list SRC DST: a regular file of a reasonable size, copied as it is now (the service account can rewrite it any time)
+# copy_list SRC DST: a regular file of a reasonable size, copied as it is now (the service account can rewrite it any time, or put a
+# link or a FIFO in its place); no list is an empty list
 copy_list() {
-  local src="$1" dst="$2"
+  local src="$1" dst="$2" rc
   [ -d "$LISTDIR" ] && [ ! -L "$LISTDIR" ] || return 1
-  if [ ! -e "$src" ] && [ ! -L "$src" ]; then : >"$dst"; return 0; fi
-  [ -f "$src" ] && [ ! -L "$src" ] || return 1
-  timeout 60 cp -P --no-preserve=all "$src" "$dst" 2>/dev/null || return 1
-  [ -f "$dst" ] && [ ! -L "$dst" ] || return 1
-  [ "$(stat -c %s "$dst" 2>/dev/null || echo 999999999)" -le "$MAX_BYTES" ] || return 2
-  return 0
+  copy_safe "$src" "$dst" "$MAX_BYTES"; rc=$?
+  case "$rc" in 0) return 0;; 1) : >"$dst"; return 0;; *) return 1;; esac
 }
 
 emit_set() {   # NAME TYPE FILE
@@ -4760,10 +5516,11 @@ case "${1:-}" in
   status) write_status ok "scan";;
   clear) do_clear;;
   apply)
-    [ -f "$REQ" ] || exit 0
-    # a private copy first (in a directory only root can write): the service account can rewrite the file while we read it
-    if [ -L "$REQ" ] || ! cp -P --no-preserve=all "$REQ" "$TMP/request" 2>/dev/null; then rm -f "$REQ"; exit 1; fi
-    rm -f "$REQ"
+    # a private copy first (in a directory only root can write): the service account can rewrite the file while we read it, or put a
+    # link or a FIFO in its place
+    take_request "$REQ" "$TMP/request" 4096; rc=$?
+    [ "$rc" -ne 1 ] || exit 0
+    [ "$rc" -eq 0 ] || exit 1
     [ -f "$TMP/request" ] && [ ! -L "$TMP/request" ] && [ "$(stat -c %s "$TMP/request")" -le 4096 ] || exit 1
     rq() { sed -n "s/^$1=//p" "$TMP/request" | tail -n1 | tr -d '\r'; }
     JOB="$(rq JOB)"; valid_job "$JOB" || JOB=""
@@ -4777,6 +5534,68 @@ case "${1:-}" in
   *) echo "usage: toutwaf-blocklist status|apply|clear" >&2; exit 2;;
 esac
 TW_BLOCKLIST_TPL
+  emit_helper toutwaf-vpn <<'TW_VPN_TPL'
+#!/usr/bin/env bash
+# toutwaf-vpn-proto: 1
+#
+# toutwaf-vpn apply              (root; toutwaf-vpn.service) perform the pending @DATA_DIR@/vpn-request
+# toutwaf-vpn rollback RECORD    put back a change whose trial ran out (a transient systemd timer started by "apply" runs it)
+#
+# The VPN module of the console generates WireGuard / OpenVPN / strongSwan files; this helper puts them on the machine
+# (/etc/wireguard, /etc/openvpn, /etc/swanctl/conf.d), enables or disables the systemd unit and reads the state of the tunnels
+# (@DATA_DIR@/vpn-status.json, without any key). The request and the files in it are written by the unprivileged service account,
+# so for root they are untrusted input. All the work is done by `toutwafctl vpn-host`, which checks them again:
+#   * the destinations are fixed and derived from the validated record id and interface name, never taken from the request;
+#   * every configuration file is read against an allow list of directives: nothing that runs a program (PostUp, up, plugin,
+#     script-security above 1, updown...) or reads another file can get through; a symbolic link is refused;
+#   * a file that ToutWAF did not write is renamed (*.toutwaf-save) before it is replaced, nothing is ever deleted;
+#   * the route to the address of the administrator is checked before and after the start and the change is undone at once when
+#     it moved; a change of the default route stays on trial and a timer undoes it unless the console confirms it.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; BIN_DIR='@BIN_DIR@'
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-vpn must run as root" >&2; exit 1; }
+CTL="$BIN_DIR/toutwafctl"
+[ -x "$CTL" ] || { echo "toutwaf-vpn: $CTL is missing" >&2; exit 1; }
+case "${1:-}" in
+  apply) exec "$CTL" vpn-host apply --data-dir "$DATA_DIR";;
+  rollback)
+    [[ "${2:-}" =~ ^vp[su]_[0-9a-f]{16}$ ]] || { echo "toutwaf-vpn: invalid record" >&2; exit 2; }
+    exec "$CTL" vpn-host rollback --id "$2";;
+  *) echo "usage: toutwaf-vpn apply|rollback RECORD" >&2; exit 2;;
+esac
+TW_VPN_TPL
+  emit_helper toutwaf-fw <<'TW_FW_TPL'
+#!/usr/bin/env bash
+# toutwaf-fw-proto: 1
+#
+# toutwaf-fw apply              (root; toutwaf-fw.service) perform the pending @DATA_DIR@/fw-request
+# toutwaf-fw rollback TRIAL     put back the rules of a trial that was not confirmed (a transient systemd timer started by "apply" runs it)
+# toutwaf-fw boot               (root; toutwaf-fw-boot.service) load the rules the console confirmed, at boot
+#
+# The Firewall module of the console builds an nftables ruleset in ONE table of its own (inet toutwaf_fw); the control plane runs
+# without any privilege, so this helper loads it. The request and the files in it are written by the unprivileged service
+# account, so for root they are untrusted input. All the work is done by `toutwafctl fw-host`, which checks them again:
+#   * the request carries a configuration, never a script: root renders the ruleset itself (validation, strict template, lint) and
+#     refuses anything that is not exactly what the renderer writes; only our table can be touched, no other nft command exists;
+#   * the lock-out guard runs again on the root side (SSH 22, console 443/9443, agent 9444, the peers and the address of the
+#     administrator who asked): a change that would cut access is refused before anything is loaded;
+#   * `nft -c` first; then the new rules stay on trial and a transient systemd timer owned by root puts the previous ones back
+#     unless the console confirms in time, whether or not the control plane is still alive;
+#   * the rules put back are the ones root saved itself, never a copy from the request.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; BIN_DIR='@BIN_DIR@'
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-fw must run as root" >&2; exit 1; }
+CTL="$BIN_DIR/toutwafctl"
+[ -x "$CTL" ] || { echo "toutwaf-fw: $CTL is missing" >&2; exit 1; }
+case "${1:-}" in
+  apply) exec "$CTL" fw-host apply --data-dir "$DATA_DIR";;
+  rollback)
+    [[ "${2:-}" =~ ^[0-9a-f]{32}$ ]] || { echo "toutwaf-fw: invalid trial" >&2; exit 2; }
+    exec "$CTL" fw-host rollback --id "$2";;
+  boot) exec "$CTL" fw-host boot --data-dir "$DATA_DIR";;
+  *) echo "usage: toutwaf-fw apply|rollback TRIAL|boot" >&2; exit 2;;
+esac
+TW_FW_TPL
   cat >"$sd/toutwaf-upgrade.path" <<EOF
 [Unit]
 Description=ToutWAF upgrade requests (data plane update_engine, console Updates page)
@@ -4798,7 +5617,26 @@ Wants=network-online.target
 Type=oneshot
 EnvironmentFile=-$CONF_DIR/upgrade.env
 ExecStart=$BIN_DIR/toutwaf-upgrade apply
-TimeoutStartSec=20min
+# longest honest run: download and checks (10 min) + the installer (15 min) + the health window (up to 30 min); the transient rollback timer settles
+# the update anyway if systemd cuts the helper short (docs/design/update-resilience.md)
+TimeoutStartSec=60min
+EOF
+  # finishes or undoes an update that a power loss, a killed helper or a reboot interrupted (no-op when the journal of the update helper is closed)
+  cat >"$sd/toutwaf-upgrade-guard.service" <<EOF
+[Unit]
+Description=ToutWAF: finish or undo an interrupted update
+After=local-fs.target network-online.target toutwaf-cp.service toutwaf-dp.service
+Wants=network-online.target
+ConditionPathExists=${DATA_DIR}-upgrade/journal.json
+
+[Service]
+Type=oneshot
+# a failed repair never stops the machine from booting
+ExecStart=-$BIN_DIR/toutwaf-upgrade recover
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target
 EOF
   if want_cp; then
     cat >"$sd/toutwaf-firewall.path" <<EOF
@@ -4858,6 +5696,76 @@ LockPersonality=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 UMask=0022
+EOF
+    cat >"$sd/toutwaf-vpn.path" <<EOF
+[Unit]
+Description=ToutWAF VPN requests (console VPN)
+
+[Path]
+PathExists=$DATA_DIR/vpn-request
+Unit=toutwaf-vpn.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    # the helper starts and stops the tunnels (systemctl) and reads their state; the tunnels themselves run in their own units
+    cat >"$sd/toutwaf-vpn.service" <<EOF
+[Unit]
+Description=ToutWAF VPN helper (requested by the control plane)
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-vpn apply
+TimeoutStartSec=5min
+PrivateTmp=yes
+ProtectHome=yes
+EOF
+    cat >"$sd/toutwaf-fw.path" <<EOF
+[Unit]
+Description=ToutWAF firewall rules requests (console Firewall)
+
+[Path]
+PathExists=$DATA_DIR/fw-request
+Unit=toutwaf-fw.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    # the helper loads nftables rules (netlink) and starts the transient rollback timer (systemctl): it is not sandboxed further
+    cat >"$sd/toutwaf-fw.service" <<EOF
+[Unit]
+Description=ToutWAF firewall rules helper (requested by the control plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-fw apply
+TimeoutStartSec=2min
+PrivateTmp=yes
+ProtectHome=yes
+EOF
+    # loads the confirmed rules at boot, before the control plane runs; installed, NOT enabled (the control plane also compares the
+    # loaded rules with the confirmed ones at start-up and every 5 minutes): systemctl enable toutwaf-fw-boot.service
+    cat >"$sd/toutwaf-fw-boot.service" <<EOF
+[Unit]
+Description=ToutWAF firewall: load the confirmed rules at boot
+ConditionPathExists=$DATA_DIR/firewall/toutwaf-fw.nft
+Before=network-pre.target
+Wants=network-pre.target
+DefaultDependencies=no
+After=local-fs.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# a failed load never stops the machine from booting or the control plane from starting
+ExecStart=-$BIN_DIR/toutwaf-fw boot
+TimeoutStartSec=1min
+
+[Install]
+WantedBy=multi-user.target
 EOF
   fi
   return 0
@@ -5060,7 +5968,8 @@ phase_binaries() {
     if install_binary toutwaf-cp; then CHANGED=1; fi
     if install_binary toutwafctl; then CHANGED=1; fi
     install_agent_dist
-    install_av_dist
+    # the antivirus programs are withdrawn from the product: installed only on explicit request (TOUTWAF_WITH_ANTIVIRUS=1)
+    if [ "${TOUTWAF_WITH_ANTIVIRUS:-0}" = 1 ]; then install_av_dist; fi
   fi
   link_cli
   return 0
@@ -5072,8 +5981,12 @@ prepare_panel() { prepare_panel_run; }
 start_services() {
   # the update helper serves the console Updates page (cp) and update_engine (dp); the firewall helper serves Settings > Firewall (cp)
   if want_dp || want_cp; then systemctl enable --now toutwaf-upgrade.path >/dev/null 2>&1 || warn "could not enable toutwaf-upgrade.path"; fi
+  # enabled, never started now: this installer may be running under the update helper, whose journal is still open
+  if want_dp || want_cp; then systemctl enable toutwaf-upgrade-guard.service >/dev/null 2>&1 || warn "could not enable toutwaf-upgrade-guard.service"; fi
   if want_cp; then systemctl enable --now toutwaf-firewall.path >/dev/null 2>&1 || warn "could not enable toutwaf-firewall.path"; fi
   if want_cp; then systemctl enable --now toutwaf-blocklist.path >/dev/null 2>&1 || warn "could not enable toutwaf-blocklist.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-vpn.path >/dev/null 2>&1 || warn "could not enable toutwaf-vpn.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-fw.path >/dev/null 2>&1 || warn "could not enable toutwaf-fw.path"; fi
   if want_cp; then
     systemctl enable toutwaf-cp >/dev/null 2>&1 || true
     if svc_active toutwaf-cp && [ "$CHANGED" = 0 ]; then :; else
@@ -5125,6 +6038,7 @@ do_install_flow() {
   SRC_DIR=""
   RESOLVED_VERSION="${TARBALL:+local}"
   NEW_BUILD=""
+  if [ "$VIA_REPO" = 1 ] && [ -z "$TARBALL" ] && [ -z "$BASE_URL" ]; then via_repo_try || true; fi   # sets BASE_URL to the staged package on success
   if [ -z "$TARBALL" ]; then resolve_release; fi
   if [ -n "$CH_JSON" ] && [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then NEW_BUILD="$CH_BUILD"; fi
   if [ "$ACTION" = update ] && [ -z "$TARBALL" ] && [ "$FORCE" = 0 ]; then
@@ -5165,6 +6079,7 @@ do_install_flow() {
   if [ "$STAGING" = 0 ]; then step "$(t s_fw)" setup_firewall; fi
   if want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_boot)" prepare_panel; fi
   if want_dp && want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_link)" link_local_dp; fi
+  if want_cp && [ "$FW_MODULE" = 1 ]; then step "$(t s_fwmod)" enable_firewall_module; fi
   if [ "$HAS_SYSTEMD" = 1 ] && [ "$DRY_RUN" = 0 ]; then
     run systemctl daemon-reload
     if [ "$NO_START" = 0 ]; then
@@ -5173,7 +6088,7 @@ do_install_flow() {
       say "  $BUL services installed but not started (--no-start)"
     fi
     if [ "$NO_ENABLE" = 1 ]; then
-      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-firewall.path toutwaf-blocklist.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
+      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
     fi
   fi
   record_installed_now
@@ -5193,7 +6108,7 @@ record_installed_now() {
 
 # ------------------------------------------------------------------------------------------------ interactive configuration
 configure_interactively() {
-  local fw boot go
+  local fw fwm boot go su
   box_top "$(t cfg_title)"; box_bottom
   if [ "$COMPONENT" = dp ] && [ -z "$CP_URL" ]; then ask CP_URL "$(t q_cp_url)" ""; fi
   if [ -n "$CP_URL" ] && [ -z "$NODE_TOKEN$ENROLL_TOKEN" ]; then ask ENROLL_TOKEN "$(t q_token)" "" secret; fi
@@ -5206,7 +6121,13 @@ configure_interactively() {
     ask CONSOLE_FROM "$(t q_console_from)" "$CONSOLE_FROM"
     if [ -n "$CONSOLE_FROM" ] && { ! [[ "$CONSOLE_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$CONSOLE_FROM" == */0 ]]; }; then say "  $(paint "$RED" "$(t q_console_from_bad)")"; CONSOLE_FROM=""; fi
   fi
+  if want_cp && [ -z "$FW_MODULE" ] && [ "$ACTION" = install ]; then
+    echo >&3
+    say "  $D$(t fwmod_n1)$R"; say "  $D$(t fwmod_n2)$R"; say "  $D$(t fwmod_n3)$R"
+    ask_yn fwm "$(t q_fwmodule)" 0; FW_MODULE="$fwm"
+  fi
   ask_yn boot "$(t q_boot)" 1; if [ "$boot" != 1 ]; then NO_ENABLE=1; fi
+  if [ "$SKIP_SYSUPDATE" != 1 ]; then ask_yn su "$(t q_sysupdate)" 1; if [ "$su" != 1 ]; then SKIP_SYSUPDATE=1; fi; fi
   if [ -z "$TARBALL" ]; then ask CHANNEL "$(t q_channel)" "$CHANNEL"; fi
   if [ "$LAYOUT" = home ] && [ "$BIN_EXPLICIT" = 0 ]; then
     local h="$HOME_DIR"; ask h "$(t q_bindir)" "$HOME_DIR"
@@ -5259,6 +6180,7 @@ fi
 
 case "$ACTION" in
   checkenv) detect_installed; if [ "$INST_CP" = 1 ] || [ "$INST_DP" = 1 ]; then load_existing_ports; fi; rc=0; env_run_check || rc=$?; exit "$rc";;
+  checkprereq) rc=0; prereq_run_check || rc=$?; exit "$rc";;
   status) persist_log; rc=0; cmd_status || rc=$?; exit "$rc";;      # (a plain call would fire the ERR trap on a non-zero status)
   links) persist_log; rc=0; cmd_links || rc=$?; exit "$rc";;
   uninstall) persist_log; cmd_uninstall; exit 0;;
@@ -5286,6 +6208,8 @@ if [ "$COMPAT_OK" = 1 ]; then
   for _n in ${CP_NOTES[@]+"${CP_NOTES[@]}"}; do warn "$_n"; done
 fi
 if [ "$ACTION" = install ]; then env_gate; fi   # what is in the way is said now, before anything is changed (exit 4)
+prereq_gate          # disk space, DNS and clock, with the fix of each problem (only a full disk refuses, exit 4)
+sysupdate_run        # then the system packages (an installation only; TOUTWAF_SKIP_SYSUPDATE=1 skips it; a failure is a warning)
 if want_cp && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; then detect_public_ip; fi
 do_install_flow
 
@@ -5297,6 +6221,7 @@ say "  $(paint "$GRN" "$OKM") $(t "done")${new_dp:+  toutwaf-dp $new_dp${OLD_DP:
 if [ "${#WARNINGS[@]}" -gt 0 ] && [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ]; then local_w=""; for local_w in "${WARNINGS[@]}"; do printf '  %s%s%s %s\n' "$YLW" "$WRM" "$R" "$local_w"; done; fi
 if want_cp && [ "$PANEL_RAN" = 0 ] && [ "$STAGING" = 0 ]; then cp_links; fi
 render_summary tty
+if [ "$FW_MODULE_RESULT" = on ]; then say "  $BUL $(t fwmod_done)"; fi
 if want_dp; then
   say "  ${D}data plane: systemctl status toutwaf-dp   config: $CONF_DIR/toutwaf-dp.yaml   health: curl http://127.0.0.1:9101/healthz$R"
   if [ -z "$CP_URL" ] && { [ "$COMPONENT" != all ] || [ "$DP_LINK" = failed ]; }; then say "  ${D}policy: edit $CONF_DIR/policy.yaml (hot reloaded) - apps start in detect mode$R"; fi

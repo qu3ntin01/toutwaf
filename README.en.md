@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.3.0-dev** · build `5471236be0d4` · channel **dev (pre-release)** · 2026-10-14
+**Version 0.3.0-dev** · build `765fc9bbd8d8` · channel **dev (pre-release)** · 2026-10-18
 
 </div>
 
@@ -202,9 +202,9 @@ The **Updates** page (Administration menu) shows the installed version, the late
 
 ## Free edition
 
-Without a licence ToutWAF runs as the **free edition**, free for a reasonable personal use: **up to 3 protected sites, 1 node, 2 users, 1 organisation and 50 million requests per month**. Going over the monthly request quota is flagged as "over quota" in the console. Adding more is refused, with the limit and the number in use, until a licence is installed.
+Without a licence or a sign-up ToutWAF runs as the **free edition (Free)**, free, professional use included: **up to 3 protected sites, 1 node, 2 users, 1 organisation and 5 million authorised requests per month** (blocked attacks are not counted). An optional free sign-up (confirmed e-mail address, Administration > Licence) moves the installation to **Free+**: **5 sites and 15 million authorised requests per month** (the other limits are the same; the quotas are not added). The ceilings apply to the whole installation, not to each server. The monthly volume is announced, never enforced by a cut: a warning at 80 % then at 100 %, then, if the overrun lasts, a request to move to a paid offer with an announced grace period (30 days by default). Traffic, protection and the console are never interrupted; only the creation of a new site beyond the ceiling is refused, with the limit and the number in use. WAF protection, two-factor authentication and security updates are in every offer.
 
-More sites, enterprise use and the advanced features are under licence: advanced load balancing, several organisations (tenants, MSSP), enterprise sign-in (OIDC, SAML, SCIM), SIEM / SOAR / ticketing / threat-intelligence integrations and off-site backups. They stay visible in the console, locked, with a link to the offers; they are never hidden. When a licence expires there is a 14-day grace period, then only the *new configuration* of those features is refused: the protection already in place keeps working. Everything else described here is the same product; for larger limits or the advanced features, contact your ToutWAF vendor.
+More sites or nodes (Pro: 15 sites and 2 nodes; Agency: 50 sites and 5 nodes; Enterprise: ceilings by quote) and the advanced features are under licence: advanced load balancing, several organisations (tenants, MSSP), enterprise sign-in (OIDC, SAML, SCIM), SIEM / SOAR / ticketing / threat-intelligence integrations and off-site backups. They stay visible in the console, locked, with a link to the offers; they are never hidden. When a paid licence expires there are 48 hours of grace (everything works, with warnings), then 48 hours of read-only (traffic and protection continue, nothing can be created or changed), then WAF protection is switched off: traffic keeps flowing, unprotected, and only renewal remains possible in the panel; renewing restores everything at once. Free and Free + are not concerned. Everything else described here is the same product; for larger limits or the advanced features, contact your ToutWAF vendor.
 
 
 ## Known limitations
@@ -220,6 +220,10 @@ Let's be transparent about what is not (yet) covered:
 - Console and error-message translations were written with the help of automated tools and have not yet been reviewed by native speakers.
 - No certification (ANSSI, PCI DSS, ISO 27001) is claimed.
 
+Targets not built for this release:
+- `linux-arm64`: disabled in settings
+- `windows-amd64`: disabled in settings
+- `windows-arm64`: disabled in settings
 
 ## Versions and downloads
 
@@ -227,15 +231,12 @@ Let's be transparent about what is not (yet) covered:
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 81.4 MiB | `74e70464210bd8197f130a8ce27242435223e6ee1ab2c7566d4d4796c98efaf3` |
-| `toutwaf-linux-arm64.tar.gz` | linux | arm64 | 73.6 MiB | `e8e4d6c54f4a5c2c0fe398ae0c4178e003390a62e3daea8eb7b79074be50947d` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 82.3 MiB | `a5ef087ace0f73dc5d501e7672cc21f4e01ce4fc3cb01f3ad09e51fb3ed2ec99` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 74.1 MiB | `f5bfab14531f363ae95fa67c7ead375b1f8ff71eb45799394ce78c813a92e93e` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 90.4 MiB | `af5e728f015ec77dc9505e571c9f79fec45be782a0cb4ec4199c995637fce472` |
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.3.0-dev` | 2026-10-14T23:23:46Z | **current** | `releases/0.3.0-dev/` |
+| `0.3.0-dev` | 2026-10-18T02:02:18Z | **current** | `releases/0.3.0-dev/` |
 | `0.2.0-dev.9` | 2026-10-06T19:53:00Z | available | `releases/0.2.0-dev.9/` |
 | `0.2.0-dev.8` | 2026-10-05T17:24:59Z | available | `releases/0.2.0-dev.8/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | available | `releases/0.2.0-dev.7/` |
