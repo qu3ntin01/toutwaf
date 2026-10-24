@@ -1,14 +1,14 @@
+**English** | [Français](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Italiano](README.it.md) | [Português](README.pt.md) | [Nederlands](README.nl.md) | [Русский](README.ru.md) | [中文](README.zh.md) | [العربية](README.ar.md)
+
 # ToutWAF Backup - binaries (branch `toutwaf-backup`)
 
-This branch holds only **signed binaries** of ToutWAF Backup (backup server and client, one `toutwaf-backup` executable) and their installers. There is no source code here.
-
-Francais: [README.md](README.md)
+This branch holds only **signed binaries** of ToutWAF Backup (backup server and client, one `toutwaf-backup` executable) and their installers. There is no source code here. The installers and the command line speak ten languages; the translations are machine-written and not reviewed by native speakers.
 
 ## Available version
 
 | Version | Channel | Build | Published |
 |---|---|---|---|
-| `0.1.0-dev` | dev | `8965b7890a92` | 2026-10-23 |
+| `0.1.1` | dev | `0270440dc7e0` | 2026-10-24 |
 
 ## Install
 
@@ -29,12 +29,14 @@ irm https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup/install.ps1 -O
 
 Mirror if the first host is unreachable: `https://raw.githubusercontent.com/qu3ntin01/toutwaf/toutwaf-backup` (`--base-url` or `TOUTWAF_BACKUP_BASE_URL` to choose).
 
+Language of the installer: `--lang fr` (or `--es`, `--de` ...; `-Lang fr` on Windows), otherwise the language of your system, in a UTF-8 terminal.
+
 ## Verify a release
 
 `releases/<version>/SHA256SUMS` lists the SHA-256 of the archives; `SHA256SUMS.sig` is the Ed25519 signature (base64) of that file. The public key is `release.pub` (the same key as the ToutWAF product: `ebd2a20ce5a5650f`). The installers verify the signature, then the hash, before installing anything.
 
 ```sh
-V=0.1.0-dev
+V=0.1.1
 cd releases/$V
 base64 -d SHA256SUMS.sig > sig.bin
 ( printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; base64 -d ../../release.pub ) > pub.der
