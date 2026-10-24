@@ -1,0 +1,16 @@
+{
+  "channel": "dev",
+  "version": "0.1.0-dev",
+  "build": "8965b7890a92",
+  "released_at": "2026-10-23T23:55:16Z",
+  "min_installer": "1",
+  "public_key": "V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=",
+  "public_key_id": "ebd2a20ce5a5650f",
+  "notes_url": "https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup/CHANGELOG.md",
+  "assets": [
+    {"name": "toutwaf-backup-linux-amd64.tar.gz", "os": "linux", "arch": "amd64", "size": 4107026, "sha256": "8ceb4c71002337f513ced0db9a82343f80b58c8d6f50a4c75f0030bc15f7f076"},
+    {"name": "toutwaf-backup-linux-arm64.tar.gz", "os": "linux", "arch": "arm64", "size": 3737341, "sha256": "ed57199d95eff70208390fad5c99824a2bdc0311fdcd52aac6041ed623ac4d8c"},
+    {"name": "toutwaf-backup-windows-amd64.zip", "os": "windows", "arch": "amd64", "size": 4095305, "sha256": "1fa588ac9208b310694c15404d6166971d640323ee26c8da3b30043d66ceb077"}
+  ],
+  "yanked": []
+}
