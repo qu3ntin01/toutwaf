@@ -3,7 +3,13 @@
 Format: [Keep a Changelog](https://keepachangelog.com). Versions follow SemVer. The repository format version (see `docs/ARCHITECTURE.md`) and the
 API version (`/api/v1`) change independently of the program version and are never changed incompatibly within a major version.
 
-## [0.1.1] - unreleased
+## [0.1.2] - 2026-10-24
+
+### Fixed
+- Dashboard: the 30-day backup calendar drew huge cells stretched to the width of the card; the cells are now fixed squares (20 px, 18 px on a phone), left aligned.
+- A stray "null" appeared in the "Resume from S3" dialog (a conditional child passed to the native `append`). The interface now leaves out `null`, `undefined` and `false` children everywhere, and a browser sweep (`tools/e2e-ui/sweep.js`) opens every dialog and page in each of the ten languages and fails on "null", "undefined", "NaN" or "[object Object]".
+
+## [0.1.1] - 2026-10-24
 
 ### Added
 - **New web interface** with the ToutWAF design system (aurora theme, glass cards, grouped sidebar, light/dark/system, reduced motion, no CDN, ToutWAF icons and logo): dashboard with gauges, history charts, dedup and compression

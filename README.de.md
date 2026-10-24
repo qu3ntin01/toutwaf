@@ -8,7 +8,7 @@ Dieser Branch enthält nur **signierte Programme** von ToutWAF Backup (Backup-Se
 
 | Version | Kanal | Build | Veröffentlicht |
 |---|---|---|---|
-| `0.1.1` | dev | `0270440dc7e0` | 2026-10-24 |
+| `0.1.2` | dev | `8efe447af258` | 2026-10-24 |
 
 ## Installieren
 
@@ -36,7 +36,7 @@ Sprache des Installers: `--lang fr` (oder `--es`, `--de` ...; unter Windows `-La
 `releases/<Version>/SHA256SUMS` listet die SHA-256-Werte der Archive auf; `SHA256SUMS.sig` ist die Ed25519-Signatur (Base64) dieser Datei. Der öffentliche Schlüssel ist `release.pub` (derselbe wie beim Produkt ToutWAF: `ebd2a20ce5a5650f`). Die Installer prüfen die Signatur, dann den Hash, bevor sie irgendetwas installieren.
 
 ```sh
-V=0.1.1
+V=0.1.2
 cd releases/$V
 base64 -d SHA256SUMS.sig > sig.bin
 ( printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; base64 -d ../../release.pub ) > pub.der

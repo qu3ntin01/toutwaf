@@ -10,7 +10,7 @@
 
 | الإصدار | القناة | البناء | تاريخ النشر |
 |---|---|---|---|
-| `0.1.1` | dev | `0270440dc7e0` | 2026-10-24 |
+| `0.1.2` | dev | `8efe447af258` | 2026-10-24 |
 
 ## التثبيت
 
@@ -38,7 +38,7 @@ irm https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup/install.ps1 -O
 يسرد `releases/<الإصدار>/SHA256SUMS` قيم SHA-256 للأرشيفات؛ و`SHA256SUMS.sig` هو توقيع Ed25519 (base64) لذلك الملف. المفتاح العام هو `release.pub` (نفسه لمنتج ToutWAF: `ebd2a20ce5a5650f`). تتحقق المثبّتات من التوقيع ثم من التجزئة قبل تثبيت أي شيء.
 
 ```sh
-V=0.1.1
+V=0.1.2
 cd releases/$V
 base64 -d SHA256SUMS.sig > sig.bin
 ( printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; base64 -d ../../release.pub ) > pub.der

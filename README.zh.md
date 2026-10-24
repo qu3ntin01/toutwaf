@@ -8,7 +8,7 @@
 
 | 版本 | 渠道 | 构建 | 发布日期 |
 |---|---|---|---|
-| `0.1.1` | dev | `0270440dc7e0` | 2026-10-24 |
+| `0.1.2` | dev | `8efe447af258` | 2026-10-24 |
 
 ## 安装
 
@@ -36,7 +36,7 @@ irm https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup/install.ps1 -O
 `releases/<版本>/SHA256SUMS` 列出各压缩包的 SHA-256；`SHA256SUMS.sig` 是该文件的 Ed25519 签名（base64）。公钥是 `release.pub`（与 ToutWAF 产品相同：`ebd2a20ce5a5650f`）。安装程序在安装任何内容之前，先验证签名，再验证哈希。
 
 ```sh
-V=0.1.1
+V=0.1.2
 cd releases/$V
 base64 -d SHA256SUMS.sig > sig.bin
 ( printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; base64 -d ../../release.pub ) > pub.der
