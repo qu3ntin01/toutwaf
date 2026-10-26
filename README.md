@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.3.3-dev** · build `f7cbf0205867` · canal **bêta (dev)** · 2026-10-18
+**Version 0.4.0-dev** · build `8cbf886c7076` · canal **bêta (dev)** · 2026-10-26
 
 </div>
 
@@ -226,16 +226,17 @@ Cibles non compilées pour cette version :
 
 ## Versions et téléchargements
 
-**Version 0.3.3-dev**
+**Version 0.4.0-dev**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 94.2 MiB | `6a1256cdf556bc21d406d71a9227653fa6a31e963f2d689522527a090f25c6db` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 89.5 MiB | `882fdb3ba7c2549c005f9f70653c3f85dfaf506ec574e521be2924998225b228` |
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.3.3-dev` | 2026-10-18T15:01:19Z | **actuelle** | `releases/0.3.3-dev/` |
+| `0.4.0-dev` | 2026-10-26T11:10:41Z | **actuelle** | `releases/0.4.0-dev/` |
+| `0.3.3-dev` | 2026-10-18T15:01:19Z | disponible | `releases/0.3.3-dev/` |
 | `0.3.2-dev` | 2026-10-18T10:42:15Z | disponible | `releases/0.3.2-dev/` |
 | `0.3.1-dev` | 2026-10-18T07:32:26Z | disponible | `releases/0.3.1-dev/` |
 | `0.3.0-dev` | 2026-10-18T02:02:18Z | disponible | `releases/0.3.0-dev/` |
@@ -252,7 +253,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.3.3-dev && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.4.0-dev && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Vérifier une version
@@ -260,7 +261,7 @@ cd releases/0.3.3-dev && sha256sum -c SHA256SUMS --ignore-missing
 À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `ebd2a20ce5a5650f`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
 
 ```sh
-V=0.3.3-dev; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
+V=0.4.0-dev; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/dev/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
