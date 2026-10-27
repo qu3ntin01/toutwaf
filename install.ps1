@@ -42,6 +42,8 @@ param(
     [string]$BaseUrl = '',
     [switch]$ViaRepo,                         # try ToutWAF's own package repository for Windows first (falls back to GitLab, then GitHub)
     [string]$ZipPath = '',
+    [string[]]$ExtrasPath = @(),              # the extras of the release (Windows agents, antivirus programs) from local files: toutwaf-extras*.tar.gz (offline)
+    [switch]$NoExtras,                       # do not download nor install the extras (also $env:TOUTWAF_NO_EXTRAS=1)
     [string]$CpUrl = '',
     [string]$EnrollToken = '',
     [string]$NodeToken = '',
@@ -399,6 +401,22 @@ $script:Catalog = @{
         'db_sum_backup' = 'A verified pg_dump runs every night (7 kept); status in the console, Sant\u00e9'
         'db_sum_nobackup' = 'No automatic database backup: schedule pg_dump or use the backup of your database provider'
         'db_sum_sqlite' = 'Database: SQLite, one file on this machine (small installation). Move to PostgreSQL later: toutwaf-cp db migrate'
+        's_extras' = 'Extras: Windows agent and antivirus programs'
+        's_extras_ok' = 'Extras installed: {0} programs in {1}'
+        's_extras_sha' = 'Extras verified: {0} file(s), {1} MiB (SHA-256 and signature)'
+        's_extras_unchecked' = 'Extras taken as given, without a SHA256SUMS to check them: {0}'
+        'w_extras_dl' = 'The extras could not be downloaded ({0}). ToutWAF works without them, but this console will not offer Windows nor the antivirus until they are installed.'
+        'w_extras_sum' = 'The extras {0} do not match their SHA-256 in the signed SHA256SUMS: they were NOT installed.'
+        'w_extras_bad' = 'The extras file {0} is not a valid extras archive: it was NOT installed.'
+        'w_extras_ver' = 'The extras are for version {0}, this installation is {1}: they were NOT installed.'
+        'w_extras_inc' = 'The release lists {0} part(s) of the extras but says it has {1}: the publication is damaged, the extras were NOT installed.'
+        'w_extras_nofile' = 'The extras file {0} does not exist.'
+        'w_extras_none' = 'This release carries no extras: this console will not offer Windows nor the antivirus.'
+        'w_extras_todo' = 'Extras not installed. When the network allows it, run as root: {0}'
+        'extras_needs_cp' = 'The extras belong to the control plane: it is not installed on this machine.'
+        'extras_other_release' = 'The published release ({0}) is not the installed one ({1}): the extras come with it. Run --update.'
+        'st_extras_ok' = 'Extras: installed (Windows agent, antivirus programs)'
+        'st_extras_none' = 'Extras missing: Windows and the antivirus are not offered. Run as root: {0}'
     }
     'fr' = @{
         'tagline' = 'Protection des applications web et des API'
@@ -677,6 +695,22 @@ $script:Catalog = @{
         'db_sum_backup' = 'Un pg_dump v\u00e9rifi\u00e9 s''ex\u00e9cute chaque nuit (7 conserv\u00e9s) ; \u00e9tat dans la console, Sant\u00e9'
         'db_sum_nobackup' = 'Pas de sauvegarde automatique de la base : planifiez pg_dump ou utilisez la sauvegarde de votre h\u00e9bergeur de base'
         'db_sum_sqlite' = 'Base de donn\u00e9es : SQLite, un fichier sur cette machine (petite installation). Passer \u00e0 PostgreSQL plus tard : toutwaf-cp db migrate'
+        's_extras' = 'Extras : agent Windows et programmes de l''antivirus'
+        's_extras_ok' = 'Extras install\u00e9s : {0} programmes dans {1}'
+        's_extras_sha' = 'Extras v\u00e9rifi\u00e9s : {0} fichier(s), {1} Mio (SHA-256 et signature)'
+        's_extras_unchecked' = 'Extras pris tels quels, sans SHA256SUMS pour les v\u00e9rifier : {0}'
+        'w_extras_dl' = 'Les extras n''ont pas pu \u00eatre t\u00e9l\u00e9charg\u00e9s ({0}). ToutWAF fonctionne sans eux, mais cette console ne proposera ni Windows ni l''antivirus tant qu''ils ne sont pas install\u00e9s.'
+        'w_extras_sum' = 'Les extras {0} ne correspondent pas \u00e0 leur SHA-256 du SHA256SUMS sign\u00e9 : ils n''ont PAS \u00e9t\u00e9 install\u00e9s.'
+        'w_extras_bad' = 'Le fichier d''extras {0} n''est pas une archive d''extras valide : il n''a PAS \u00e9t\u00e9 install\u00e9.'
+        'w_extras_ver' = 'Les extras sont de la version {0}, cette installation est en {1} : ils n''ont PAS \u00e9t\u00e9 install\u00e9s.'
+        'w_extras_inc' = 'La version liste {0} partie(s) des extras mais annonce {1} : la publication est ab\u00eem\u00e9e, les extras n''ont PAS \u00e9t\u00e9 install\u00e9s.'
+        'w_extras_nofile' = 'Le fichier d''extras {0} n''existe pas.'
+        'w_extras_none' = 'Cette version ne contient pas d''extras : cette console ne proposera ni Windows ni l''antivirus.'
+        'w_extras_todo' = 'Extras non install\u00e9s. Quand le r\u00e9seau le permet, lancez en root : {0}'
+        'extras_needs_cp' = 'Les extras appartiennent au plan de contr\u00f4le : il n''est pas install\u00e9 sur cette machine.'
+        'extras_other_release' = 'La version publi\u00e9e ({0}) n''est pas celle qui est install\u00e9e ({1}) : les extras viennent avec elle. Lancez --update.'
+        'st_extras_ok' = 'Extras : install\u00e9s (agent Windows, programmes de l''antivirus)'
+        'st_extras_none' = 'Extras absents : Windows et l''antivirus ne sont pas propos\u00e9s. Lancez en root : {0}'
     }
     'es' = @{
         'tagline' = 'Protecci\u00f3n de aplicaciones web y API'
@@ -955,6 +989,22 @@ $script:Catalog = @{
         'db_sum_backup' = 'Cada noche se ejecuta un pg_dump verificado (se conservan 7); estado en la consola, Salud'
         'db_sum_nobackup' = 'Sin copia autom\u00e1tica de la base: programe pg_dump o use la copia de su proveedor de base de datos'
         'db_sum_sqlite' = 'Base de datos: SQLite, un archivo en esta m\u00e1quina (instalaci\u00f3n peque\u00f1a). Pasar a PostgreSQL m\u00e1s tarde: toutwaf-cp db migrate'
+        's_extras' = 'Extras: agente de Windows y programas del antivirus'
+        's_extras_ok' = 'Extras instalados: {0} programas en {1}'
+        's_extras_sha' = 'Extras verificados: {0} archivo(s), {1} MiB (SHA-256 y firma)'
+        's_extras_unchecked' = 'Extras tomados tal cual, sin SHA256SUMS para verificarlos: {0}'
+        'w_extras_dl' = 'No se pudieron descargar los extras ({0}). ToutWAF funciona sin ellos, pero esta consola no ofrecer\u00e1 Windows ni el antivirus hasta que se instalen.'
+        'w_extras_sum' = 'Los extras {0} no coinciden con su SHA-256 del SHA256SUMS firmado: NO se instalaron.'
+        'w_extras_bad' = 'El archivo de extras {0} no es un archivo de extras v\u00e1lido: NO se instal\u00f3.'
+        'w_extras_ver' = 'Los extras son de la versi\u00f3n {0}, esta instalaci\u00f3n es {1}: NO se instalaron.'
+        'w_extras_inc' = 'La versi\u00f3n lista {0} parte(s) de los extras pero indica {1}: la publicaci\u00f3n est\u00e1 da\u00f1ada, los extras NO se instalaron.'
+        'w_extras_nofile' = 'El archivo de extras {0} no existe.'
+        'w_extras_none' = 'Esta versi\u00f3n no incluye extras: esta consola no ofrecer\u00e1 Windows ni el antivirus.'
+        'w_extras_todo' = 'Extras no instalados. Cuando la red lo permita, ejecute como root: {0}'
+        'extras_needs_cp' = 'Los extras pertenecen al plano de control: no est\u00e1 instalado en esta m\u00e1quina.'
+        'extras_other_release' = 'La versi\u00f3n publicada ({0}) no es la instalada ({1}): los extras vienen con ella. Ejecute --update.'
+        'st_extras_ok' = 'Extras: instalados (agente de Windows, programas del antivirus)'
+        'st_extras_none' = 'Extras ausentes: Windows y el antivirus no se ofrecen. Ejecute como root: {0}'
     }
     'de' = @{
         'tagline' = 'Schutz f\u00fcr Webanwendungen und APIs'
@@ -1233,6 +1283,22 @@ $script:Catalog = @{
         'db_sum_backup' = 'Jede Nacht l\u00e4uft ein gepr\u00fcftes pg_dump (7 bleiben erhalten); Status in der Konsole, Sant\u00e9'
         'db_sum_nobackup' = 'Keine automatische Datenbanksicherung: planen Sie pg_dump oder nutzen Sie die Sicherung Ihres Datenbankanbieters'
         'db_sum_sqlite' = 'Datenbank: SQLite, eine Datei auf diesem Rechner (kleine Installation). Sp\u00e4ter zu PostgreSQL wechseln: toutwaf-cp db migrate'
+        's_extras' = 'Extras: Windows-Agent und Antivirus-Programme'
+        's_extras_ok' = 'Extras installiert: {0} Programme in {1}'
+        's_extras_sha' = 'Extras gepr\u00fcft: {0} Datei(en), {1} MiB (SHA-256 und Signatur)'
+        's_extras_unchecked' = 'Extras unver\u00e4ndert \u00fcbernommen, ohne SHA256SUMS zur Pr\u00fcfung: {0}'
+        'w_extras_dl' = 'Die Extras konnten nicht heruntergeladen werden ({0}). ToutWAF l\u00e4uft auch ohne sie, doch diese Konsole bietet weder Windows noch den Virenschutz an, bis sie installiert sind.'
+        'w_extras_sum' = 'Die Extras {0} stimmen nicht mit ihrem SHA-256 im signierten SHA256SUMS \u00fcberein: sie wurden NICHT installiert.'
+        'w_extras_bad' = 'Die Extras-Datei {0} ist kein g\u00fcltiges Extras-Archiv: sie wurde NICHT installiert.'
+        'w_extras_ver' = 'Die Extras geh\u00f6ren zu Version {0}, diese Installation ist {1}: sie wurden NICHT installiert.'
+        'w_extras_inc' = 'Die Version listet {0} Teil(e) der Extras, nennt aber {1}: die Ver\u00f6ffentlichung ist besch\u00e4digt, die Extras wurden NICHT installiert.'
+        'w_extras_nofile' = 'Die Extras-Datei {0} existiert nicht.'
+        'w_extras_none' = 'Diese Version enth\u00e4lt keine Extras: diese Konsole bietet weder Windows noch den Virenschutz an.'
+        'w_extras_todo' = 'Extras nicht installiert. Sobald das Netz es erlaubt, als root ausf\u00fchren: {0}'
+        'extras_needs_cp' = 'Die Extras geh\u00f6ren zur Control Plane: sie ist auf diesem Rechner nicht installiert.'
+        'extras_other_release' = 'Die ver\u00f6ffentlichte Version ({0}) ist nicht die installierte ({1}): die Extras kommen mit ihr. --update ausf\u00fchren.'
+        'st_extras_ok' = 'Extras: installiert (Windows-Agent, Antivirus-Programme)'
+        'st_extras_none' = 'Extras fehlen: Windows und der Virenschutz werden nicht angeboten. Als root ausf\u00fchren: {0}'
     }
     'it' = @{
         'tagline' = 'Protezione di applicazioni web e API'
@@ -1511,6 +1577,22 @@ $script:Catalog = @{
         'db_sum_backup' = 'Ogni notte gira un pg_dump verificato (se ne conservano 7); stato nella console, Sant\u00e9'
         'db_sum_nobackup' = 'Nessun backup automatico del database: pianifica pg_dump o usa il backup del tuo fornitore di database'
         'db_sum_sqlite' = 'Database: SQLite, un file su questa macchina (piccola installazione). Passare a PostgreSQL pi\u00f9 tardi: toutwaf-cp db migrate'
+        's_extras' = 'Extra: agente Windows e programmi dell''antivirus'
+        's_extras_ok' = 'Extra installati: {0} programmi in {1}'
+        's_extras_sha' = 'Extra verificati: {0} file, {1} MiB (SHA-256 e firma)'
+        's_extras_unchecked' = 'Extra usati cos\u00ec come sono, senza SHA256SUMS per verificarli: {0}'
+        'w_extras_dl' = 'Impossibile scaricare gli extra ({0}). ToutWAF funziona senza, ma questa console non proporr\u00e0 Windows n\u00e9 l''antivirus finch\u00e9 non saranno installati.'
+        'w_extras_sum' = 'Gli extra {0} non corrispondono al loro SHA-256 nel SHA256SUMS firmato: NON sono stati installati.'
+        'w_extras_bad' = 'Il file di extra {0} non \u00e8 un archivio di extra valido: NON \u00e8 stato installato.'
+        'w_extras_ver' = 'Gli extra sono della versione {0}, questa installazione \u00e8 {1}: NON sono stati installati.'
+        'w_extras_inc' = 'La versione elenca {0} parte/i degli extra ma ne dichiara {1}: la pubblicazione \u00e8 danneggiata, gli extra NON sono stati installati.'
+        'w_extras_nofile' = 'Il file di extra {0} non esiste.'
+        'w_extras_none' = 'Questa versione non contiene extra: questa console non proporr\u00e0 Windows n\u00e9 l''antivirus.'
+        'w_extras_todo' = 'Extra non installati. Quando la rete lo consente, eseguire come root: {0}'
+        'extras_needs_cp' = 'Gli extra appartengono al control plane: non \u00e8 installato su questa macchina.'
+        'extras_other_release' = 'La versione pubblicata ({0}) non \u00e8 quella installata ({1}): gli extra arrivano con essa. Eseguire --update.'
+        'st_extras_ok' = 'Extra: installati (agente Windows, programmi dell''antivirus)'
+        'st_extras_none' = 'Extra mancanti: Windows e l''antivirus non sono proposti. Eseguire come root: {0}'
     }
     'pt' = @{
         'tagline' = 'Prote\u00e7\u00e3o de aplica\u00e7\u00f5es web e APIs'
@@ -1789,6 +1871,22 @@ $script:Catalog = @{
         'db_sum_backup' = 'Todas as noites corre um pg_dump verificado (guardam-se 7); estado na consola, Sant\u00e9'
         'db_sum_nobackup' = 'Sem c\u00f3pia autom\u00e1tica da base: agende o pg_dump ou use a c\u00f3pia do seu fornecedor de base de dados'
         'db_sum_sqlite' = 'Base de dados: SQLite, um ficheiro nesta m\u00e1quina (instala\u00e7\u00e3o pequena). Passar para PostgreSQL mais tarde: toutwaf-cp db migrate'
+        's_extras' = 'Extras: agente Windows e programas do antiv\u00edrus'
+        's_extras_ok' = 'Extras instalados: {0} programas em {1}'
+        's_extras_sha' = 'Extras verificados: {0} ficheiro(s), {1} MiB (SHA-256 e assinatura)'
+        's_extras_unchecked' = 'Extras usados tal como est\u00e3o, sem SHA256SUMS para os verificar: {0}'
+        'w_extras_dl' = 'N\u00e3o foi poss\u00edvel transferir os extras ({0}). O ToutWAF funciona sem eles, mas esta consola n\u00e3o oferecer\u00e1 o Windows nem o antiv\u00edrus enquanto n\u00e3o estiverem instalados.'
+        'w_extras_sum' = 'Os extras {0} n\u00e3o correspondem ao seu SHA-256 no SHA256SUMS assinado: N\u00c3O foram instalados.'
+        'w_extras_bad' = 'O ficheiro de extras {0} n\u00e3o \u00e9 um arquivo de extras v\u00e1lido: N\u00c3O foi instalado.'
+        'w_extras_ver' = 'Os extras s\u00e3o da vers\u00e3o {0}, esta instala\u00e7\u00e3o \u00e9 {1}: N\u00c3O foram instalados.'
+        'w_extras_inc' = 'A vers\u00e3o lista {0} parte(s) dos extras mas indica {1}: a publica\u00e7\u00e3o est\u00e1 danificada, os extras N\u00c3O foram instalados.'
+        'w_extras_nofile' = 'O ficheiro de extras {0} n\u00e3o existe.'
+        'w_extras_none' = 'Esta vers\u00e3o n\u00e3o inclui extras: esta consola n\u00e3o oferecer\u00e1 o Windows nem o antiv\u00edrus.'
+        'w_extras_todo' = 'Extras n\u00e3o instalados. Quando a rede o permitir, execute como root: {0}'
+        'extras_needs_cp' = 'Os extras pertencem ao plano de controlo: n\u00e3o est\u00e1 instalado nesta m\u00e1quina.'
+        'extras_other_release' = 'A vers\u00e3o publicada ({0}) n\u00e3o \u00e9 a instalada ({1}): os extras v\u00eam com ela. Execute --update.'
+        'st_extras_ok' = 'Extras: instalados (agente Windows, programas do antiv\u00edrus)'
+        'st_extras_none' = 'Extras em falta: o Windows e o antiv\u00edrus n\u00e3o s\u00e3o oferecidos. Execute como root: {0}'
     }
     'nl' = @{
         'tagline' = 'Bescherming van webapplicaties en API''s'
@@ -2067,6 +2165,22 @@ $script:Catalog = @{
         'db_sum_backup' = 'Elke nacht draait een gecontroleerde pg_dump (7 bewaard); status in de console, Sant\u00e9'
         'db_sum_nobackup' = 'Geen automatische databaseback-up: plan pg_dump in of gebruik de back-up van uw databaseaanbieder'
         'db_sum_sqlite' = 'Database: SQLite, \u00e9\u00e9n bestand op deze machine (kleine installatie). Later overstappen naar PostgreSQL: toutwaf-cp db migrate'
+        's_extras' = 'Extra''s: Windows-agent en antivirusprogramma''s'
+        's_extras_ok' = 'Extra''s ge\u00efnstalleerd: {0} programma''s in {1}'
+        's_extras_sha' = 'Extra''s gecontroleerd: {0} bestand(en), {1} MiB (SHA-256 en handtekening)'
+        's_extras_unchecked' = 'Extra''s zoals ze zijn overgenomen, zonder SHA256SUMS om ze te controleren: {0}'
+        'w_extras_dl' = 'De extra''s konden niet worden gedownload ({0}). ToutWAF werkt zonder, maar deze console biedt geen Windows of antivirus aan zolang ze niet ge\u00efnstalleerd zijn.'
+        'w_extras_sum' = 'De extra''s {0} komen niet overeen met hun SHA-256 in de ondertekende SHA256SUMS: ze zijn NIET ge\u00efnstalleerd.'
+        'w_extras_bad' = 'Het extra-bestand {0} is geen geldig extra-archief: het is NIET ge\u00efnstalleerd.'
+        'w_extras_ver' = 'De extra''s zijn van versie {0}, deze installatie is {1}: ze zijn NIET ge\u00efnstalleerd.'
+        'w_extras_inc' = 'De versie vermeldt {0} deel/delen van de extra''s maar zegt er {1} te hebben: de publicatie is beschadigd, de extra''s zijn NIET ge\u00efnstalleerd.'
+        'w_extras_nofile' = 'Het extra-bestand {0} bestaat niet.'
+        'w_extras_none' = 'Deze versie bevat geen extra''s: deze console biedt geen Windows of antivirus aan.'
+        'w_extras_todo' = 'Extra''s niet ge\u00efnstalleerd. Zodra het netwerk het toelaat, voer uit als root: {0}'
+        'extras_needs_cp' = 'De extra''s horen bij de control plane: die is niet ge\u00efnstalleerd op deze machine.'
+        'extras_other_release' = 'De gepubliceerde versie ({0}) is niet de ge\u00efnstalleerde ({1}): de extra''s komen daarmee mee. Voer --update uit.'
+        'st_extras_ok' = 'Extra''s: ge\u00efnstalleerd (Windows-agent, antivirusprogramma''s)'
+        'st_extras_none' = 'Extra''s ontbreken: Windows en antivirus worden niet aangeboden. Voer uit als root: {0}'
     }
     'ru' = @{
         'tagline' = '\u0417\u0430\u0449\u0438\u0442\u0430 \u0432\u0435\u0431-\u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0439 \u0438 API'
@@ -2345,6 +2459,22 @@ $script:Catalog = @{
         'db_sum_backup' = '\u041a\u0430\u0436\u0434\u0443\u044e \u043d\u043e\u0447\u044c \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442\u0441\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u043d\u044b\u0439 pg_dump (\u0445\u0440\u0430\u043d\u0438\u0442\u0441\u044f 7); \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u0435 \u0432 \u043a\u043e\u043d\u0441\u043e\u043b\u0438, Sant\u00e9'
         'db_sum_nobackup' = '\u0410\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u043e\u0439 \u043a\u043e\u043f\u0438\u0438 \u0431\u0430\u0437\u044b \u043d\u0435\u0442: \u0437\u0430\u043f\u043b\u0430\u043d\u0438\u0440\u0443\u0439\u0442\u0435 pg_dump \u0438\u043b\u0438 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 \u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0432\u0430\u0448\u0435\u0433\u043e \u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0430 \u0411\u0414'
         'db_sum_sqlite' = '\u0411\u0430\u0437\u0430 \u0434\u0430\u043d\u043d\u044b\u0445: SQLite, \u043e\u0434\u0438\u043d \u0444\u0430\u0439\u043b \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435 (\u043d\u0435\u0431\u043e\u043b\u044c\u0448\u0430\u044f \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430). \u041f\u043e\u0437\u0436\u0435 \u043f\u0435\u0440\u0435\u0439\u0442\u0438 \u043d\u0430 PostgreSQL: toutwaf-cp db migrate'
+        's_extras' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f: \u0430\u0433\u0435\u043d\u0442 \u0434\u043b\u044f Windows \u0438 \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b \u0430\u043d\u0442\u0438\u0432\u0438\u0440\u0443\u0441\u0430'
+        's_extras_ok' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b: {0} \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c \u0432 {1}'
+        's_extras_sha' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u044b: \u0444\u0430\u0439\u043b\u043e\u0432 {0}, {1} \u041c\u0438\u0411 (SHA-256 \u0438 \u043f\u043e\u0434\u043f\u0438\u0441\u044c)'
+        's_extras_unchecked' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u0432\u0437\u044f\u0442\u044b \u043a\u0430\u043a \u0435\u0441\u0442\u044c, \u0431\u0435\u0437 SHA256SUMS \u0434\u043b\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438: {0}'
+        'w_extras_dl' = '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f ({0}). ToutWAF \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u0431\u0435\u0437 \u043d\u0438\u0445, \u043d\u043e \u044d\u0442\u0430 \u043a\u043e\u043d\u0441\u043e\u043b\u044c \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0438\u0442 Windows \u0438 \u0430\u043d\u0442\u0438\u0432\u0438\u0440\u0443\u0441, \u043f\u043e\u043a\u0430 \u043e\u043d\u0438 \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b.'
+        'w_extras_sum' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f {0} \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0442 \u0441\u043e \u0441\u0432\u043e\u0435\u0439 \u0441\u0443\u043c\u043c\u043e\u0439 SHA-256 \u0432 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u043e\u043c SHA256SUMS: \u043e\u043d\u0438 \u041d\u0415 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b.'
+        'w_extras_bad' = '\u0424\u0430\u0439\u043b \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0439 {0} \u043d\u0435 \u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0434\u043e\u043f\u0443\u0441\u0442\u0438\u043c\u044b\u043c \u0430\u0440\u0445\u0438\u0432\u043e\u043c \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0439: \u043e\u043d \u041d\u0415 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d.'
+        'w_extras_ver' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u043e\u0442 \u0432\u0435\u0440\u0441\u0438\u0438 {0}, \u0430 \u044d\u0442\u0430 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u2014 {1}: \u043e\u043d\u0438 \u041d\u0415 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b.'
+        'w_extras_inc' = '\u0420\u0435\u043b\u0438\u0437 \u043f\u0435\u0440\u0435\u0447\u0438\u0441\u043b\u044f\u0435\u0442 {0} \u0447\u0430\u0441\u0442\u0435\u0439 \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0439, \u043d\u043e \u0437\u0430\u044f\u0432\u043b\u044f\u0435\u0442 {1}: \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044f \u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0435\u043d\u0430, \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u041d\u0415 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b.'
+        'w_extras_nofile' = '\u0424\u0430\u0439\u043b \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0439 {0} \u043d\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442.'
+        'w_extras_none' = '\u0412 \u044d\u0442\u043e\u043c \u0440\u0435\u043b\u0438\u0437\u0435 \u043d\u0435\u0442 \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0439: \u044d\u0442\u0430 \u043a\u043e\u043d\u0441\u043e\u043b\u044c \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0438\u0442 Windows \u0438 \u0430\u043d\u0442\u0438\u0432\u0438\u0440\u0443\u0441.'
+        'w_extras_todo' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b. \u041a\u043e\u0433\u0434\u0430 \u0441\u0435\u0442\u044c \u043f\u043e\u0437\u0432\u043e\u043b\u0438\u0442, \u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u043e\u0442 root: {0}'
+        'extras_needs_cp' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u043e\u0442\u043d\u043e\u0441\u044f\u0442\u0441\u044f \u043a control plane: \u043e\u043d \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435.'
+        'extras_other_release' = '\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u0440\u0435\u043b\u0438\u0437 ({0}) \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442 \u0441 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u044b\u043c ({1}): \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u0438\u0434\u0443\u0442 \u0432\u043c\u0435\u0441\u0442\u0435 \u0441 \u043d\u0438\u043c. \u0412\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 --update.'
+        'st_extras_ok' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f: \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b (\u0430\u0433\u0435\u043d\u0442 \u0434\u043b\u044f Windows, \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b \u0430\u043d\u0442\u0438\u0432\u0438\u0440\u0443\u0441\u0430)'
+        'st_extras_none' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044e\u0442: Windows \u0438 \u0430\u043d\u0442\u0438\u0432\u0438\u0440\u0443\u0441 \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u0430\u0433\u0430\u044e\u0442\u0441\u044f. \u0412\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u043e\u0442 root: {0}'
     }
     'zh' = @{
         'tagline' = 'Web \u5e94\u7528\u4e0e API \u9632\u62a4'
@@ -2623,6 +2753,22 @@ $script:Catalog = @{
         'db_sum_backup' = '\u6bcf\u665a\u8fd0\u884c\u7ecf\u9a8c\u8bc1\u7684 pg_dump\uff08\u4fdd\u7559 7 \u4efd\uff09\uff1b\u72b6\u6001\u89c1\u63a7\u5236\u53f0 Sant\u00e9'
         'db_sum_nobackup' = '\u6ca1\u6709\u81ea\u52a8\u6570\u636e\u5e93\u5907\u4efd\uff1a\u8bf7\u5b89\u6392 pg_dump \u6216\u4f7f\u7528\u6570\u636e\u5e93\u63d0\u4f9b\u5546\u7684\u5907\u4efd'
         'db_sum_sqlite' = '\u6570\u636e\u5e93\uff1aSQLite\uff0c\u672c\u673a\u4e0a\u7684\u4e00\u4e2a\u6587\u4ef6\uff08\u5c0f\u578b\u5b89\u88c5\uff09\u3002\u4ee5\u540e\u53ef\u8fc1\u79fb\u5230 PostgreSQL\uff1atoutwaf-cp db migrate'
+        's_extras' = '\u9644\u52a0\u5305\uff1aWindows \u4ee3\u7406\u548c\u6740\u6bd2\u7a0b\u5e8f'
+        's_extras_ok' = '\u9644\u52a0\u5305\u5df2\u5b89\u88c5\uff1a{0} \u4e2a\u7a0b\u5e8f\uff0c\u4f4d\u4e8e {1}'
+        's_extras_sha' = '\u9644\u52a0\u5305\u5df2\u6821\u9a8c\uff1a{0} \u4e2a\u6587\u4ef6\uff0c{1} MiB\uff08SHA-256 \u4e0e\u7b7e\u540d\uff09'
+        's_extras_unchecked' = '\u9644\u52a0\u5305\u6309\u539f\u6837\u4f7f\u7528\uff0c\u6ca1\u6709 SHA256SUMS \u53ef\u4f9b\u6821\u9a8c\uff1a{0}'
+        'w_extras_dl' = '\u65e0\u6cd5\u4e0b\u8f7d\u9644\u52a0\u5305\uff08{0}\uff09\u3002ToutWAF \u6ca1\u6709\u5b83\u4eec\u4e5f\u80fd\u8fd0\u884c\uff0c\u4f46\u5728\u5b89\u88c5\u4e4b\u524d\uff0c\u6b64\u63a7\u5236\u53f0\u4e0d\u4f1a\u63d0\u4f9b Windows \u548c\u6740\u6bd2\u529f\u80fd\u3002'
+        'w_extras_sum' = '\u9644\u52a0\u5305 {0} \u4e0e\u5df2\u7b7e\u540d SHA256SUMS \u4e2d\u7684 SHA-256 \u4e0d\u4e00\u81f4\uff1a\u672a\u5b89\u88c5\u3002'
+        'w_extras_bad' = '\u9644\u52a0\u5305\u6587\u4ef6 {0} \u4e0d\u662f\u6709\u6548\u7684\u9644\u52a0\u5305\u5f52\u6863\uff1a\u672a\u5b89\u88c5\u3002'
+        'w_extras_ver' = '\u9644\u52a0\u5305\u9002\u7528\u4e8e\u7248\u672c {0}\uff0c\u800c\u6b64\u5b89\u88c5\u4e3a {1}\uff1a\u672a\u5b89\u88c5\u3002'
+        'w_extras_inc' = '\u8be5\u7248\u672c\u5217\u51fa\u4e86\u9644\u52a0\u5305\u7684 {0} \u4e2a\u90e8\u5206\uff0c\u4f46\u58f0\u660e\u5171\u6709 {1} \u4e2a\uff1a\u53d1\u5e03\u5df2\u635f\u574f\uff0c\u672a\u5b89\u88c5\u9644\u52a0\u5305\u3002'
+        'w_extras_nofile' = '\u9644\u52a0\u5305\u6587\u4ef6 {0} \u4e0d\u5b58\u5728\u3002'
+        'w_extras_none' = '\u6b64\u7248\u672c\u4e0d\u542b\u9644\u52a0\u5305\uff1a\u6b64\u63a7\u5236\u53f0\u4e0d\u4f1a\u63d0\u4f9b Windows \u548c\u6740\u6bd2\u529f\u80fd\u3002'
+        'w_extras_todo' = '\u9644\u52a0\u5305\u672a\u5b89\u88c5\u3002\u7f51\u7edc\u53ef\u7528\u65f6\u8bf7\u4ee5 root \u8fd0\u884c\uff1a{0}'
+        'extras_needs_cp' = '\u9644\u52a0\u5305\u5c5e\u4e8e\u63a7\u5236\u5e73\u9762\uff1a\u672c\u673a\u672a\u5b89\u88c5\u63a7\u5236\u5e73\u9762\u3002'
+        'extras_other_release' = '\u5df2\u53d1\u5e03\u7684\u7248\u672c\uff08{0}\uff09\u4e0d\u662f\u5df2\u5b89\u88c5\u7684\u7248\u672c\uff08{1}\uff09\uff1a\u9644\u52a0\u5305\u968f\u5b83\u4e00\u8d77\u63d0\u4f9b\u3002\u8bf7\u8fd0\u884c --update\u3002'
+        'st_extras_ok' = '\u9644\u52a0\u5305\uff1a\u5df2\u5b89\u88c5\uff08Windows \u4ee3\u7406\u3001\u6740\u6bd2\u7a0b\u5e8f\uff09'
+        'st_extras_none' = '\u7f3a\u5c11\u9644\u52a0\u5305\uff1a\u4e0d\u63d0\u4f9b Windows \u548c\u6740\u6bd2\u529f\u80fd\u3002\u8bf7\u4ee5 root \u8fd0\u884c\uff1a{0}'
     }
     'ar' = @{
         'tagline' = '\u062d\u0645\u0627\u064a\u0629 \u062a\u0637\u0628\u064a\u0642\u0627\u062a \u0627\u0644\u0648\u064a\u0628 \u0648\u0648\u0627\u062c\u0647\u0627\u062a API'
@@ -2901,6 +3047,22 @@ $script:Catalog = @{
         'db_sum_backup' = '\u064a\u0639\u0645\u0644 pg_dump \u0645\u0648\u062b\u064e\u0651\u0642 \u0643\u0644 \u0644\u064a\u0644\u0629 (\u064a\u064f\u062d\u062a\u0641\u0638 \u0628\u0640 7)\u061b \u0627\u0644\u062d\u0627\u0644\u0629 \u0641\u064a \u0648\u062d\u062f\u0629 \u0627\u0644\u062a\u062d\u0643\u0645\u060c Sant\u00e9'
         'db_sum_nobackup' = '\u0644\u0627 \u062a\u0648\u062c\u062f \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u062a\u0644\u0642\u0627\u0626\u064a\u0629 \u0644\u0642\u0627\u0639\u062f\u0629 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a: \u062c\u062f\u0648\u0644 pg_dump \u0623\u0648 \u0627\u0633\u062a\u062e\u062f\u0645 \u0646\u0633\u062e \u0645\u0632\u0648\u0651\u062f \u0642\u0627\u0639\u062f\u0629 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a'
         'db_sum_sqlite' = '\u0642\u0627\u0639\u062f\u0629 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a: SQLite\u060c \u0645\u0644\u0641 \u0648\u0627\u062d\u062f \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 (\u062a\u062b\u0628\u064a\u062a \u0635\u063a\u064a\u0631). \u0627\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0625\u0644\u0649 PostgreSQL \u0644\u0627\u062d\u0642\u064b\u0627: toutwaf-cp db migrate'
+        's_extras' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a: \u0648\u0643\u064a\u0644 Windows \u0648\u0628\u0631\u0627\u0645\u062c \u0645\u0643\u0627\u0641\u062d\u0629 \u0627\u0644\u0641\u064a\u0631\u0648\u0633\u0627\u062a'
+        's_extras_ok' = '\u062a\u0645 \u062a\u062b\u0628\u064a\u062a \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a: {0} \u0628\u0631\u0646\u0627\u0645\u062c \u0641\u064a {1}'
+        's_extras_sha' = '\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a: {0} \u0645\u0644\u0641\u060c {1} \u0645\u064a\u0628\u064a\u0628\u0627\u064a\u062a (SHA-256 \u0648\u0627\u0644\u062a\u0648\u0642\u064a\u0639)'
+        's_extras_unchecked' = '\u062a\u0645 \u0623\u062e\u0630 \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u0643\u0645\u0627 \u0647\u064a \u062f\u0648\u0646 SHA256SUMS \u0644\u0644\u062a\u062d\u0642\u0642 \u0645\u0646\u0647\u0627: {0}'
+        'w_extras_dl' = '\u062a\u0639\u0630\u0631 \u062a\u0646\u0632\u064a\u0644 \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a ({0}). \u064a\u0639\u0645\u0644 ToutWAF \u0628\u062f\u0648\u0646\u0647\u0627\u060c \u0644\u0643\u0646 \u0647\u0630\u0647 \u0627\u0644\u0644\u0648\u062d\u0629 \u0644\u0646 \u062a\u0639\u0631\u0636 Windows \u0648\u0644\u0627 \u0645\u0643\u0627\u0641\u062d\u0629 \u0627\u0644\u0641\u064a\u0631\u0648\u0633\u0627\u062a \u062d\u062a\u0649 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a\u0647\u0627.'
+        'w_extras_sum' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a {0} \u0644\u0627 \u062a\u0637\u0627\u0628\u0642 \u0642\u064a\u0645\u0629 SHA-256 \u0641\u064a SHA256SUMS \u0627\u0644\u0645\u0648\u0642\u0651\u0639: \u0644\u0645 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a\u0647\u0627.'
+        'w_extras_bad' = '\u0645\u0644\u0641 \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a {0} \u0644\u064a\u0633 \u0623\u0631\u0634\u064a\u0641 \u0625\u0636\u0627\u0641\u0627\u062a \u0635\u0627\u0644\u062d\u0627: \u0644\u0645 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a\u0647.'
+        'w_extras_ver' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0} \u0648\u0647\u0630\u0627 \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0647\u0648 {1}: \u0644\u0645 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a\u0647\u0627.'
+        'w_extras_inc' = '\u064a\u0633\u0631\u062f \u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0} \u062c\u0632\u0621\u0627 \u0645\u0646 \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u0644\u0643\u0646\u0647 \u064a\u0630\u0643\u0631 {1}: \u0627\u0644\u0646\u0634\u0631 \u062a\u0627\u0644\u0641 \u0648\u0644\u0645 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a.'
+        'w_extras_nofile' = '\u0645\u0644\u0641 \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a {0} \u063a\u064a\u0631 \u0645\u0648\u062c\u0648\u062f.'
+        'w_extras_none' = '\u0644\u0627 \u064a\u062d\u062a\u0648\u064a \u0647\u0630\u0627 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0639\u0644\u0649 \u0625\u0636\u0627\u0641\u0627\u062a: \u0644\u0646 \u062a\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0644\u0648\u062d\u0629 Windows \u0648\u0644\u0627 \u0645\u0643\u0627\u0641\u062d\u0629 \u0627\u0644\u0641\u064a\u0631\u0648\u0633\u0627\u062a.'
+        'w_extras_todo' = '\u0644\u0645 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a. \u0639\u0646\u062f\u0645\u0627 \u062a\u0633\u0645\u062d \u0627\u0644\u0634\u0628\u0643\u0629\u060c \u0634\u063a\u0651\u0644 \u0628\u0635\u0644\u0627\u062d\u064a\u0627\u062a root: {0}'
+        'extras_needs_cp' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u062a\u062e\u0635 \u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062a\u062d\u0643\u0645: \u0648\u0647\u0648 \u063a\u064a\u0631 \u0645\u062b\u0628\u062a \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632.'
+        'extras_other_release' = '\u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0627\u0644\u0645\u0646\u0634\u0648\u0631 ({0}) \u0644\u064a\u0633 \u0627\u0644\u0645\u062b\u0628\u062a ({1}): \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u062a\u0623\u062a\u064a \u0645\u0639\u0647. \u0634\u063a\u0651\u0644 --update.'
+        'st_extras_ok' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a: \u0645\u062b\u0628\u062a\u0629 (\u0648\u0643\u064a\u0644 Windows \u0648\u0628\u0631\u0627\u0645\u062c \u0645\u0643\u0627\u0641\u062d\u0629 \u0627\u0644\u0641\u064a\u0631\u0648\u0633\u0627\u062a)'
+        'st_extras_none' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u0645\u0641\u0642\u0648\u062f\u0629: \u0644\u0627 \u064a\u062a\u0645 \u0639\u0631\u0636 Windows \u0648\u0644\u0627 \u0645\u0643\u0627\u0641\u062d\u0629 \u0627\u0644\u0641\u064a\u0631\u0648\u0633\u0627\u062a. \u0634\u063a\u0651\u0644 \u0628\u0635\u0644\u0627\u062d\u064a\u0627\u062a root: {0}'
     }
 }
 # END CATALOG
@@ -3836,6 +3998,145 @@ function Update-ChannelOnce {
     if (([string]$j.version) -eq $script:ResolvedVersion) { $script:NewBuild = Get-ChannelBuild $j }
     return $true
 }
+# ------------------------------------------------------------------------------------------------ extras
+# The second asset of a release: toutwaf-extras.tar.gz, or toutwaf-extras-<n>of<m>.tar.gz when cut. It holds toutwaf-extras-<version>\{agent-dist\toutwaf-agent-windows-*.exe,
+# av-dist\toutwaf-av-*, LICENSE, VERSION, BUILD} and is listed in the signed SHA256SUMS, so the signature check of the archive covers it too (deploy/RELEASE-LAYOUT.md).
+# Nothing about the extras is ever fatal here: an installation without them works and does not offer Windows servers nor the antivirus (the console says so).
+$script:ExtrasDir = ''; $script:ExtrasResult = ''; $script:ExtrasCount = 0; $script:ExtrasVersion = ''; $script:ExtrasBuild = ''
+# the programs the contract names, nothing else (a file with another name, or a link, is never installed)
+function Get-ExtrasFiles([string]$dir) {
+    $out = @()
+    $pairs = @(@('agent-dist', '^toutwaf-agent-windows-(amd64|arm64)\.exe$'), @('av-dist', '^toutwaf-av-(linux-(amd64|arm64)|darwin-(amd64|arm64)|windows-(amd64|arm64)\.exe)$'))
+    foreach ($pair in $pairs) {
+        $src = Join-Path $dir $pair[0]
+        if (-not (Test-Path $src)) { continue }
+        foreach ($f in @(Get-ChildItem -Path $src -File -Force | Where-Object { $_.Name -cmatch $pair[1] -and -not $_.LinkType })) { $out += ,@($pair[0], $f) }
+    }
+    return $out
+}
+function Get-ExtrasSkipped { return ($NoExtras -or $env:TOUTWAF_NO_EXTRAS -in @('1', 'yes', 'true', 'on')) }
+function Set-ExtrasFailed([string]$key, [object[]]$a) { $script:ExtrasResult = 'failed'; $script:ExtrasDir = ''; Write-Warn (T $key $a) }
+function Expand-ExtrasParts([string[]]$files, [string]$tmp) {
+    $out = Join-Path $tmp 'extras-out'
+    if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+    New-Item -ItemType Directory -Path $out -Force | Out-Null
+    $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+    if (-not $tar) { Set-ExtrasFailed 'w_extras_bad' @((Split-Path $files[0] -Leaf)); return }
+    foreach ($f in $files) {
+        & $tar.Source -xzf $f -C $out 2>$null
+        if ($LASTEXITCODE -ne 0) { Set-ExtrasFailed 'w_extras_bad' @((Split-Path $f -Leaf)); return }
+    }
+    $d = Get-ChildItem -Path $out -Directory -Filter 'toutwaf-extras-*' | Select-Object -First 1
+    if (-not $d) { Set-ExtrasFailed 'w_extras_bad' @((Split-Path $files[0] -Leaf)); return }
+    $v = ''; $b = ''
+    if (Test-Path (Join-Path $d.FullName 'VERSION')) { $v = (Get-Content (Join-Path $d.FullName 'VERSION') -TotalCount 1).Trim() }
+    if (Test-Path (Join-Path $d.FullName 'BUILD')) { $b = ConvertTo-Build (Get-Content (Join-Path $d.FullName 'BUILD') -TotalCount 1) }
+    $av = $script:Rel.ArchiveVersion; $ab = $script:Rel.ArchiveBuild
+    if ($av -and $v -and $v -ne $av) { Set-ExtrasFailed 'w_extras_ver' @($v, $av); return }
+    if ($ab -and $b -and $b -ne $ab) { Set-ExtrasFailed 'w_extras_ver' @("$v ($b)", "$av ($ab)"); return }
+    $n = @(Get-ExtrasFiles $d.FullName).Count
+    if ($n -eq 0) { Set-ExtrasFailed 'w_extras_bad' @((Split-Path $files[0] -Leaf)); return }
+    $script:ExtrasDir = $d.FullName; $script:ExtrasCount = $n
+    $script:ExtrasVersion = if ($v) { $v } else { $av }; $script:ExtrasBuild = if ($b) { $b } else { $ab }
+}
+function Get-Extras([string]$rel, [string]$tmp, [string]$q) {
+    $script:ExtrasDir = ''; $script:ExtrasResult = ''
+    if (Get-ExtrasSkipped) { $script:ExtrasResult = 'skipped'; return }
+    if ($Component -eq 'dp') { $script:ExtrasResult = 'skipped'; return }
+    if ($ExtrasPath -and $ExtrasPath.Count -gt 0) {
+        foreach ($f in $ExtrasPath) { if (-not (Test-Path -LiteralPath $f)) { Set-ExtrasFailed 'w_extras_nofile' @($f); return } }
+        foreach ($f in $ExtrasPath) {
+            $n = Split-Path $f -Leaf; $sums = Join-Path (Split-Path (Resolve-Path -LiteralPath $f).Path -Parent) 'SHA256SUMS'
+            if (Test-Path $sums) {
+                $line = Get-Content $sums | Where-Object { $_ -match ([regex]::Escape($n) + '$') } | Select-Object -First 1
+                $want = if ($line) { ($line -split '\s+')[0].ToLower() } else { '' }
+                if (-not $want -or $want -ne (Get-FileHash -Algorithm SHA256 -LiteralPath $f).Hash.ToLower()) { Set-ExtrasFailed 'w_extras_sum' @($n); return }
+            } else { Write-Info (T 's_extras_unchecked' @($n)) }
+        }
+        Expand-ExtrasParts @($ExtrasPath | ForEach-Object { (Resolve-Path -LiteralPath $_).Path }) $tmp
+        return
+    }
+    if ($ZipPath) { $script:ExtrasResult = 'none'; return }
+    $sumsFile = Join-Path $tmp 'SHA256SUMS'
+    $names = @(Get-Content $sumsFile | ForEach-Object { if ($_ -match '^[0-9a-fA-F]{64}\s+(toutwaf-extras(-[0-9]+of[0-9]+)?\.tar\.gz)$') { $Matches[1] } })
+    if ($names.Count -eq 0) { $script:ExtrasResult = 'none'; return }
+    $names = @($names | Sort-Object { if ($_ -match '-([0-9]+)of') { [int]$Matches[1] } else { 0 } })
+    if ($names[0] -match 'of([0-9]+)\.tar\.gz$') { if ([int]$Matches[1] -ne $names.Count) { Set-ExtrasFailed 'w_extras_inc' @($names.Count, $Matches[1]); return } }
+    $files = @(); $total = 0
+    foreach ($n in $names) {
+        $f = Join-Path $tmp $n
+        $ok = $false
+        for ($i = 1; $i -le 2 -and -not $ok; $i++) {
+            try { Invoke-WebRequest -UseBasicParsing -Uri "$rel/$n$q" -OutFile $f; $ok = (Test-Path $f) } catch { if (Test-Path $f) { Remove-Item $f -Force } }
+        }
+        if (-not $ok) { Set-ExtrasFailed 'w_extras_dl' @($n); return }
+        $line = Get-Content $sumsFile | Where-Object { $_ -match ([regex]::Escape($n) + '$') } | Select-Object -First 1
+        $want = ($line -split '\s+')[0].ToLower()
+        $got = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower()
+        if ($want -ne $got) { Set-ExtrasFailed 'w_extras_sum' @($n); return }
+        if ($script:ChJson -and [string]$script:ChJson.version -eq $script:ResolvedVersion) {
+            $a = @($script:ChJson.assets | Where-Object { $_.name -eq $n }) | Select-Object -First 1
+            if ($a -and $a.sha256 -and ([string]$a.sha256).ToLower() -ne $got) { Set-ExtrasFailed 'w_extras_sum' @($n); return }
+        }
+        $total += (Get-Item $f).Length; $files += $f
+    }
+    Write-Info (T 's_extras_sha' @($names.Count, [int]($total / 1MB)))
+    Expand-ExtrasParts $files $tmp
+}
+function Install-Extras {
+    if (-not $script:ExtrasDir) { return }
+    $n = 0; $names = @()
+    foreach ($e in @(Get-ExtrasFiles $script:ExtrasDir)) {
+        $dst = Join-Path $CpDataDir $e[0]
+        New-Item -ItemType Directory -Path $dst -Force | Out-Null
+        $f = $e[1]
+        # a copy next to the final name, moved over it: a program being downloaded by a machine is never half replaced
+        Copy-Item $f.FullName (Join-Path $dst ($f.Name + '.new')) -Force
+        Move-Item (Join-Path $dst ($f.Name + '.new')) (Join-Path $dst $f.Name) -Force
+        $n++; $names += $f.Name
+    }
+    $json = '{"version":"' + $script:ExtrasVersion + '","build":"' + $script:ExtrasBuild + '","installed_at":"' + (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') + '","files":[' + (($names | ForEach-Object { '"' + $_ + '"' }) -join ',') + ']}'
+    Set-Content -Path (Join-Path $CpDataDir 'extras.json') -Value $json -Encoding ASCII
+    $script:ExtrasResult = 'ok'; $script:ExtrasCount = $n
+    Write-Info (T 's_extras_ok' @($n, $CpDataDir))
+}
+function Test-ExtrasCurrent([string]$v, [string]$b) {
+    $j = Join-Path $CpDataDir 'extras.json'
+    if (-not (Test-Path $j)) { return $false }
+    $raw = Get-Content -Raw $j
+    if ($raw -notmatch '"version":"([^"]*)"' -or $Matches[1] -ne $v) { return $false }
+    if ($b) { if ($raw -notmatch '"build":"([^"]*)"' -or $Matches[1] -ne $b) { return $false } }
+    foreach ($m in [regex]::Matches($raw, '"(toutwaf-[^"]+)"')) {
+        $f = $m.Groups[1].Value
+        $d = if ($f -like 'toutwaf-agent-*') { 'agent-dist' } else { 'av-dist' }
+        if (-not (Test-Path (Join-Path (Join-Path $CpDataDir $d) $f))) { return $false }
+    }
+    return $true
+}
+# an update that finds nothing new for the programs still brings the extras when they are missing or of another build
+function Invoke-ExtrasMaintain([string]$tmp, [string]$v, [string]$b) {
+    if ($Component -eq 'dp' -or (Get-ExtrasSkipped)) { return }
+    if ($ZipPath -and -not $ExtrasPath) { return }
+    if (Test-ExtrasCurrent $v $b) { return }
+    $rel = if ($ZipPath) { '' } else { (Get-RepoBase) + '/releases/' + $script:ResolvedVersion }
+    if (-not $ZipPath -and -not (Test-Path (Join-Path $tmp 'SHA256SUMS'))) {
+        $q = Get-ReleaseQuery
+        try { Invoke-WebRequest -UseBasicParsing -Uri "$rel/SHA256SUMS$q" -OutFile (Join-Path $tmp 'SHA256SUMS') } catch { Write-Warn (T 'w_extras_dl' @('SHA256SUMS')); return }
+        Confirm-ReleaseSignature $rel $tmp $q
+    }
+    $script:Rel = @{ ArchiveVersion = $v; ArchiveBuild = $b }
+    Invoke-Step (T 's_extras') { Get-Extras $rel $tmp (Get-ReleaseQuery) }
+    Install-Extras
+    Write-ExtrasReport
+}
+function Write-ExtrasReport {
+    switch ($script:ExtrasResult) {
+        'ok' { Write-Out ('  {0} {1}' -f $script:Bul, (T 's_extras_ok' @($script:ExtrasCount, $CpDataDir))) }
+        'none' { Write-Out ('  {0} {1}' -f $script:Bul, (T 'w_extras_none')) }
+        'failed' { Write-Out ('  {0} {1}' -f $script:Bul, (T 'w_extras_todo' @('install.ps1 -Update'))) }
+    }
+}
+
 function Get-Release([string]$tmp) {
     $arch = Get-Arch
     $zip = $ZipPath
@@ -4042,6 +4343,7 @@ function Invoke-InstallFlow([string]$action) {
             $verdict = Get-UpdateVerdict $script:ResolvedVersion $script:NewBuild
             if ($verdict -eq 'same' -and $script:NewBuild) {
                 Write-Out ('  {0}{1}{2} {3}' -f $script:Grn, $script:OkM, $script:R, (T 'up_to_date' @((Format-VersionBuildShort $script:ResolvedVersion $script:NewBuild))))
+                Invoke-ExtrasMaintain $tmp $script:ResolvedVersion $script:NewBuild
                 return $null
             }
             if ($verdict -eq 'rebuilt') {
@@ -4051,6 +4353,10 @@ function Invoke-InstallFlow([string]$action) {
         }
         $verLabel = if ($ZipPath) { 'local' } else { $script:ResolvedVersion }
         Invoke-Step (T 's_fetch' @($verLabel, (Get-Arch))) { $script:Rel = Get-Release $tmp }
+        if ($Component -ne 'dp' -and -not (Get-ExtrasSkipped)) {
+            $xrel = if ($ZipPath) { '' } else { (Get-RepoBase) + '/releases/' + $script:ResolvedVersion }
+            Invoke-Step (T 's_extras') { Get-Extras $xrel $tmp (Get-ReleaseQuery) }
+        }
         $newBuild = if ($script:Rel.ArchiveBuild) { $script:Rel.ArchiveBuild } else { $script:NewBuild }
         $bins = $script:Rel.Bins
         $state = Get-InstallState
@@ -4074,6 +4380,7 @@ function Invoke-InstallFlow([string]$action) {
                 Write-Out ('  {0}{1}{2} {3}' -f $script:Grn, $script:OkM, $script:R, (T 'up_to_date' @((Format-VersionBuildShort $cur $curB))))
                 # the files are the archive's: whatever the binaries cannot say of themselves, the archive does
                 Save-InstalledRecord $cur $curB
+                if ($script:ExtrasDir) { Install-Extras; Write-ExtrasReport } else { Invoke-ExtrasMaintain $tmp $cur $curB }
                 return $null
             }
             New-Item -ItemType Directory -Path $backup -Force | Out-Null
@@ -4106,14 +4413,8 @@ function Invoke-InstallFlow([string]$action) {
             Copy-Item -Path (Join-Path $script:Rel.AgentDist 'toutwaf-agent-*') -Destination $agentDst -Force
             Write-Info "host agent builds installed in $agentDst"
         }
-        # the antivirus programs are withdrawn from the product: installed only on explicit request (TOUTWAF_WITH_ANTIVIRUS=1)
-        if ($Component -ne 'dp' -and $script:Rel.AVDist -and $env:TOUTWAF_WITH_ANTIVIRUS -eq '1') {
-            # the programs the console hands to the machines its antivirus installer sets up (replaced at every update)
-            $avDst = Join-Path $CpDataDir 'av-dist'
-            New-Item -ItemType Directory -Path $avDst -Force | Out-Null
-            Copy-Item -Path (Join-Path $script:Rel.AVDist 'toutwaf-av-*') -Destination $avDst -Force
-            Write-Info "ToutWAF Antivirus programs installed in $avDst"
-        }
+        # the Windows agents and the antivirus programs come with the extras of the release (a second asset): installed next to the data of the control plane
+        if ($Component -ne 'dp') { Install-Extras }
         Invoke-Step (T 's_cfg') { Write-Configs }
         Invoke-Step (T 's_units') {
             Register-Services
@@ -4341,6 +4642,7 @@ function Invoke-Main {
     $tail = ''
     if ($newDp) { $tail = "  toutwaf-dp $newDp"; if ($res.OldDp) { $tail += " (was $($res.OldDp))" } }
     Write-Out ('  {0}{1}{2} {3}{4}' -f $script:Grn, $script:OkM, $script:R, (T 'done'), $tail)
+    Write-ExtrasReport
     if ($script:Warnings.Count -gt 0 -and $script:Color -and -not $Quiet) { foreach ($w in $script:Warnings) { Write-Host ('  {0}{1}{2} {3}' -f $script:Ylw, $script:WrM, $script:R, $w) } }
     if ($Component -ne 'dp' -and -not $script:PanelTried) { [void](Invoke-CpLinks) }
     Show-Summary $pub

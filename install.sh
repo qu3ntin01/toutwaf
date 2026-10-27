@@ -76,6 +76,10 @@ DB_ADMIN_DSN_FILE=""; DB_BACKUP_TIMER=1; DB_SERVER_LOCAL=0; DB_RESULT=""; DB_SEC
 OPEN_CP_PORT=0; NO_SELINUX=0; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
 QUIET=0; NO_COLOR_FLAG=0; ACCEPT_DEFAULTS=0
 CHECK_COMPAT=0                                  # --check-compat: print the compatibility verdict, change nothing (exit 0 compatible, 3 not)
+# The extras of a release (deploy/RELEASE-LAYOUT.md, "Extras"): the host agent for Windows and the antivirus programs, a second asset next to the archive of the platform.
+# --no-extras (or TOUTWAF_NO_EXTRAS=1) leaves them out; --extras FILE (repeatable, or TOUTWAF_EXTRAS=FILE:FILE) installs them from local files (offline).
+NO_EXTRAS=0; case "${TOUTWAF_NO_EXTRAS:-}" in 1|yes|true|on) NO_EXTRAS=1;; esac
+EXTRAS_LOCAL="${TOUTWAF_EXTRAS:-}"; EXTRAS_DIR=""; EXTRAS_RESULT=""; EXTRAS_COUNT=0; EXTRAS_VERSION=""; EXTRAS_BUILD=""; SIG_OK_FOR=""
 ACTION=""; PURGE=0; LANG_CODE="${TOUTWAF_LANG:-}"; NARGS=$#
 
 # ------------------------------------------------------------------------------------------------ message catalog
@@ -2842,6 +2846,166 @@ nl|db_sum_sqlite|Database: SQLite, één bestand op deze machine (kleine install
 ru|db_sum_sqlite|База данных: SQLite, один файл на этой машине (небольшая установка). Позже перейти на PostgreSQL: toutwaf-cp db migrate
 zh|db_sum_sqlite|数据库：SQLite，本机上的一个文件（小型安装）。以后可迁移到 PostgreSQL：toutwaf-cp db migrate
 ar|db_sum_sqlite|قاعدة البيانات: SQLite، ملف واحد على هذا الجهاز (تثبيت صغير). الانتقال إلى PostgreSQL لاحقًا: toutwaf-cp db migrate
+en|s_extras|Extras: Windows agent and antivirus programs
+fr|s_extras|Extras : agent Windows et programmes de l'antivirus
+es|s_extras|Extras: agente de Windows y programas del antivirus
+de|s_extras|Extras: Windows-Agent und Antivirus-Programme
+it|s_extras|Extra: agente Windows e programmi dell'antivirus
+pt|s_extras|Extras: agente Windows e programas do antivírus
+nl|s_extras|Extra's: Windows-agent en antivirusprogramma's
+ru|s_extras|Дополнения: агент для Windows и программы антивируса
+zh|s_extras|附加包：Windows 代理和杀毒程序
+ar|s_extras|الإضافات: وكيل Windows وبرامج مكافحة الفيروسات
+en|s_extras_ok|Extras installed: %s programs in %s
+fr|s_extras_ok|Extras installés : %s programmes dans %s
+es|s_extras_ok|Extras instalados: %s programas en %s
+de|s_extras_ok|Extras installiert: %s Programme in %s
+it|s_extras_ok|Extra installati: %s programmi in %s
+pt|s_extras_ok|Extras instalados: %s programas em %s
+nl|s_extras_ok|Extra's geïnstalleerd: %s programma's in %s
+ru|s_extras_ok|Дополнения установлены: %s программ в %s
+zh|s_extras_ok|附加包已安装：%s 个程序，位于 %s
+ar|s_extras_ok|تم تثبيت الإضافات: %s برنامج في %s
+en|s_extras_sha|Extras verified: %s file(s), %s MiB (SHA-256 and signature)
+fr|s_extras_sha|Extras vérifiés : %s fichier(s), %s Mio (SHA-256 et signature)
+es|s_extras_sha|Extras verificados: %s archivo(s), %s MiB (SHA-256 y firma)
+de|s_extras_sha|Extras geprüft: %s Datei(en), %s MiB (SHA-256 und Signatur)
+it|s_extras_sha|Extra verificati: %s file, %s MiB (SHA-256 e firma)
+pt|s_extras_sha|Extras verificados: %s ficheiro(s), %s MiB (SHA-256 e assinatura)
+nl|s_extras_sha|Extra's gecontroleerd: %s bestand(en), %s MiB (SHA-256 en handtekening)
+ru|s_extras_sha|Дополнения проверены: файлов %s, %s МиБ (SHA-256 и подпись)
+zh|s_extras_sha|附加包已校验：%s 个文件，%s MiB（SHA-256 与签名）
+ar|s_extras_sha|تم التحقق من الإضافات: %s ملف، %s ميبيبايت (SHA-256 والتوقيع)
+en|s_extras_unchecked|Extras taken as given, without a SHA256SUMS to check them: %s
+fr|s_extras_unchecked|Extras pris tels quels, sans SHA256SUMS pour les vérifier : %s
+es|s_extras_unchecked|Extras tomados tal cual, sin SHA256SUMS para verificarlos: %s
+de|s_extras_unchecked|Extras unverändert übernommen, ohne SHA256SUMS zur Prüfung: %s
+it|s_extras_unchecked|Extra usati così come sono, senza SHA256SUMS per verificarli: %s
+pt|s_extras_unchecked|Extras usados tal como estão, sem SHA256SUMS para os verificar: %s
+nl|s_extras_unchecked|Extra's zoals ze zijn overgenomen, zonder SHA256SUMS om ze te controleren: %s
+ru|s_extras_unchecked|Дополнения взяты как есть, без SHA256SUMS для проверки: %s
+zh|s_extras_unchecked|附加包按原样使用，没有 SHA256SUMS 可供校验：%s
+ar|s_extras_unchecked|تم أخذ الإضافات كما هي دون SHA256SUMS للتحقق منها: %s
+en|w_extras_dl|The extras could not be downloaded (%s). ToutWAF works without them, but this console will not offer Windows nor the antivirus until they are installed.
+fr|w_extras_dl|Les extras n'ont pas pu être téléchargés (%s). ToutWAF fonctionne sans eux, mais cette console ne proposera ni Windows ni l'antivirus tant qu'ils ne sont pas installés.
+es|w_extras_dl|No se pudieron descargar los extras (%s). ToutWAF funciona sin ellos, pero esta consola no ofrecerá Windows ni el antivirus hasta que se instalen.
+de|w_extras_dl|Die Extras konnten nicht heruntergeladen werden (%s). ToutWAF läuft auch ohne sie, doch diese Konsole bietet weder Windows noch den Virenschutz an, bis sie installiert sind.
+it|w_extras_dl|Impossibile scaricare gli extra (%s). ToutWAF funziona senza, ma questa console non proporrà Windows né l'antivirus finché non saranno installati.
+pt|w_extras_dl|Não foi possível transferir os extras (%s). O ToutWAF funciona sem eles, mas esta consola não oferecerá o Windows nem o antivírus enquanto não estiverem instalados.
+nl|w_extras_dl|De extra's konden niet worden gedownload (%s). ToutWAF werkt zonder, maar deze console biedt geen Windows of antivirus aan zolang ze niet geïnstalleerd zijn.
+ru|w_extras_dl|Не удалось загрузить дополнения (%s). ToutWAF работает без них, но эта консоль не предложит Windows и антивирус, пока они не установлены.
+zh|w_extras_dl|无法下载附加包（%s）。ToutWAF 没有它们也能运行，但在安装之前，此控制台不会提供 Windows 和杀毒功能。
+ar|w_extras_dl|تعذر تنزيل الإضافات (%s). يعمل ToutWAF بدونها، لكن هذه اللوحة لن تعرض Windows ولا مكافحة الفيروسات حتى يتم تثبيتها.
+en|w_extras_sum|The extras %s do not match their SHA-256 in the signed SHA256SUMS: they were NOT installed.
+fr|w_extras_sum|Les extras %s ne correspondent pas à leur SHA-256 du SHA256SUMS signé : ils n'ont PAS été installés.
+es|w_extras_sum|Los extras %s no coinciden con su SHA-256 del SHA256SUMS firmado: NO se instalaron.
+de|w_extras_sum|Die Extras %s stimmen nicht mit ihrem SHA-256 im signierten SHA256SUMS überein: sie wurden NICHT installiert.
+it|w_extras_sum|Gli extra %s non corrispondono al loro SHA-256 nel SHA256SUMS firmato: NON sono stati installati.
+pt|w_extras_sum|Os extras %s não correspondem ao seu SHA-256 no SHA256SUMS assinado: NÃO foram instalados.
+nl|w_extras_sum|De extra's %s komen niet overeen met hun SHA-256 in de ondertekende SHA256SUMS: ze zijn NIET geïnstalleerd.
+ru|w_extras_sum|Дополнения %s не совпадают со своей суммой SHA-256 в подписанном SHA256SUMS: они НЕ установлены.
+zh|w_extras_sum|附加包 %s 与已签名 SHA256SUMS 中的 SHA-256 不一致：未安装。
+ar|w_extras_sum|الإضافات %s لا تطابق قيمة SHA-256 في SHA256SUMS الموقّع: لم يتم تثبيتها.
+en|w_extras_bad|The extras file %s is not a valid extras archive: it was NOT installed.
+fr|w_extras_bad|Le fichier d'extras %s n'est pas une archive d'extras valide : il n'a PAS été installé.
+es|w_extras_bad|El archivo de extras %s no es un archivo de extras válido: NO se instaló.
+de|w_extras_bad|Die Extras-Datei %s ist kein gültiges Extras-Archiv: sie wurde NICHT installiert.
+it|w_extras_bad|Il file di extra %s non è un archivio di extra valido: NON è stato installato.
+pt|w_extras_bad|O ficheiro de extras %s não é um arquivo de extras válido: NÃO foi instalado.
+nl|w_extras_bad|Het extra-bestand %s is geen geldig extra-archief: het is NIET geïnstalleerd.
+ru|w_extras_bad|Файл дополнений %s не является допустимым архивом дополнений: он НЕ установлен.
+zh|w_extras_bad|附加包文件 %s 不是有效的附加包归档：未安装。
+ar|w_extras_bad|ملف الإضافات %s ليس أرشيف إضافات صالحا: لم يتم تثبيته.
+en|w_extras_ver|The extras are for version %s, this installation is %s: they were NOT installed.
+fr|w_extras_ver|Les extras sont de la version %s, cette installation est en %s : ils n'ont PAS été installés.
+es|w_extras_ver|Los extras son de la versión %s, esta instalación es %s: NO se instalaron.
+de|w_extras_ver|Die Extras gehören zu Version %s, diese Installation ist %s: sie wurden NICHT installiert.
+it|w_extras_ver|Gli extra sono della versione %s, questa installazione è %s: NON sono stati installati.
+pt|w_extras_ver|Os extras são da versão %s, esta instalação é %s: NÃO foram instalados.
+nl|w_extras_ver|De extra's zijn van versie %s, deze installatie is %s: ze zijn NIET geïnstalleerd.
+ru|w_extras_ver|Дополнения от версии %s, а эта установка — %s: они НЕ установлены.
+zh|w_extras_ver|附加包适用于版本 %s，而此安装为 %s：未安装。
+ar|w_extras_ver|الإضافات خاصة بالإصدار %s وهذا التثبيت هو %s: لم يتم تثبيتها.
+en|w_extras_inc|The release lists %s part(s) of the extras but says it has %s: the publication is damaged, the extras were NOT installed.
+fr|w_extras_inc|La version liste %s partie(s) des extras mais annonce %s : la publication est abîmée, les extras n'ont PAS été installés.
+es|w_extras_inc|La versión lista %s parte(s) de los extras pero indica %s: la publicación está dañada, los extras NO se instalaron.
+de|w_extras_inc|Die Version listet %s Teil(e) der Extras, nennt aber %s: die Veröffentlichung ist beschädigt, die Extras wurden NICHT installiert.
+it|w_extras_inc|La versione elenca %s parte/i degli extra ma ne dichiara %s: la pubblicazione è danneggiata, gli extra NON sono stati installati.
+pt|w_extras_inc|A versão lista %s parte(s) dos extras mas indica %s: a publicação está danificada, os extras NÃO foram instalados.
+nl|w_extras_inc|De versie vermeldt %s deel/delen van de extra's maar zegt er %s te hebben: de publicatie is beschadigd, de extra's zijn NIET geïnstalleerd.
+ru|w_extras_inc|Релиз перечисляет %s частей дополнений, но заявляет %s: публикация повреждена, дополнения НЕ установлены.
+zh|w_extras_inc|该版本列出了附加包的 %s 个部分，但声明共有 %s 个：发布已损坏，未安装附加包。
+ar|w_extras_inc|يسرد الإصدار %s جزءا من الإضافات لكنه يذكر %s: النشر تالف ولم يتم تثبيت الإضافات.
+en|w_extras_nofile|The extras file %s does not exist.
+fr|w_extras_nofile|Le fichier d'extras %s n'existe pas.
+es|w_extras_nofile|El archivo de extras %s no existe.
+de|w_extras_nofile|Die Extras-Datei %s existiert nicht.
+it|w_extras_nofile|Il file di extra %s non esiste.
+pt|w_extras_nofile|O ficheiro de extras %s não existe.
+nl|w_extras_nofile|Het extra-bestand %s bestaat niet.
+ru|w_extras_nofile|Файл дополнений %s не существует.
+zh|w_extras_nofile|附加包文件 %s 不存在。
+ar|w_extras_nofile|ملف الإضافات %s غير موجود.
+en|w_extras_none|This release carries no extras: this console will not offer Windows nor the antivirus.
+fr|w_extras_none|Cette version ne contient pas d'extras : cette console ne proposera ni Windows ni l'antivirus.
+es|w_extras_none|Esta versión no incluye extras: esta consola no ofrecerá Windows ni el antivirus.
+de|w_extras_none|Diese Version enthält keine Extras: diese Konsole bietet weder Windows noch den Virenschutz an.
+it|w_extras_none|Questa versione non contiene extra: questa console non proporrà Windows né l'antivirus.
+pt|w_extras_none|Esta versão não inclui extras: esta consola não oferecerá o Windows nem o antivírus.
+nl|w_extras_none|Deze versie bevat geen extra's: deze console biedt geen Windows of antivirus aan.
+ru|w_extras_none|В этом релизе нет дополнений: эта консоль не предложит Windows и антивирус.
+zh|w_extras_none|此版本不含附加包：此控制台不会提供 Windows 和杀毒功能。
+ar|w_extras_none|لا يحتوي هذا الإصدار على إضافات: لن تعرض هذه اللوحة Windows ولا مكافحة الفيروسات.
+en|w_extras_todo|Extras not installed. When the network allows it, run as root: %s
+fr|w_extras_todo|Extras non installés. Quand le réseau le permet, lancez en root : %s
+es|w_extras_todo|Extras no instalados. Cuando la red lo permita, ejecute como root: %s
+de|w_extras_todo|Extras nicht installiert. Sobald das Netz es erlaubt, als root ausführen: %s
+it|w_extras_todo|Extra non installati. Quando la rete lo consente, eseguire come root: %s
+pt|w_extras_todo|Extras não instalados. Quando a rede o permitir, execute como root: %s
+nl|w_extras_todo|Extra's niet geïnstalleerd. Zodra het netwerk het toelaat, voer uit als root: %s
+ru|w_extras_todo|Дополнения не установлены. Когда сеть позволит, выполните от root: %s
+zh|w_extras_todo|附加包未安装。网络可用时请以 root 运行：%s
+ar|w_extras_todo|لم يتم تثبيت الإضافات. عندما تسمح الشبكة، شغّل بصلاحيات root: %s
+en|extras_needs_cp|The extras belong to the control plane: it is not installed on this machine.
+fr|extras_needs_cp|Les extras appartiennent au plan de contrôle : il n'est pas installé sur cette machine.
+es|extras_needs_cp|Los extras pertenecen al plano de control: no está instalado en esta máquina.
+de|extras_needs_cp|Die Extras gehören zur Control Plane: sie ist auf diesem Rechner nicht installiert.
+it|extras_needs_cp|Gli extra appartengono al control plane: non è installato su questa macchina.
+pt|extras_needs_cp|Os extras pertencem ao plano de controlo: não está instalado nesta máquina.
+nl|extras_needs_cp|De extra's horen bij de control plane: die is niet geïnstalleerd op deze machine.
+ru|extras_needs_cp|Дополнения относятся к control plane: он не установлен на этой машине.
+zh|extras_needs_cp|附加包属于控制平面：本机未安装控制平面。
+ar|extras_needs_cp|الإضافات تخص مستوى التحكم: وهو غير مثبت على هذا الجهاز.
+en|extras_other_release|The published release (%s) is not the installed one (%s): the extras come with it. Run --update.
+fr|extras_other_release|La version publiée (%s) n'est pas celle qui est installée (%s) : les extras viennent avec elle. Lancez --update.
+es|extras_other_release|La versión publicada (%s) no es la instalada (%s): los extras vienen con ella. Ejecute --update.
+de|extras_other_release|Die veröffentlichte Version (%s) ist nicht die installierte (%s): die Extras kommen mit ihr. --update ausführen.
+it|extras_other_release|La versione pubblicata (%s) non è quella installata (%s): gli extra arrivano con essa. Eseguire --update.
+pt|extras_other_release|A versão publicada (%s) não é a instalada (%s): os extras vêm com ela. Execute --update.
+nl|extras_other_release|De gepubliceerde versie (%s) is niet de geïnstalleerde (%s): de extra's komen daarmee mee. Voer --update uit.
+ru|extras_other_release|Опубликованный релиз (%s) не совпадает с установленным (%s): дополнения идут вместе с ним. Выполните --update.
+zh|extras_other_release|已发布的版本（%s）不是已安装的版本（%s）：附加包随它一起提供。请运行 --update。
+ar|extras_other_release|الإصدار المنشور (%s) ليس المثبت (%s): الإضافات تأتي معه. شغّل --update.
+en|st_extras_ok|Extras: installed (Windows agent, antivirus programs)
+fr|st_extras_ok|Extras : installés (agent Windows, programmes de l'antivirus)
+es|st_extras_ok|Extras: instalados (agente de Windows, programas del antivirus)
+de|st_extras_ok|Extras: installiert (Windows-Agent, Antivirus-Programme)
+it|st_extras_ok|Extra: installati (agente Windows, programmi dell'antivirus)
+pt|st_extras_ok|Extras: instalados (agente Windows, programas do antivírus)
+nl|st_extras_ok|Extra's: geïnstalleerd (Windows-agent, antivirusprogramma's)
+ru|st_extras_ok|Дополнения: установлены (агент для Windows, программы антивируса)
+zh|st_extras_ok|附加包：已安装（Windows 代理、杀毒程序）
+ar|st_extras_ok|الإضافات: مثبتة (وكيل Windows وبرامج مكافحة الفيروسات)
+en|st_extras_none|Extras missing: Windows and the antivirus are not offered. Run as root: %s
+fr|st_extras_none|Extras absents : Windows et l'antivirus ne sont pas proposés. Lancez en root : %s
+es|st_extras_none|Extras ausentes: Windows y el antivirus no se ofrecen. Ejecute como root: %s
+de|st_extras_none|Extras fehlen: Windows und der Virenschutz werden nicht angeboten. Als root ausführen: %s
+it|st_extras_none|Extra mancanti: Windows e l'antivirus non sono proposti. Eseguire come root: %s
+pt|st_extras_none|Extras em falta: o Windows e o antivírus não são oferecidos. Execute como root: %s
+nl|st_extras_none|Extra's ontbreken: Windows en antivirus worden niet aangeboden. Voer uit als root: %s
+ru|st_extras_none|Дополнения отсутствуют: Windows и антивирус не предлагаются. Выполните от root: %s
+zh|st_extras_none|缺少附加包：不提供 Windows 和杀毒功能。请以 root 运行：%s
+ar|st_extras_none|الإضافات مفقودة: لا يتم عرض Windows ولا مكافحة الفيروسات. شغّل بصلاحيات root: %s
 # END CATALOG
 TW_CATALOG
 }
@@ -3849,13 +4013,18 @@ Without options on a terminal the interactive menu is shown. Unattended examples
   install.sh --install --component dp --cp-url https://cp.example.com:9444 --enroll-token XXXX --yes
 
 Actions:
-  --install | --update | --uninstall | --status | --links
+  --install | --update | --uninstall | --status | --links | --extras-only
                              install (default), update to the newest release, remove, health check, show panel links
 Options:
   --component dp|cp|all      what to install (default: all)
   --version X.Y.Z|latest     release to install (default: latest of the channel)
   --channel stable|dev       release channel: stable = branch main, dev = branch dev (remembered in <home>/conf/installer.conf)
   --tarball FILE             install from a local release tarball (offline)
+  --extras FILE              also install the extras of the release (host agent for Windows, antivirus programs) from a local file
+                             toutwaf-extras*.tar.gz (offline; repeat for a release cut in parts). Without it the extras are downloaded with the
+                             archive, checked like it (SHA-256 and signature) and installed; a failure is a warning, the installation goes on
+  --no-extras                do not download nor install the extras (also TOUTWAF_NO_EXTRAS=1): the console then offers neither Windows nor the antivirus
+  --extras-only              install (or refresh) only the extras of the release that is installed, stopping nothing
   --base-url URL             mirror of the release tree (expects <URL>/channel.json and <URL>/releases/<version>/..., see deploy/RELEASE-LAYOUT.md)
   --via-repo                 install from ToutWAF's own package repository (adds a signed dnf .repo / apt .list, installs the package \`toutwaf\`);
                              when it is unreachable or the system is not covered, falls back to the direct download (GitLab, then GitHub)
@@ -3968,6 +4137,9 @@ while [ $# -gt 0 ]; do
     --version) VERSION="$2"; shift 2;;
     --channel) CHANNEL="$2"; shift 2;;
     --tarball) TARBALL="$2"; shift 2;;
+    --extras) EXTRAS_LOCAL="${EXTRAS_LOCAL:+$EXTRAS_LOCAL:}$2"; shift 2;;
+    --no-extras) NO_EXTRAS=1; shift;;
+    --extras-only) ACTION=extras; shift;;
     --base-url) BASE_URL="$2"; shift 2;;
     --via-repo) VIA_REPO=1; shift;;
     --cp-url) CP_URL="$2"; shift 2;;
@@ -4654,6 +4826,10 @@ cmd_status() {
   [ "$INST_DP" = 1 ] && box_line "toutwaf-dp $(installed_label "$(p "$BIN_DIR/toutwaf-dp")")"
   [ "$INST_CP" = 1 ] && box_line "toutwaf-cp $(installed_label "$(p "$BIN_DIR/toutwaf-cp")")"
   box_line "$(t st_channel "$CHANNEL") ($(channel_branch))"
+  if [ "$INST_CP" = 1 ]; then
+    if ls "$(p "$DATA_DIR")"/agent-dist/toutwaf-agent-windows-*.exe >/dev/null 2>&1 || ls "$(p "$DATA_DIR")"/av-dist/toutwaf-av-* >/dev/null 2>&1; then box_line "$(t st_extras_ok)"
+    else box_line "$(paint "$YLW" "$WRM $(t st_extras_none "sudo bash install.sh --extras-only")")"; fi
+  fi
   if [ "$DRY_RUN" = 0 ]; then
     local frc=0; fetch_channel 2>/dev/null || frc=$?
     if [ "$frc" = 0 ]; then
@@ -4991,6 +5167,7 @@ verify_signature() {   # $1 = base URL of the release directory, $2 = its cache-
     die "internal error: the built-in release public key has id ${kid:-?}, expected $RELEASE_PUBKEY_ID"
   fi
   info "$(t s_sigok "${kid:-?}")"
+  SIG_OK_FOR="$RESOLVED_VERSION|$(release_build)"
 }
 
 SRC_DIR=""; RESOLVED_VERSION=""
@@ -5068,6 +5245,186 @@ read_archive_identity() {
     fi
   done
   return 0
+}
+
+# ------------------------------------------------------------------------------------------------ extras
+# The second asset of a release: toutwaf-extras.tar.gz, or toutwaf-extras-<n>of<m>.tar.gz when it is cut (every part under 90 MiB). It holds
+# toutwaf-extras-<version>/{agent-dist/toutwaf-agent-windows-*.exe, av-dist/toutwaf-av-*, LICENSE, VERSION, BUILD}. It is listed in the signed SHA256SUMS
+# like the archive, so the one signature check covers it; its SHA-256 is compared with SHA256SUMS (and with channel.json when that is the channel's version).
+# An installation without the extras works: it does not offer Windows nor the antivirus, and says what to do. A problem with the extras is NEVER fatal
+# here (only a bad signature, which verify_signature handles for the whole release).
+extras_names() {   # the extras files SHA256SUMS lists, parts in order; prints nothing when the release carries none
+  [ -f "$TMP/SHA256SUMS" ] || return 0
+  awk '$2 ~ /^toutwaf-extras(-[0-9]+of[0-9]+)?\.tar\.gz$/ {print $2}' "$TMP/SHA256SUMS" | sort -t- -k3,3n
+}
+extras_fail() {   # KEY ARGS...: remember that the extras are not installed, say why and what to do
+  EXTRAS_RESULT=failed; EXTRAS_DIR=""
+  warn "$(t "$@")"
+  return 0
+}
+# extras_wanted PATH: a regular file (not a link) whose place and name are the ones of the contract: agent-dist/toutwaf-agent-windows-{amd64,arm64}.exe, av-dist/toutwaf-av-<system>-<arch>
+extras_wanted() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  case "$(basename "$(dirname "$1")")/$(basename "$1")" in
+    agent-dist/toutwaf-agent-windows-amd64.exe|agent-dist/toutwaf-agent-windows-arm64.exe) return 0;;
+    av-dist/toutwaf-av-linux-amd64|av-dist/toutwaf-av-linux-arm64|av-dist/toutwaf-av-darwin-amd64|av-dist/toutwaf-av-darwin-arm64|av-dist/toutwaf-av-windows-amd64.exe|av-dist/toutwaf-av-windows-arm64.exe) return 0;;
+  esac
+  return 1
+}
+# extras_unpack FILE...: unpack the parts into $TMP/extras/out and check that they are the release's; sets EXTRAS_DIR; prints nothing
+extras_unpack() {
+  local f out="$TMP/extras/out" d top nfiles=0 v b
+  rm -rf "$out"; mkdir -p "$out"
+  for f in "$@"; do
+    if ! tar -xzf "$f" -C "$out" 2>>"$LOG"; then extras_fail w_extras_bad "$(basename "$f")"; return 0; fi
+  done
+  d=""
+  for top in "$out"/toutwaf-extras-*; do [ -d "$top" ] && { d="$top"; break; }; done
+  [ -n "$d" ] || { extras_fail w_extras_bad "$(basename "$1")"; return 0; }
+  v="$(head -n1 "$d/VERSION" 2>/dev/null | tr -d ' \t\r\n')"; b="$(clean_build "$(head -n1 "$d/BUILD" 2>/dev/null)")"
+  # they must belong to the release that was installed (or is being installed): a Windows agent of another version would not match the console
+  if [ -n "$ARCHIVE_VERSION" ] && [ -n "$v" ] && [ "$v" != "$ARCHIVE_VERSION" ]; then extras_fail w_extras_ver "$v" "$ARCHIVE_VERSION"; return 0; fi
+  if [ -n "$ARCHIVE_BUILD" ] && [ -n "$b" ] && [ "$b" != "$ARCHIVE_BUILD" ]; then extras_fail w_extras_ver "$v ($b)" "$ARCHIVE_VERSION ($ARCHIVE_BUILD)"; return 0; fi
+  for f in "$d"/agent-dist/* "$d"/av-dist/*; do extras_wanted "$f" && nfiles=$((nfiles + 1)); done
+  if [ "$nfiles" = 0 ]; then extras_fail w_extras_bad "$(basename "$1")"; return 0; fi
+  EXTRAS_DIR="$d"; EXTRAS_COUNT="$nfiles"; EXTRAS_VERSION="${v:-$ARCHIVE_VERSION}"; EXTRAS_BUILD="${b:-$ARCHIVE_BUILD}"
+  return 0
+}
+# obtain_extras: sets EXTRAS_DIR (unpacked) or EXTRAS_RESULT (none | failed | skipped); never stops the installation
+obtain_extras() {
+  EXTRAS_DIR=""; EXTRAS_RESULT=""
+  if [ "$NO_EXTRAS" = 1 ]; then EXTRAS_RESULT=skipped; return 0; fi
+  want_cp || { EXTRAS_RESULT=skipped; return 0; }
+  mkdir -p "$TMP/extras"
+  local files=() f want got n ch rel q names parts i total=0 attempt
+  # ---- local files (offline)
+  if [ -n "$EXTRAS_LOCAL" ] || { [ -n "$TARBALL" ] && ls "$(dirname "$TARBALL")"/toutwaf-extras*.tar.gz >/dev/null 2>&1; }; then
+    local oldifs="$IFS" list="$EXTRAS_LOCAL"; IFS=:
+    for f in $list; do [ -z "$f" ] || files+=("$f"); done
+    IFS="$oldifs"
+    if [ ${#files[@]} -eq 0 ]; then for f in "$(dirname "$TARBALL")"/toutwaf-extras*.tar.gz; do files+=("$f"); done; fi   # next to the archive: they belong together
+    for f in "${files[@]}"; do [ -f "$f" ] || { extras_fail w_extras_nofile "$f"; return 0; }; done
+    # a SHA256SUMS next to a file is used to check it; without one the file is trusted as the archive given with --tarball is
+    for f in "${files[@]}"; do
+      n="$(basename "$f")"
+      if [ -f "$(dirname "$f")/SHA256SUMS" ]; then
+        want="$(grep " $n\$" "$(dirname "$f")/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"
+        got="$(sha256sum "$f" | awk '{print $1}')"
+        if [ -z "$want" ] || [ "$want" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+      else info "$(t s_extras_unchecked "$n")"; fi
+    done
+    extras_unpack "${files[@]}"
+    return 0
+  fi
+  [ -z "$TARBALL" ] || { EXTRAS_RESULT=none; return 0; }   # an archive given by hand, no extras given with it
+  # ---- download: the signed SHA256SUMS of the release says which files are the extras
+  rel="$(repo_base)/releases/$RESOLVED_VERSION"; q="$(release_q "$(release_build)")"
+  if [ ! -f "$TMP/SHA256SUMS" ] || [ "$SIG_OK_FOR" != "$RESOLVED_VERSION|$(release_build)" ]; then
+    if ! fetch "$rel/SHA256SUMS$q" "$TMP/SHA256SUMS" 2>>"$LOG"; then extras_fail w_extras_dl "SHA256SUMS"; return 0; fi
+    verify_signature "$rel" "$q"      # a bad signature aborts, as for the archive
+  fi
+  names="$(extras_names)"
+  if [ -z "$names" ]; then EXTRAS_RESULT=none; return 0; fi    # a release from before the extras: nothing to install
+  parts=0; for f in $names; do parts=$((parts + 1)); done
+  case "$names" in *of[0-9]*) i="$(printf '%s\n' "$names" | head -n1 | sed -n 's/.*-[0-9]*of\([0-9]*\)\.tar\.gz/\1/p')"; if [ "$i" != "$parts" ]; then extras_fail w_extras_inc "$parts" "$i"; return 0; fi;; esac
+  files=()
+  for n in $names; do
+    f="$TMP/extras/$n"
+    for attempt in 1 2; do
+      if fetch "$rel/$n$q" "$f" 2>>"$LOG"; then break; fi
+      rm -f "$f"
+    done
+    [ -f "$f" ] || { extras_fail w_extras_dl "$n"; return 0; }
+    want="$(grep " $n\$" "$TMP/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"
+    got="$(sha256sum "$f" | awk '{print $1}')"
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+    if [ -n "$CH_JSON" ] && [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then
+      ch="$(ch_asset_sha "$n")"; if [ -n "$ch" ] && [ "$ch" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+    fi
+    total=$((total + $(wc -c <"$f")))
+    files+=("$f")
+  done
+  info "$(t s_extras_sha "$parts" "$((total / 1048576))")"
+  extras_unpack "${files[@]}"
+  return 0
+}
+# install_extras: put the unpacked extras next to the data of the control plane and record which release they are of
+install_extras() {
+  [ -n "$EXTRAS_DIR" ] || return 0
+  local f dst own grp n=0 recorded="" sub
+  own="$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")"; grp="$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")"
+  for sub in agent-dist av-dist; do
+    run install -d -m 0750 -o "$own" -g "$grp" "$(p "$DATA_DIR/$sub")" || return 0
+  done
+  for f in "$EXTRAS_DIR"/agent-dist/* "$EXTRAS_DIR"/av-dist/*; do
+    extras_wanted "$f" || continue
+    dst="$(p "$DATA_DIR/$(basename "$(dirname "$f")")/$(basename "$f")")"
+    # a copy next to the final name, moved over it: a program being downloaded by a machine is never half replaced
+    if run install -m 0640 -o "$own" -g "$grp" "$f" "$dst.new" && run mv -f "$dst.new" "$dst"; then n=$((n + 1)); recorded="$recorded\"$(basename "$f")\","; else warn "could not install $(basename "$f")"; run rm -f "$dst.new"; fi
+  done
+  if [ "$n" -gt 0 ] && [ "$DRY_RUN" = 0 ]; then
+    local ej; ej="$(p "$DATA_DIR/extras.json")"
+    printf '{"version":"%s","build":"%s","installed_at":"%s","files":[%s]}\n' "$EXTRAS_VERSION" "${EXTRAS_BUILD:-}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${recorded%,}" >"$ej.new" || true
+    chown "$own:$grp" "$ej.new" 2>/dev/null || true; chmod 0644 "$ej.new" 2>/dev/null || true
+    mv -f "$ej.new" "$ej" || warn "could not record the extras in $ej"
+  fi
+  EXTRAS_RESULT=ok; EXTRAS_COUNT="$n"
+  info "$(t s_extras_ok "$n" "$DATA_DIR")"
+  return 0
+}
+# the extras are installed for THIS release: extras.json says the version and the build, and every program it listed is still there
+extras_current() {
+  local j v b
+  j="$(p "$DATA_DIR/extras.json")"
+  [ -f "$j" ] || return 1
+  v="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$j" | head -n1)"; b="$(sed -n 's/.*"build":"\([^"]*\)".*/\1/p' "$j" | head -n1)"
+  [ -n "$v" ] && [ "$v" = "${1:-}" ] || return 1
+  [ -z "${2:-}" ] || [ "$b" = "$2" ] || return 1
+  # every program extras.json lists is still there
+  local f d
+  for f in $(grep -o '"toutwaf-[^"]*"' "$j" | tr -d '"'); do
+    case "$f" in toutwaf-agent-*) d=agent-dist;; *) d=av-dist;; esac
+    [ -s "$(p "$DATA_DIR/$d/$f")" ] || return 1
+  done
+  return 0
+}
+extras_step() { obtain_extras; install_extras; return 0; }
+# an update that finds nothing new for the programs still brings the extras when they are missing or of another build (a first install made without network, an older installer)
+extras_maintain() {
+  want_cp && [ "$NO_EXTRAS" = 0 ] || return 0
+  [ "$DRY_RUN" = 0 ] || return 0
+  if extras_current "$1" "${2:-}"; then return 0; fi
+  ARCHIVE_VERSION="$1"; ARCHIVE_BUILD="$(clean_build "${2:-}")"
+  step "$(t s_extras)" extras_step
+  extras_report
+  return 0
+}
+# the summary line for the extras (the warning with the cause is already there)
+extras_report() {
+  case "$EXTRAS_RESULT" in
+    ok) say "  $BUL $(t s_extras_ok "$EXTRAS_COUNT" "$DATA_DIR")";;
+    none) say "  $BUL $(t w_extras_none)";;
+    failed) say "  $BUL $(t w_extras_todo "sudo bash install.sh --extras-only")";;
+  esac
+  return 0
+}
+# --extras-only: the extras of the installed release, nothing else is touched
+cmd_extras() {
+  banner; detect_installed
+  [ "$INST_CP" = 1 ] || { say "  $(t extras_needs_cp)"; return 1; }
+  component_from_installed; load_existing_ports
+  local cbin curv curb; cbin="$(p "$BIN_DIR/toutwaf-cp")"; curv="$(installed_version "$cbin")"; curb="$(inst_build "$cbin" "$curv")"
+  SRC_DIR=""; ARCHIVE_VERSION="$curv"; ARCHIVE_BUILD="$(clean_build "$curb")"
+  if [ -z "$EXTRAS_LOCAL" ]; then
+    resolve_release
+    if [ "$RESOLVED_VERSION" != "$curv" ] || { [ -n "$CH_BUILD" ] && [ -n "$ARCHIVE_BUILD" ] && [ "$CH_BUILD" != "$ARCHIVE_BUILD" ]; }; then
+      say "  $(paint "$YLW" "$WRM $(t extras_other_release "$(ver_short "$RESOLVED_VERSION" "$CH_BUILD")" "$(ver_short "$curv" "$curb")")")"; return 1
+    fi
+  else RESOLVED_VERSION=local; fi
+  NO_EXTRAS=0
+  step "$(t s_extras)" extras_step
+  extras_report
+  [ "$EXTRAS_RESULT" = ok ]
 }
 
 # ------------------------------------------------------------------------------------------------ system setup
@@ -5344,7 +5701,7 @@ EnvironmentFile=-$CONF_DIR/cp.env
 ExecStart=$BIN_DIR/toutwaf-cp \$TOUTWAF_CP_ARGS
 Restart=always
 RestartSec=2s
-TimeoutStopSec=30s
+TimeoutStopSec=180s
 LimitNOFILE=262144
 NoNewPrivileges=yes
 CapabilityBoundingSet=
@@ -5446,7 +5803,7 @@ set -uo pipefail
 # journal for every failure. deploy/tests/upgrade-helper-test.sh runs the fallback with a fake environment and with a variable made unbound.
 exec 3>&2   # the journal: the standard error the service was started with, kept apart from the one captured below
 DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; BIN_DIR='@BIN_DIR@'; REPO='@REPO@'; SVC_USER='@SVC_USER@'
-comp=""; chan=""; ver=""; dg=0; job=""; trc=0; rc=0; got=0; base=""; direct=""; br=main; tmp=""; v=""; url=""; l=""; msg=""
+comp=""; chan=""; ver=""; xonly=""; dg=0; job=""; trc=0; rc=0; got=0; base=""; direct=""; br=main; tmp=""; v=""; url=""; l=""; msg=""
 urls=(); args=(); to=()
 errf=""; TOOK=0; LAST_ERR=""
 STATE_DIR="${DATA_DIR}-upgrade"
@@ -5632,7 +5989,11 @@ case "${1:-request}" in
       plog "this source does not answer; trying the next one"
     done
     [ "$got" = 1 ] || fail "cannot download the installer from any source (${urls[*]+${urls[*]}}). Nothing was changed; check the network of this server or set DIRECT_URL in $CONF_DIR/upgrade.conf"
-    args=(--update --component "$comp" --channel "$chan" --yes --no-color --quiet)
+    # EXTRAS_ONLY=1: only the extras of the installed release (the Windows agents, the antivirus programs) are installed, nothing is replaced or restarted;
+    # the installer downloads them, checks them against the signed SHA256SUMS like the archive, and installs them (install.sh --extras-only)
+    xonly="$(req_get EXTRAS_ONLY)"
+    if [ "$xonly" = 1 ]; then args=(--extras-only --component "$comp" --channel "$chan" --yes --no-color --quiet)
+    else args=(--update --component "$comp" --channel "$chan" --yes --no-color --quiet); fi
     [ "$ver" = latest ] || args+=(--version "$ver")
     [ -z "$base" ] || args+=(--base-url "$base")
     [ "$dg" = 1 ] && args+=(--force)
@@ -6660,6 +7021,46 @@ rollback_cp() {
   die "toutwaf-cp did not become healthy ($(t w_rollback))"
 }
 
+# BEGIN update-db-backup (extracted by tests/update-db-backup-test.sh: keep the markers)
+# SQLite, run by hand (no update program around): what the copy really costs. The write-ahead log is merged into the database first (by the
+# installed control plane, as the service account); if the new control plane has no migration to apply, the previous version reads the same
+# file after a rollback and no copy is made; otherwise the disk is checked BEFORE the service is stopped, the copy is checked, and a copy
+# that cannot be made stops the update (it used to go on without one).
+db_size_bytes() { local f s t=0; for f in "$@"; do [ -f "$f" ] || continue; s="$(stat -c %s "$f" 2>/dev/null || echo 0)"; t=$((t + s)); done; printf '%s' "$t"; }
+backup_sqlite_before_update() {
+  local dir="$1" db="$DATA_DIR/toutwaf.db" newcp="${SRC_DIR:-}/toutwaf-cp" st applied known need free fmb sz wal
+  [ -f "$db" ] || return 0
+  if [ -x "$(cp_exe)" ] && command -v runuser >/dev/null 2>&1; then
+    runuser -u "$SVC_USER" -- "$(cp_exe)" db-snapshot --db "$db" --checkpoint-only >>"$LOG" 2>&1 || log "the write-ahead log could not be merged first (the installed control plane predates it)"
+  fi
+  if [ -x "$newcp" ]; then
+    st="$("$newcp" schema-status --db "$db" 2>>"$LOG" | tail -n1 || true)"
+    applied="$(printf '%s' "$st" | sed -n 's/.*"applied":\([0-9][0-9]*\).*/\1/p')"; known="$(printf '%s' "$st" | sed -n 's/.*"known":\([0-9][0-9]*\).*/\1/p')"
+    if [ -n "$applied" ] && [ -n "$known" ] && [ "$applied" -ge "$known" ]; then
+      info "no database migration is pending (schema $applied): the previous version reads the same database after a rollback, so no copy of it is made"
+      return 0
+    fi
+  fi
+  sz="$(db_size_bytes "$db")"; wal="$(db_size_bytes "$db-wal")"
+  # MB: the database, what of the log can still hold pages the file does not have (the service's clean stop merges the rest; at most a tenth
+  # of the database), and a tenth more for the way the copy lands
+  local sz_mb=$((sz / 1024 / 1024)) wal_mb=$((wal / 1024 / 1024)) allow
+  allow=$((sz_mb / 10 + 64)); [ "$wal_mb" -ge "$allow" ] || allow="$wal_mb"
+  need=$(( (sz_mb + allow) * 11 / 10 + 64 ))
+  fmb="$(df -Pm "$DATA_DIR/backup" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  case "$fmb" in ""|*[!0-9]*) fmb="";; esac
+  if [ -n "$fmb" ] && [ "$fmb" -lt "$need" ]; then
+    die "not enough free disk space on the disk of $DATA_DIR/backup: $fmb MB free, about $need MB needed for the copy of the database before the migration (toutwaf.db $sz_mb MB, toutwaf.db-wal $wal_mb MB). Nothing was changed. Free that space, move the data directory to a larger disk, reduce the retention of events, or delete the older copies in $DATA_DIR/backup/pre-update-*/db, then try again"
+  fi
+  if svc_active toutwaf-cp; then systemctl stop toutwaf-cp; fi      # consistent copy of the SQLite files (restarted below)
+  if ! cp -a "$DATA_DIR"/toutwaf.db* "$DATA_DIR"/master.key "$dir/db/" 2>>"$LOG"; then
+    rm -rf "$dir/db"
+    if [ "$HAS_SYSTEMD" = 1 ]; then systemctl start toutwaf-cp 2>/dev/null || true; fi
+    die "the copy of the database before the update could not be completed (is the disk full? see $LOG). Nothing was replaced and the service was started again"
+  fi
+  DB_BACKUP_DIR="$dir/db"
+}
+
 # update: snapshot configuration, unit files and (for the control plane) the database before replacing anything
 backup_before_update() {
   [ "$STAGING" = 1 ] && return 0
@@ -6672,18 +7073,22 @@ backup_before_update() {
       # a database server: a verified pg_dump before the migrations of the new version run (the service keeps running, MVCC gives a consistent dump)
       cp -a "$DATA_DIR"/master.key "$dir/db/" 2>/dev/null || true
       if runuser -u "$SVC_USER" -- "$(cp_exe)" db backup --config "$CONF_DIR/toutwaf-cp.yaml" --dir "$dir/db" --keep 1 >>"$LOG" 2>&1; then DB_BACKUP_DIR="$dir/db"; else warn "the database could not be dumped before the update (see the log): the migrations of the new version will run without this safety copy"; fi
+    elif [ "${TOUTWAF_UPDATE_DB_HANDLED:-0}" = 1 ]; then
+      # started by toutwafctl upgrade-host: it has saved the database itself (a consistent copy in its private directory) or found that
+      # nothing is to be migrated; a second copy of a database of many gigabytes here would only fill the disk
+      info "the database is looked after by the update program: no second copy here"
     else
-      if svc_active toutwaf-cp; then systemctl stop toutwaf-cp; fi      # consistent copy of the SQLite files (restarted below)
-      cp -a "$DATA_DIR"/toutwaf.db* "$DATA_DIR"/master.key "$dir/db/" 2>/dev/null || true
-      DB_BACKUP_DIR="$dir/db"
+      backup_sqlite_before_update "$dir"
     fi
   fi
   chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR/backup" 2>/dev/null || true
-  # keep the five most recent pre-update snapshots
+  # keep the five most recent pre-update snapshots (configuration), and the copy of the database in the two newest only
   ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -5 | while IFS= read -r old; do rm -rf "$old"; done || true
+  ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -2 | while IFS= read -r old; do [ ! -d "$old/db" ] || rm -rf "$old/db"; done || true
   info "backup written to $dir"
   return 0
 }
+# END update-db-backup
 
 # ------------------------------------------------------------------------------------------------ database
 # BEGIN db-setup
@@ -7164,8 +7569,8 @@ db_ask() {
 # ------------------------------------------------------------------------------------------------ install / update flow
 CHANGED=0; OLD_DP=""; UPDATE_NOOP=0; PANEL_RAN=0
 phase_account() { create_user; make_dirs; }
-# The control plane serves the host agent builds to the servers of the cluster: they ship in every archive (agent-dist/)
-# and are kept next to the control plane data, replaced at every update.
+# The control plane serves the host agent builds to the servers of the cluster: the Linux ones ship in every archive (agent-dist/) and are kept next to the control
+# plane data, replaced at every update. The ones for Windows, and the antivirus programs, come with the extras of the release (install_extras).
 install_agent_dist() {
   local d="" src f own grp
   for src in "$(dirname "$SRC_DIR")/agent-dist" "$SRC_DIR/agent-dist"; do
@@ -7180,24 +7585,6 @@ install_agent_dist() {
   done
   info "host agent builds installed in $DATA_DIR/agent-dist"
 }
-# The console hands the ToutWAF Antivirus programs (Linux, Windows and macOS, both architectures) to the machines its installer
-# generator sets up: they ship in every archive (av-dist/) and are kept in the av-dist folder of the data directory, replaced
-# at every update. Without them the installer generator of the console answers 409 with the cause.
-install_av_dist() {
-  local d="" src f own grp
-  for src in "$(dirname "$SRC_DIR")/av-dist" "$SRC_DIR/av-dist"; do
-    if [ -d "$src" ]; then d="$src"; break; fi
-  done
-  [ -n "$d" ] || { info "this release carries no ToutWAF Antivirus programs (the installer generator of the antivirus cannot set up machines until you update)"; return 0; }
-  own="$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")"; grp="$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")"
-  run install -d -m 0750 -o "$own" -g "$grp" "$(p "$DATA_DIR/av-dist")" || return 0
-  for f in "$d"/toutwaf-av-*; do
-    [ -f "$f" ] || continue
-    run install -m 0640 -o "$own" -g "$grp" "$f" "$(p "$DATA_DIR/av-dist/$(basename "$f")")" || warn "could not install $(basename "$f")"
-  done
-  info "ToutWAF Antivirus programs installed in $DATA_DIR/av-dist"
-}
-
 # ---- ToutWAF Cloud (--cloud-url): the node connects OUTBOUND to the hosted control plane through toutwaf-cloudlink --------------------------
 # The link enrols the node (its key pair is made here, only the public key leaves), keeps one HTTPS connection to the account, and gives the data plane a
 # control-plane address on the loopback interface (http://127.0.0.1:$CLOUDLINK_PORT). The data plane keeps filtering with its last policy if the cloud is
@@ -7328,8 +7715,7 @@ phase_binaries() {
     if install_binary toutwaf-cp; then CHANGED=1; fi
     if install_binary toutwafctl; then CHANGED=1; fi
     install_agent_dist
-    # the antivirus programs are withdrawn from the product: installed only on explicit request (TOUTWAF_WITH_ANTIVIRUS=1)
-    if [ "${TOUTWAF_WITH_ANTIVIRUS:-0}" = 1 ]; then install_av_dist; fi
+    install_extras         # the Windows agents and the antivirus programs (obtain_extras unpacked them; nothing when there are none)
   fi
   link_cli
   return 0
@@ -7411,12 +7797,13 @@ do_install_flow() {
     # build cannot tell: the archive is downloaded and its files are compared, as before.)
     local ust; ust="$(update_verdict "$RESOLVED_VERSION" "$NEW_BUILD")"
     case "$ust" in
-      same) if [ -n "$NEW_BUILD" ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; return 0; fi;;
+      same) if [ -n "$NEW_BUILD" ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; extras_maintain "$RESOLVED_VERSION" "$NEW_BUILD"; return 0; fi;;
       rebuilt) say "  $BUL $(t up_rebuilt "$(installed_identity_label)" "$(ver_label "$RESOLVED_VERSION" "$NEW_BUILD")")";;
     esac
   fi
   step "$(t s_fetch "${RESOLVED_VERSION:-?}" "$ARCH")" obtain_binaries
   [ -z "$ARCHIVE_BUILD" ] || NEW_BUILD="$ARCHIVE_BUILD"
+  if want_cp && [ "$NO_EXTRAS" = 0 ]; then step "$(t s_extras)" obtain_extras; fi   # downloaded and checked now, installed with the programs (never fatal)
   if [ "$ACTION" = update ]; then
     local cur="" curb="" same=1 b
     if want_dp && [ "$INST_DP" = 1 ]; then cur="$(installed_version "$(p "$BIN_DIR/toutwaf-dp")")"; curb="$(inst_build "$(p "$BIN_DIR/toutwaf-dp")" "$cur")"; fi
@@ -7430,6 +7817,7 @@ do_install_flow() {
       say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}")")"; UPDATE_NOOP=1
       # the files are the archive's: whatever the binaries cannot say of themselves, the archive does
       record_installed "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}"
+      if [ -n "$EXTRAS_DIR" ]; then install_extras; extras_report; else extras_maintain "${ARCHIVE_VERSION:-$RESOLVED_VERSION}" "${ARCHIVE_BUILD:-$NEW_BUILD}"; fi   # same programs: the extras alone may be missing
       return 0
     fi
     step "$(t s_backup)" backup_before_update
@@ -7558,6 +7946,7 @@ case "$ACTION" in
   checkprereq) rc=0; prereq_run_check || rc=$?; exit "$rc";;
   status) persist_log; rc=0; cmd_status || rc=$?; exit "$rc";;      # (a plain call would fire the ERR trap on a non-zero status)
   links) persist_log; rc=0; cmd_links || rc=$?; exit "$rc";;
+  extras) persist_log; rc=0; cmd_extras || rc=$?; exit "$rc";;
   uninstall) persist_log; cmd_uninstall; exit 0;;
 esac
 compat_gate          # unsupported system: stops here (exit 3) before anything is changed
@@ -7598,6 +7987,7 @@ say "  $(paint "$GRN" "$OKM") $(t "done")${new_dp:+  toutwaf-dp $new_dp${OLD_DP:
 if [ "${#WARNINGS[@]}" -gt 0 ] && [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ]; then local_w=""; for local_w in "${WARNINGS[@]}"; do printf '  %s%s%s %s\n' "$YLW" "$WRM" "$R" "$local_w"; done; fi
 if want_cp && [ "$PANEL_RAN" = 0 ] && [ "$STAGING" = 0 ]; then cp_links; fi
 render_summary tty
+extras_report
 if [ "$FW_MODULE_RESULT" = on ]; then say "  $BUL $(t fwmod_done)"; fi
 if [ "$BACKUP_CLIENT_RESULT" = on ]; then say "  $BUL $(t bkc_done)"; fi
 if want_dp; then
