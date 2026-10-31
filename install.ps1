@@ -3890,8 +3890,8 @@ function Get-ChannelBuild($j) { if ($j -and ($j.PSObject.Properties.Name -contai
 # Release signature trust anchor. It lives HERE (in the installer you run), never in channel.json: the copy of the public key that
 # channel.json advertises is informational and must not be trusted. Overridden by TOUTWAF_RELEASE_PUBKEY, then by <ConfDir>\release.pub.
 # RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
-$script:ReleasePubKeyDefault = 'V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA='
-$script:ReleasePubKeyId = 'ebd2a20ce5a5650f'
+$script:ReleasePubKeyDefault = 'zSNPyjzV0ZdbjYJEKyR1S9YhfI12qw/+YuI5vW2eNWc='
+$script:ReleasePubKeyId = 'fd6f978c2fee11c6'
 $script:SigRequiredFrom = '0.2.0-dev.7'   # releases before this one were published unsigned
 function Test-CustomPubKey { return [bool]($env:TOUTWAF_RELEASE_PUBKEY -or (Test-Path (Join-Path $ConfDir 'release.pub'))) }
 function Get-PubKeyPem([string]$tmp) {

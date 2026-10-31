@@ -65,11 +65,13 @@ FW_MODULE=""; case "${TOUTWAF_WITH_FIREWALL:-}" in 1|yes|true|on) FW_MODULE=1;; 
 # --backup-client-pubkey, TOUTWAF_BACKUP_PUBKEY or $CONF_DIR/backup-release.pub. The client comes from the `toutwaf-backup` branch of the public repository.
 BACKUP_CLIENT=""; case "${TOUTWAF_WITH_BACKUP_CLIENT:-}" in 1|yes|true|on) BACKUP_CLIENT=1;; esac
 BACKUP_CLIENT_BASE="${TOUTWAF_BACKUP_BASE_URL:-https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup}"
-BACKUP_CLIENT_PUBKEY="${TOUTWAF_BACKUP_PUBKEY:-V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA=}"; BACKUP_CLIENT_VERSION=""; BACKUP_CLIENT_RESULT=""
+BACKUP_CLIENT_PUBKEY="${TOUTWAF_BACKUP_PUBKEY:-zSNPyjzV0ZdbjYJEKyR1S9YhfI12qw/+YuI5vW2eNWc=}"; BACKUP_CLIENT_VERSION=""; BACKUP_CLIENT_RESULT=""
 # Telemetry to the publisher space is ON by default and can be switched off in one click in the console ("zero telemetry"). --no-telemetry or
 # TOUTWAF_TELEMETRY=0 installs with zero telemetry from the first start (written to the control-plane configuration; the console shows it).
 NO_TELEMETRY=0; case "$(printf '%s' "${TOUTWAF_TELEMETRY:-}" | tr 'A-Z' 'a-z')" in 0|false|off|no|none|zero) NO_TELEMETRY=1;; esac
 # The database (--db): empty = ask in the interactive mode; SQLite (unchanged behaviour) otherwise. See the db-setup block.
+# common licence (ToutPanel + ToutWAF): address of the licence site and its pinned public key(s), written to the configuration before the first start
+LICENCE_API_URL="${TOUTWAF_LICENCE_API_URL:-}"; LICENCE_PINS=""; LICENCE_PIN_FILE="${TOUTWAF_LICENCE_PIN_FILE:-}"; LICENCE_PINNED=""
 DB_ENGINE="${TOUTWAF_DB:-}"; DB_DSN="${TOUTWAF_DB_DSN:-}"; DB_DSN_FILE="${TOUTWAF_DB_DSN_FILE:-}"; DB_LOCAL=""; case "${TOUTWAF_DB_INSTALL_LOCAL:-}" in 1|yes|true|on) DB_LOCAL=1;; esac
 DB_HOST=""; DB_PORT=""; DB_NAME="toutwaf"; DB_USER="toutwaf"; DB_PASSWORD_FILE="${TOUTWAF_DB_PASSWORD_FILE:-}"; DB_TLS_MODE=""; DB_CA=""
 DB_ADMIN_DSN_FILE=""; DB_BACKUP_TIMER=1; DB_SERVER_LOCAL=0; DB_RESULT=""; DB_SECRET_WRITTEN=0; DB_ASKED=0; DB_SCHEMA_LINE=""; DB_BACKUP_SCHEDULED=0
@@ -3696,15 +3698,16 @@ env_check() {   # fills EC_LV / EC_CA / EC_AC from what this machine is; changes
     local ok=1
     if have curl; then curl -sk -o /dev/null --max-time 8 "$CP_URL" >/dev/null 2>&1 || ok=0
     else
-      local hp="${CP_URL#*://}"; hp="${hp%%/*}"
-      { if have timeout; then timeout 8 bash -c "exec 4<>/dev/tcp/${hp%%:*}/${hp##*:}"; else bash -c "exec 4<>/dev/tcp/${hp%%:*}/${hp##*:}"; fi; } >/dev/null 2>&1 || ok=0
+      local hp="${CP_URL#*://}"; hp="${hp%%/*}" hh hpt
+      hpt="${hp##*:}"; hh="${hp%:*}"; hh="${hh#[}"; hh="${hh%]}"   # https://[2001:db8::1]:9444 -> 2001:db8::1 and 9444
+      { if have timeout; then timeout 8 bash -c "exec 4<>/dev/tcp/$hh/$hpt"; else bash -c "exec 4<>/dev/tcp/$hh/$hpt"; fi; } >/dev/null 2>&1 || ok=0
     fi
     [ "$ok" = 1 ] || ec_add "$refuse" "$(t pf_cp_cause "$CP_URL")$nostart" "$(t pf_cp_action)"
   fi
 
   # 5. a private address: probably behind a router (said once installed, by the console; here a note so that nothing is a surprise)
   if want_dp && [ "$STAGING" = 0 ]; then
-    local lip; lip="$(local_ips | head -n1 || true)"
+    local lip; lip="$(local_ips4 | head -n1 || true)"
     if [ -n "$lip" ] && ec_is_private "$lip"; then ec_add info "$(t pf_router_cause "$lip")" "$(t pf_router_action)"; fi
   fi
   return 0
@@ -4028,6 +4031,13 @@ Options:
   --base-url URL             mirror of the release tree (expects <URL>/channel.json and <URL>/releases/<version>/..., see deploy/RELEASE-LAYOUT.md)
   --via-repo                 install from ToutWAF's own package repository (adds a signed dnf .repo / apt .list, installs the package \`toutwaf\`);
                              when it is unreachable or the system is not covered, falls back to the direct download (GitLab, then GitHub)
+  --licence-api-url URL      address of the licence site of the common licence (license.common.api_url), written to the configuration before the
+                             first start (also TOUTWAF_LICENCE_API_URL). https only (http on a loopback address only)
+  --licence-pin FP:KEY       pin the public key of the licence site without the console: FP is its fingerprint (SHA-256 of the raw key, the 32 first
+                             hex characters, in groups of 4 or not), KEY the key in base64 (32 bytes). Refused when FP is not the fingerprint of KEY.
+                             Repeat it for a rotation (four keys at most)
+  --licence-pin-file FILE    the same, one FP:KEY per line (lines starting with # ignored): the key does not show in the process list
+                             (also TOUTWAF_LICENCE_PIN_FILE)
   --cp-url URL               enrol the data plane with this control plane (e.g. https://cp:9444)
   --enroll-token TOKEN       one-time enrolment token (console: Nodes > Add node)
   --node-token TOKEN         existing node token instead of enrolment
@@ -4126,10 +4136,77 @@ db_check_options() {
 }
 # END db-options
 
+# BEGIN licence-options
+# the common licence, non interactive: the address of the licence site and its public key(s), checked here and written to toutwaf-cp.yaml
+# (license.common.api_url / pinned_keys) before the first start. The public key is not a secret; nothing but the fingerprint is ever logged.
+licence_pin_parse() {   # "FP:KEY" -> LP_FP (32 lower case hex) LP_KEY (canonical base64); returns 1 and sets LP_ERR when it is not valid
+  local v="$1" fp key f size sum
+  LP_ERR=""; LP_FP=""; LP_KEY=""
+  case "$v" in *:*) ;; *) LP_ERR="expected FINGERPRINT:KEY"; return 1;; esac
+  key="${v##*:}"; fp="${v%:*}"
+  fp="$(printf '%s' "$fp" | tr -d ' \t-' | tr 'A-F' 'a-f')"
+  [[ "$fp" =~ ^[0-9a-f]{32}$ ]] || { LP_ERR="the fingerprint must be 32 hexadecimal characters (groups of 4 allowed)"; return 1; }
+  key="$(printf '%s' "$key" | tr -d ' \t\r\n' | tr '_-' '/+' | tr -d '=')"
+  [[ "$key" =~ ^[A-Za-z0-9+/]{43}$ ]] || { LP_ERR="the key must be a base64 Ed25519 public key of 32 bytes"; return 1; }
+  f="$(mktemp)" || { LP_ERR="no temporary file"; return 1; }
+  printf '%s=' "$key" | base64 -d >"$f" 2>/dev/null || true
+  size="$(wc -c <"$f" | tr -d ' ')"
+  sum="$(sha256sum "$f" | cut -c1-32)"; rm -f "$f"
+  [ "$size" = 32 ] || { LP_ERR="the key must be a base64 Ed25519 public key of 32 bytes"; return 1; }
+  [ "$sum" = "$fp" ] || { LP_ERR="the fingerprint is not the one of this key: nothing is pinned"; return 1; }
+  LP_FP="$fp"; LP_KEY="$key="
+  return 0
+}
+licence_check_options() {
+  local line n=0 all=""
+  if [ -n "$LICENCE_API_URL" ]; then
+    [[ "$LICENCE_API_URL" =~ ^(https://[A-Za-z0-9.-]+|http://(localhost|127\.0\.0\.1|\[::1\]))(:[0-9]{1,5})?(/[A-Za-z0-9._~%+/-]*)?$ ]] \
+      || die "--licence-api-url: an https address without credentials nor query (http only on a loopback address)"
+  fi
+  if [ -n "$LICENCE_PIN_FILE" ]; then
+    [ -r "$LICENCE_PIN_FILE" ] || die "--licence-pin-file: cannot read $LICENCE_PIN_FILE"
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"; case "$line" in ""|"#"*) continue;; esac
+      all="${all:+$all
+}$line"
+    done <"$LICENCE_PIN_FILE"
+  fi
+  [ -z "$LICENCE_PINS" ] || all="${all:+$all
+}$LICENCE_PINS"
+  LICENCE_PINNED=""
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    licence_pin_parse "$line" || die "--licence-pin: $LP_ERR"
+    case "
+$LICENCE_PINNED
+" in *"
+$LP_FP $LP_KEY
+"*) continue;; esac
+    LICENCE_PINNED="${LICENCE_PINNED:+$LICENCE_PINNED
+}$LP_FP $LP_KEY"; n=$((n + 1))
+  done <<<"$all"
+  [ "$n" -le 4 ] || die "--licence-pin: four keys at most"
+  return 0
+}
+# the license: section of toutwaf-cp.yaml for the options above (empty when none was given)
+licence_yaml() {
+  local fp key
+  [ -n "$LICENCE_API_URL$LICENCE_PINNED" ] || return 0
+  printf 'license:\n  common:\n'
+  [ -z "$LICENCE_API_URL" ] || printf '    api_url: "%s"\n' "$LICENCE_API_URL"
+  if [ -n "$LICENCE_PINNED" ]; then
+    printf '    pinned_keys:\n'
+    while IFS=' ' read -r fp key; do [ -n "$key" ] && printf '      - "%s"\n' "$key"; done <<<"$LICENCE_PINNED"
+  fi
+  return 0
+}
+# END licence-options
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --install) ACTION=install; shift;;
     --update) ACTION=update; shift;;
+    --db-prepare) ACTION=dbprepare; shift;;
     --uninstall) ACTION=uninstall; shift;;
     --status) ACTION=status; shift;;
     --links|--show-links) ACTION=links; shift;;
@@ -4142,6 +4219,10 @@ while [ $# -gt 0 ]; do
     --extras-only) ACTION=extras; shift;;
     --base-url) BASE_URL="$2"; shift 2;;
     --via-repo) VIA_REPO=1; shift;;
+    --licence-api-url|--license-api-url) LICENCE_API_URL="$2"; shift 2;;
+    --licence-pin|--license-pin) LICENCE_PINS="${LICENCE_PINS:+$LICENCE_PINS
+}$2"; shift 2;;
+    --licence-pin-file|--license-pin-file) LICENCE_PIN_FILE="$2"; shift 2;;
     --cp-url) CP_URL="$2"; shift 2;;
     --enroll-token) ENROLL_TOKEN="$2"; shift 2;;
     --node-token) NODE_TOKEN="$2"; shift 2;;
@@ -4206,6 +4287,7 @@ while [ $# -gt 0 ]; do
 done
 detect_lang; detect_ui
 db_check_options
+licence_check_options
 case "$COMPONENT" in dp|cp|all) ;; *) die "--component must be dp, cp or all";; esac
 case "$CHANNEL" in beta) CHANNEL=dev;; esac
 case "$CHANNEL" in ""|stable|dev) ;; *) die "--channel must be stable or dev";; esac
@@ -4483,7 +4565,22 @@ ch_asset_sha() {   # asset name -> sha256 from channel.json
 }
 
 # ------------------------------------------------------------------------------------------------ addresses + panel data
-local_ips() {
+# urlhost ADDR: an IPv6 literal goes between brackets in a URL (https://[2001:db8::1]:9443/), a name or an IPv4 address does not
+urlhost() { case "$1" in \[*) printf '%s' "$1";; *:*) printf '[%s]' "$1";; *) printf '%s' "$1";; esac; }
+# hostport HOST PORT: host:port for a URL or a bracketed IPv6 literal
+hostport() { printf '%s:%s' "$(urlhost "$1")" "$2"; }
+# has_ipv6: the kernel has IPv6 (not disabled with ipv6.disable=1)
+has_ipv6() { [ -e /proc/net/if_inet6 ]; }
+# any_addr: the address the services listen on: [::] answers IPv6 AND IPv4 (dual stack) when the kernel has IPv6, else 0.0.0.0
+any_addr() { if has_ipv6 && [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 0)" != 1 ]; then printf '[::]'; else printf '0.0.0.0'; fi; }
+# local_ips6: the global IPv6 addresses of the machine (not link-local), without the temporary privacy addresses
+local_ips6() {
+  { if have ip; then ip -6 -o addr show scope global 2>/dev/null | grep -v -E 'temporary|deprecated' | awk '{print $4}' | cut -d/ -f1
+    fi; } | grep -E '^[0-9a-fA-F:]+$' | grep -F ':' | sort -u || true
+}
+# local_ips: IPv6 first, then IPv4
+local_ips() { { local_ips6; local_ips4; } | awk 'NF && !s[$0]++' || true; }
+local_ips4() {
   { if have ip; then ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
     elif have hostname && hostname -I >/dev/null 2>&1; then hostname -I | tr ' ' '\n'
     else awk '/32 host/ { print f } {f=$2}' /proc/net/fib_trie 2>/dev/null; fi; } | grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -v '^127\.' | sort -u || true
@@ -4493,8 +4590,13 @@ detect_public_ip() {
   if [ -n "$PUBLIC_HOST" ]; then PUBLIC_IP="$PUBLIC_HOST"; return 0; fi
   [ "$STAGING" = 1 ] && return 0
   local u ip
+  # IPv6 first (curl -6), then IPv4 (curl -4)
+  for u in https://api64.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+    ip="$(curl -6 -fsS --max-time 4 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^[0-9a-fA-F:]+$ && "$ip" == *:* ]]; then PUBLIC_IP="$ip"; return 0; fi
+  done
   for u in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
-    ip="$(curl -fsS --max-time 4 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
+    ip="$(curl -4 -fsS --max-time 4 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
     if [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then PUBLIC_IP="$ip"; return 0; fi
   done
   return 0
@@ -4731,10 +4833,10 @@ panel_urls() {   # one "label|url" per line: the control plane's links[] when kn
       seen+="$u "
     done <<<"$BS_LINKS"
   else
-    while IFS= read -r h; do if [ -n "$h" ]; then printf '%s|https://%s:%s/%s\n' "$(t sum_local)" "$h" "$CP_PORT" "$path"; fi; done < <(local_ips)
+    while IFS= read -r h; do if [ -n "$h" ]; then printf '%s|https://%s/%s\n' "$(t sum_local)" "$(hostport "$h" "$CP_PORT")" "$path"; fi; done < <(local_ips)
   fi
   if [ -n "$PUBLIC_IP" ]; then
-    u="https://$PUBLIC_IP:$CP_PORT/$path"
+    u="https://$(hostport "$PUBLIC_IP" "$CP_PORT")/$path"
     case "$seen" in *" $u "*) ;; *) printf '%s|%s\n' "$(t sum_public)" "$u";; esac
   fi
   return 0
@@ -4745,9 +4847,9 @@ setup_urls() {   # one "label|url" per line: the one-time setup link on every lo
   if [ -z "$sp" ]; then sp="/${BS_PATH:+$BS_PATH/}setup"; fi
   case "$sp" in /*) ;; *) sp="/$sp";; esac
   if [[ "$sp" != *"$BS_SETUP_TOKEN"* ]]; then case "$sp" in *\?*) sp="$sp&token=$BS_SETUP_TOKEN";; *) sp="$sp?token=$BS_SETUP_TOKEN";; esac; fi
-  while IFS= read -r h; do [ -n "$h" ] && printf '%s|https://%s:%s%s\n' "$(t sum_local)" "$h" "$CP_PORT" "$sp"; done < <(local_ips)
-  if [ -n "$PUBLIC_IP" ]; then printf '%s|https://%s:%s%s\n' "$(t sum_public)" "$PUBLIC_IP" "$CP_PORT" "$sp"
-  elif [ -z "$(local_ips)" ]; then printf '%s|https://%s:%s%s\n' "$(t sum_local)" "$(fqdn)" "$CP_PORT" "$sp"; fi
+  while IFS= read -r h; do [ -n "$h" ] && printf '%s|https://%s%s\n' "$(t sum_local)" "$(hostport "$h" "$CP_PORT")" "$sp"; done < <(local_ips)
+  if [ -n "$PUBLIC_IP" ]; then printf '%s|https://%s%s\n' "$(t sum_public)" "$(hostport "$PUBLIC_IP" "$CP_PORT")" "$sp"
+  elif [ -z "$(local_ips)" ]; then printf '%s|https://%s%s\n' "$(t sum_local)" "$(hostport "$(fqdn)" "$CP_PORT")" "$sp"; fi
   return 0
 }
 setup_url() { setup_urls | head -n1 | cut -d'|' -f2; }
@@ -4891,6 +4993,8 @@ cmd_uninstall() {
     ask_yn a "$(t q_purge)" 0; [ "$a" = 1 ] || die "$(t aborted)"
   fi
   detect_installed; load_existing_ports
+  # the activation of the common licence (key TP-...) is freed at the licence site while the console still runs; best effort, never blocks
+  if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ -x "$BIN_DIR/toutwafctl" ]; then timeout 30 "$BIN_DIR/toutwafctl" license deactivate --quiet >>"$LOG" 2>&1 || true; fi
   # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
@@ -5001,8 +5105,8 @@ fetch() { curl -fsSL --retry 3 --connect-timeout 15 -o "$2" "$1"; }
 # Release signature trust anchor. It lives HERE (in the installer you run), never in channel.json: the copy of the public key that
 # channel.json advertises is informational and must not be trusted. Overridden by TOUTWAF_RELEASE_PUBKEY, then by $CONF_DIR/release.pub.
 # RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
-RELEASE_PUBKEY_DEFAULT='V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA='
-RELEASE_PUBKEY_ID='ebd2a20ce5a5650f'
+RELEASE_PUBKEY_DEFAULT='zSNPyjzV0ZdbjYJEKyR1S9YhfI12qw/+YuI5vW2eNWc='
+RELEASE_PUBKEY_ID='fd6f978c2fee11c6'
 SIG_REQUIRED_FROM='0.2.0-dev.7'   # releases before this one were published unsigned
 
 # release_pubkey: prints the path of a PEM public key (Ed25519): TOUTWAF_RELEASE_PUBKEY, else $CONF_DIR/release.pub, else the built-in key
@@ -5525,8 +5629,8 @@ group: ${NODE_GROUP:-default}
 data_dir: $DATA_DIR
 certs_dir: $DATA_DIR/certs
 listen:
-  http: ["0.0.0.0:$HTTP_PORT"]
-  https: ["0.0.0.0:$HTTPS_PORT"]
+  http: ["$(any_addr):$HTTP_PORT"]       # [::] = IPv6 and IPv4 on the same socket (0.0.0.0 on a kernel without IPv6)
+  https: ["$(any_addr):$HTTPS_PORT"]
   # proxy_protocol: optional      # when behind a TCP load balancer sending PROXY protocol
 admin:
   listen: 127.0.0.1:9101          # /healthz /metrics /status /debug/inspect (loopback only)
@@ -5580,11 +5684,16 @@ EOF
 
 cp_config() {
   [ "$DRY_RUN" = 1 ] && return 0
-  local pubhost="${PUBLIC_HOST:-$(fqdn)}"
-  cat <<EOF | write_if_absent "$(p "$CONF_DIR/toutwaf-cp.yaml")" 0640 "root:$SVC_USER"
+  local pubhost="${PUBLIC_HOST:-$(fqdn)}" cpf lic; cpf="$(p "$CONF_DIR/toutwaf-cp.yaml")"; lic="$(licence_yaml)"
+  if [ -n "$lic" ] && [ -e "$cpf" ]; then   # a configuration that exists is kept: the section is added only when it has none
+    if grep -q '^license:' "$cpf"; then warn "$cpf already has a license: section: the licence options are not applied (use: toutwafctl license pin / api-url)"
+    else printf '\n# common licence (added by the installer options --licence-api-url / --licence-pin)\n%s\n' "$lic" >>"$cpf"; info "licence site settings added to $cpf"; fi
+    lic=""
+  fi
+  cat <<EOF | write_if_absent "$cpf" 0640 "root:$SVC_USER"
 # ToutWAF control plane
 data_dir: $DATA_DIR
-public_url: https://$pubhost:$CP_PORT
+public_url: https://$(hostport "$pubhost" "$CP_PORT")
 listen:
   console: ":$CP_PORT"
   dp: ":9444"
@@ -5604,7 +5713,10 @@ dataplane:
 # (Settings > Privacy and telemetry), the console wins over this file. Details: docs/confidentialite-telemetrie.md
 telemetry:
   enabled: $([ "$NO_TELEMETRY" = 1 ] && echo false || echo true)
+${lic:+# common licence of ToutPanel and ToutWAF (installer options --licence-api-url / --licence-pin)
+$lic}
 EOF
+  [ -z "$lic" ] || [ -z "$LICENCE_PINNED" ] || info "licence site key(s) pinned, fingerprint: $(printf '%s' "$LICENCE_PINNED" | cut -d' ' -f1 | paste -sd, -)"
   cat <<EOF | write_if_absent "$(p "$CONF_DIR/cp.env")" 0640 "root:$SVC_USER"
 # Extra command-line arguments and environment for toutwaf-cp (see https://github.com/$REPO)
 TOUTWAF_CP_ARGS=--config $CONF_DIR/toutwaf-cp.yaml
@@ -5726,6 +5838,9 @@ LockPersonality=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @mount @swap @reboot @raw-io @obsolete @debug @cpu-emulation @clock
+# A call the filter refuses fails with EPERM instead of killing the process (the default is SIGSYS): the terminal of the console starts a shell, which inherits this filter, and
+# ncurses, chown, cp -a... make calls from the groups above; killed by SIGSYS the shell ended at once and the terminal "opened no session".
+SystemCallErrorNumber=EPERM
 UMask=0027
 ReadWritePaths=$DATA_DIR $LOG_DIR
 ReadOnlyPaths=$CONF_DIR
@@ -7564,6 +7679,22 @@ db_ask() {
   ap=""
   return 0
 }
+
+# `toutwaf-install --db-prepare --db-install-local`: prepare a PostgreSQL server for an installation that already runs on SQLite (the console assistant
+# "Switch to PostgreSQL" asks for it through the root helper). Installs the package if missing, initialises and secures the server (loopback only), creates the
+# role and the database with a random password, writes the connection file and applies the schema. It does NOT touch the configuration of the control plane
+# and moves no data: the assistant of the console does that, with a backup, a verification and a roll-back.
+cmd_db_prepare() {
+  DB_LOCAL=1
+  detect_installed
+  [ "$INST_CP" = 1 ] || die "$(t not_installed)"
+  compat_gate
+  db_setup_local
+  db_apply_schema
+  db_backup_units
+  db_unit_dropin
+  printf 'TW_DB_PREPARE=ok\nDSN_FILE=%s\nRESULT=%s\n' "$(db_secret_file)" "$DB_RESULT"
+}
 # END db-setup
 
 # ------------------------------------------------------------------------------------------------ install / update flow
@@ -7714,11 +7845,19 @@ phase_binaries() {
   if want_cp; then
     if install_binary toutwaf-cp; then CHANGED=1; fi
     if install_binary toutwafctl; then CHANGED=1; fi
+    keep_installer_copy
     install_agent_dist
     install_extras         # the Windows agents and the antivirus programs (obtain_extras unpacked them; nothing when there are none)
   fi
   link_cli
   return 0
+}
+# The installer stays on the machine (toutwaf-install): the console's "Switch to PostgreSQL" assistant asks the root helper (toutwaf-jobs, verb
+# pg_install_local) to run `toutwaf-install --db-prepare --db-install-local`, the same code that installs PostgreSQL during an installation.
+keep_installer_copy() {
+  [ "$DRY_RUN" = 0 ] || return 0
+  [ -f "$0" ] && head -c 2 "$0" 2>/dev/null | grep -q '#!' || return 0
+  run install -m 0755 "$0" "$(p "$BIN_DIR/toutwaf-install")" || warn "could not keep a copy of the installer"
 }
 phase_config() { if want_dp; then cloud_link_enrol; dp_config; fi; if want_cp; then cp_config; fi; return 0; }
 phase_units() { write_units; cloud_link_unit; tune_sysctl; set_caps; return 0; }
@@ -7948,6 +8087,7 @@ case "$ACTION" in
   links) persist_log; rc=0; cmd_links || rc=$?; exit "$rc";;
   extras) persist_log; rc=0; cmd_extras || rc=$?; exit "$rc";;
   uninstall) persist_log; cmd_uninstall; exit 0;;
+  dbprepare) persist_log; rc=0; cmd_db_prepare || rc=$?; exit "$rc";;
 esac
 compat_gate          # unsupported system: stops here (exit 3) before anything is changed
 persist_log
