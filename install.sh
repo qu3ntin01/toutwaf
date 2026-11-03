@@ -18,6 +18,10 @@
 #   * opens the firewall by default when firewalld or ufw is active (80/443 + console port; --console-from, --no-firewall), labels files for SELinux, installs logrotate + sysctl tuning
 #   * prepares the panel (`toutwaf-cp bootstrap`) and prints the panel links, the one-time setup link and the ports to open
 #   * upgrades with automatic rollback when the new version fails its health check
+#
+# A node reached through a WireGuard tunnel to the main ToutWAF is NOT installed with this script by hand: the console (VPN > Add a WAF node) serves
+# a node installer (node-install.sh / node-install.ps1) that sets the tunnel up, then runs THIS script with `--component dp --cp-url <control plane in
+# the tunnel> --enroll-token <one-time token> --no-firewall` (it opens the ports itself, according to the traffic mode). See docs/vpn/noeuds-waf.md.
 set -Eeuo pipefail
 IFS=$'\n\t'
 umask 022      # files we create must not inherit a permissive/odd caller umask (secrets are chmod-ed explicitly)
@@ -46,6 +50,8 @@ if [ -n "${TOUTWAF_REPO:-}" ]; then SRC_PRIMARY="$SRC_FALLBACK"; SRC_FALLBACK=""
 CP_BIN="${TOUTWAF_CP_BIN:-}"                    # override of the toutwaf-cp used for `bootstrap` (tests)
 TARBALL=""                                      # local tarball instead of download
 CP_URL=""; NODE_TOKEN=""; ENROLL_TOKEN=""; NODE_GROUP=""; CP_CA=""
+CLOUD_URL=""; CLOUD_PINS=""; CLOUD_CA=""; CLOUD_ENROL_TOKEN=""   # ToutWAF Cloud: the node connects OUTBOUND to the hosted control plane (toutwaf-cloudlink)
+CLOUDLINK_PORT=9544
 CP_PORT=9443; HTTP_PORT=80; HTTPS_PORT=443; PUBLIC_HOST=""; CHANNEL="${TOUTWAF_CHANNEL:-}"
 OPEN_FW=""                                      # "" = default: open what is needed when firewalld / ufw is active; 1 = same, explicit; 0 = never touch the firewall
 CONSOLE_FROM=""                                 # restrict the console port to this address / CIDR ("" = reachable from anywhere)
@@ -53,9 +59,29 @@ CONSOLE_FROM=""                                 # restrict the console port to t
 # in firewalld / ufw). "" = not decided (asked in the interactive mode, default NO); 1 = switch the module on at the end of the installation
 # (no rule is applied: every change goes through the trial with automatic rollback in the console); 0 = explicitly not.
 FW_MODULE=""; case "${TOUTWAF_WITH_FIREWALL:-}" in 1|yes|true|on) FW_MODULE=1;; 0|no|false|off) FW_MODULE=0;; esac
+# The ToutWAF Backup client (the program that backs this machine up to a ToutWAF Backup server, see docs/backup/toutwaf-backup.md): installed only on request,
+# from the release channel of that product, after the Ed25519 signature of its SHA256SUMS and the SHA-256 of the archive have been verified. The public
+# key is the release key of the publisher (the one the products of this repository are signed with), built in as the default; another key can be given with
+# --backup-client-pubkey, TOUTWAF_BACKUP_PUBKEY or $CONF_DIR/backup-release.pub. The client comes from the `toutwaf-backup` branch of the public repository.
+BACKUP_CLIENT=""; case "${TOUTWAF_WITH_BACKUP_CLIENT:-}" in 1|yes|true|on) BACKUP_CLIENT=1;; esac
+BACKUP_CLIENT_BASE="${TOUTWAF_BACKUP_BASE_URL:-https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup}"
+BACKUP_CLIENT_PUBKEY="${TOUTWAF_BACKUP_PUBKEY:-gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0=}"; BACKUP_CLIENT_VERSION=""; BACKUP_CLIENT_RESULT=""
+# Telemetry to the publisher space is ON by default and can be switched off in one click in the console ("zero telemetry"). --no-telemetry or
+# TOUTWAF_TELEMETRY=0 installs with zero telemetry from the first start (written to the control-plane configuration; the console shows it).
+NO_TELEMETRY=0; case "$(printf '%s' "${TOUTWAF_TELEMETRY:-}" | tr 'A-Z' 'a-z')" in 0|false|off|no|none|zero) NO_TELEMETRY=1;; esac
+# The database (--db): empty = ask in the interactive mode; SQLite (unchanged behaviour) otherwise. See the db-setup block.
+# common licence (ToutPanel + ToutWAF): address of the licence site and its pinned public key(s), written to the configuration before the first start
+LICENCE_API_URL="${TOUTWAF_LICENCE_API_URL:-}"; LICENCE_PINS=""; LICENCE_PIN_FILE="${TOUTWAF_LICENCE_PIN_FILE:-}"; LICENCE_PINNED=""
+DB_ENGINE="${TOUTWAF_DB:-}"; DB_DSN="${TOUTWAF_DB_DSN:-}"; DB_DSN_FILE="${TOUTWAF_DB_DSN_FILE:-}"; DB_LOCAL=""; case "${TOUTWAF_DB_INSTALL_LOCAL:-}" in 1|yes|true|on) DB_LOCAL=1;; esac
+DB_HOST=""; DB_PORT=""; DB_NAME="toutwaf"; DB_USER="toutwaf"; DB_PASSWORD_FILE="${TOUTWAF_DB_PASSWORD_FILE:-}"; DB_TLS_MODE=""; DB_CA=""
+DB_ADMIN_DSN_FILE=""; DB_BACKUP_TIMER=1; DB_SERVER_LOCAL=0; DB_RESULT=""; DB_SECRET_WRITTEN=0; DB_ASKED=0; DB_SCHEMA_LINE=""; DB_BACKUP_SCHEDULED=0
 OPEN_CP_PORT=0; NO_SELINUX=0; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
 QUIET=0; NO_COLOR_FLAG=0; ACCEPT_DEFAULTS=0
 CHECK_COMPAT=0                                  # --check-compat: print the compatibility verdict, change nothing (exit 0 compatible, 3 not)
+# The extras of a release (deploy/RELEASE-LAYOUT.md, "Extras"): the host agent for Windows and the antivirus programs, a second asset next to the archive of the platform.
+# --no-extras (or TOUTWAF_NO_EXTRAS=1) leaves them out; --extras FILE (repeatable, or TOUTWAF_EXTRAS=FILE:FILE) installs them from local files (offline).
+NO_EXTRAS=0; case "${TOUTWAF_NO_EXTRAS:-}" in 1|yes|true|on) NO_EXTRAS=1;; esac
+EXTRAS_LOCAL="${TOUTWAF_EXTRAS:-}"; EXTRAS_DIR=""; EXTRAS_RESULT=""; EXTRAS_COUNT=0; EXTRAS_VERSION=""; EXTRAS_BUILD=""; SIG_OK_FOR=""
 ACTION=""; PURGE=0; LANG_CODE="${TOUTWAF_LANG:-}"; NARGS=$#
 
 # ------------------------------------------------------------------------------------------------ message catalog
@@ -1177,11 +1203,81 @@ fr|fwmod_n1|Module optionnel, éteint sauf si vous répondez oui. Rien n'est app
 es|fwmod_n1|Módulo opcional, apagado salvo que diga sí. No se aplica nada durante la instalación: revisa cada cambio en la consola.
 de|fwmod_n1|Optionales Modul, aus, außer Sie sagen ja. Während der Installation wird nichts angewendet: Sie prüfen jede Änderung in der Konsole.
 it|fwmod_n1|Modulo opzionale, spento salvo risposta affermativa. Durante l'installazione non viene applicato nulla: ogni modifica si rivede nella console.
-pt|fwmod_n1|Módulo opcional, desligado salvo se disser que sim. Nada é aplicado durante a instalação: revê cada alteração na consola.
+pt|fwmod_n1|Módulo opcional, desligado a não ser que diga que sim. Nada é aplicado durante a instalação: revê cada alteração na consola.
 nl|fwmod_n1|Optionele module, uit tenzij u ja zegt. Tijdens de installatie wordt niets toegepast: u controleert elke wijziging in de console.
 ru|fwmod_n1|Необязательный модуль, выключен, если вы не ответите «да». Во время установки ничего не применяется: каждое изменение вы проверяете в консоли.
 zh|fwmod_n1|可选模块，除非回答“是”否则保持关闭。安装期间不会应用任何规则：每项更改都在控制台中审核。
 ar|fwmod_n1|وحدة اختيارية، متوقفة ما لم تجب بنعم. لا يُطبَّق شيء أثناء التثبيت: تراجع كل تغيير في لوحة التحكم.
+en|s_bkclient|Installing the ToutWAF Backup client (signature checked)
+fr|s_bkclient|Installation du client ToutWAF Backup (signature vérifiée)
+es|s_bkclient|Instalando el cliente ToutWAF Backup (firma verificada)
+de|s_bkclient|ToutWAF-Backup-Client wird installiert (Signatur geprüft)
+it|s_bkclient|Installazione del client ToutWAF Backup (firma verificata)
+pt|s_bkclient|A instalar o cliente ToutWAF Backup (assinatura verificada)
+nl|s_bkclient|ToutWAF Backup-client wordt geïnstalleerd (handtekening gecontroleerd)
+ru|s_bkclient|Установка клиента ToutWAF Backup (подпись проверена)
+zh|s_bkclient|正在安装 ToutWAF Backup 客户端（已校验签名）
+ar|s_bkclient|تثبيت عميل ToutWAF Backup (تم التحقق من التوقيع)
+en|bkc_done|ToutWAF Backup client installed. Next: console, Backups > Backup servers, to pair a backup server.
+fr|bkc_done|Client ToutWAF Backup installé. Étape suivante : console, Sauvegardes > Serveurs de sauvegarde, pour associer un serveur.
+es|bkc_done|Cliente ToutWAF Backup instalado. Siguiente: consola, Copias > Servidores de copia, para vincular un servidor.
+de|bkc_done|ToutWAF-Backup-Client installiert. Weiter: Konsole, Backups > Backup-Server, um einen Server zu koppeln.
+it|bkc_done|Client ToutWAF Backup installato. Poi: console, Backup > Server di backup, per associare un server.
+pt|bkc_done|Cliente ToutWAF Backup instalado. Seguinte: consola, Cópias > Servidores de cópia, para associar um servidor.
+nl|bkc_done|ToutWAF Backup-client geïnstalleerd. Volgende stap: console, Back-ups > Back-upservers, om een server te koppelen.
+ru|bkc_done|Клиент ToutWAF Backup установлен. Далее: консоль, Резервные копии > Серверы копирования, чтобы привязать сервер.
+zh|bkc_done|ToutWAF Backup 客户端已安装。下一步：控制台“备份 > 备份服务器”，配对备份服务器。
+ar|bkc_done|تم تثبيت عميل ToutWAF Backup. التالي: الوحدة، النسخ الاحتياطي > خوادم النسخ، لربط خادم.
+en|bkc_fail|The ToutWAF Backup client was NOT installed (%s). The installation goes on; install it later with --with-backup-client.
+fr|bkc_fail|Le client ToutWAF Backup n’a PAS été installé (%s). L’installation continue ; installez-le plus tard avec --with-backup-client.
+es|bkc_fail|El cliente ToutWAF Backup NO se instaló (%s). La instalación continúa; instálelo después con --with-backup-client.
+de|bkc_fail|Der ToutWAF-Backup-Client wurde NICHT installiert (%s). Die Installation läuft weiter; später mit --with-backup-client nachholen.
+it|bkc_fail|Il client ToutWAF Backup NON è stato installato (%s). L’installazione prosegue; installalo più tardi con --with-backup-client.
+pt|bkc_fail|O cliente ToutWAF Backup NÃO foi instalado (%s). A instalação continua; instale-o depois com --with-backup-client.
+nl|bkc_fail|De ToutWAF Backup-client is NIET geïnstalleerd (%s). De installatie gaat door; installeer hem later met --with-backup-client.
+ru|bkc_fail|Клиент ToutWAF Backup НЕ установлен (%s). Установка продолжается; установите его позже с --with-backup-client.
+zh|bkc_fail|ToutWAF Backup 客户端未安装（%s）。安装继续；稍后可用 --with-backup-client 安装。
+ar|bkc_fail|لم يتم تثبيت عميل ToutWAF Backup (%s). يستمر التثبيت؛ ثبّته لاحقا باستخدام --with-backup-client.
+en|bkc_nokey|The ToutWAF Backup client was NOT installed: no release public key. Give it with --backup-client-pubkey (or TOUTWAF_BACKUP_PUBKEY, or the file backup-release.pub in the configuration folder); nothing is installed without a verified signature.
+fr|bkc_nokey|Le client ToutWAF Backup n’a PAS été installé : aucune clé publique de version. Donnez-la avec --backup-client-pubkey (ou TOUTWAF_BACKUP_PUBKEY, ou le fichier backup-release.pub du dossier de configuration) ; rien n’est installé sans signature vérifiée.
+es|bkc_nokey|El cliente ToutWAF Backup NO se instaló: falta la clave pública de la versión. Indíquela con --backup-client-pubkey (o TOUTWAF_BACKUP_PUBKEY, o el archivo backup-release.pub de la carpeta de configuración); nada se instala sin firma verificada.
+de|bkc_nokey|Der ToutWAF-Backup-Client wurde NICHT installiert: kein öffentlicher Release-Schlüssel. Angeben mit --backup-client-pubkey (oder TOUTWAF_BACKUP_PUBKEY oder der Datei backup-release.pub im Konfigurationsordner); ohne geprüfte Signatur wird nichts installiert.
+it|bkc_nokey|Il client ToutWAF Backup NON è stato installato: manca la chiave pubblica della release. Indicala con --backup-client-pubkey (o TOUTWAF_BACKUP_PUBKEY, o il file backup-release.pub nella cartella di configurazione); senza firma verificata non si installa nulla.
+pt|bkc_nokey|O cliente ToutWAF Backup NÃO foi instalado: falta a chave pública da versão. Indique-a com --backup-client-pubkey (ou TOUTWAF_BACKUP_PUBKEY, ou o ficheiro backup-release.pub na pasta de configuração); nada é instalado sem assinatura verificada.
+nl|bkc_nokey|De ToutWAF Backup-client is NIET geïnstalleerd: geen publieke releasesleutel. Geef die op met --backup-client-pubkey (of TOUTWAF_BACKUP_PUBKEY, of het bestand backup-release.pub in de configuratiemap); zonder gecontroleerde handtekening wordt niets geïnstalleerd.
+ru|bkc_nokey|Клиент ToutWAF Backup НЕ установлен: нет открытого ключа релиза. Укажите его через --backup-client-pubkey (или TOUTWAF_BACKUP_PUBKEY, или файл backup-release.pub в каталоге конфигурации); без проверенной подписи ничего не устанавливается.
+zh|bkc_nokey|ToutWAF Backup 客户端未安装：缺少发布公钥。请用 --backup-client-pubkey（或 TOUTWAF_BACKUP_PUBKEY，或配置目录中的 backup-release.pub）提供；没有通过校验的签名就不会安装任何内容。
+ar|bkc_nokey|لم يتم تثبيت عميل ToutWAF Backup: لا يوجد مفتاح عام للإصدار. مرّره عبر --backup-client-pubkey (أو TOUTWAF_BACKUP_PUBKEY أو الملف backup-release.pub في مجلد الإعدادات)؛ لا يُثبَّت شيء دون توقيع مُتحقَّق منه.
+en|bkc_badsig|The ToutWAF Backup client was NOT installed: the signature of the release is NOT valid. Nothing was installed.
+fr|bkc_badsig|Le client ToutWAF Backup n’a PAS été installé : la signature de la version n’est PAS valide. Rien n’a été installé.
+es|bkc_badsig|El cliente ToutWAF Backup NO se instaló: la firma de la versión NO es válida. No se instaló nada.
+de|bkc_badsig|Der ToutWAF-Backup-Client wurde NICHT installiert: die Signatur der Version ist NICHT gültig. Es wurde nichts installiert.
+it|bkc_badsig|Il client ToutWAF Backup NON è stato installato: la firma della release NON è valida. Non è stato installato nulla.
+pt|bkc_badsig|O cliente ToutWAF Backup NÃO foi instalado: a assinatura da versão NÃO é válida. Nada foi instalado.
+nl|bkc_badsig|De ToutWAF Backup-client is NIET geïnstalleerd: de handtekening van de release is NIET geldig. Er is niets geïnstalleerd.
+ru|bkc_badsig|Клиент ToutWAF Backup НЕ установлен: подпись релиза НЕДЕЙСТВИТЕЛЬНА. Ничего не установлено.
+zh|bkc_badsig|ToutWAF Backup 客户端未安装：发布签名无效。未安装任何内容。
+ar|bkc_badsig|لم يتم تثبيت عميل ToutWAF Backup: توقيع الإصدار غير صالح. لم يُثبَّت شيء.
+en|tele_on|Telemetry: by default ToutWAF shares with the publisher space (app.toutwaf.com) the attacks it blocked (attacker address, country, type of attack, rule) and aggregate figures, and the host names of the protected sites. Never the content of requests, never legitimate visitors. Switch it off in one click in the console (Settings, Privacy and telemetry), or install with --no-telemetry (or TOUTWAF_TELEMETRY=0) for zero telemetry. Details: docs/confidentialite-telemetrie.md
+fr|tele_on|Télémétrie : par défaut, ToutWAF partage avec l'espace éditeur (app.toutwaf.com) les attaques qu'il a bloquées (adresse de l'attaquant, pays, type d'attaque, règle), des chiffres agrégés et les noms d'hôte des sites protégés. Jamais le contenu des requêtes ni les visiteurs légitimes. Désactivable en un clic dans la console (Paramètres, Confidentialité et télémétrie), ou installez avec --no-telemetry (ou TOUTWAF_TELEMETRY=0) pour une télémétrie zéro. Détails : docs/confidentialite-telemetrie.md
+es|tele_on|Telemetría: por defecto ToutWAF comparte con el espacio del editor (app.toutwaf.com) los ataques que bloqueó (dirección del atacante, país, tipo de ataque, regla), cifras agregadas y los nombres de host de los sitios protegidos. Nunca el contenido de las solicitudes ni a los visitantes legítimos. Se desactiva con un clic en la consola (Ajustes, Privacidad y telemetría), o instale con --no-telemetry (o TOUTWAF_TELEMETRY=0) para telemetría cero. Detalles: docs/confidentialite-telemetrie.md
+de|tele_on|Telemetrie: Standardmäßig teilt ToutWAF mit dem Herausgeberbereich (app.toutwaf.com) die blockierten Angriffe (Adresse des Angreifers, Land, Angriffsart, Regel), aggregierte Zahlen und die Hostnamen der geschützten Sites. Niemals den Inhalt von Anfragen und niemals legitime Besucher. Mit einem Klick in der Konsole abschaltbar (Einstellungen, Datenschutz und Telemetrie), oder installieren Sie mit --no-telemetry (oder TOUTWAF_TELEMETRY=0) für Null-Telemetrie. Details: docs/confidentialite-telemetrie.md
+it|tele_on|Telemetria: per impostazione predefinita ToutWAF condivide con lo spazio dell'editore (app.toutwaf.com) gli attacchi bloccati (indirizzo dell'attaccante, paese, tipo di attacco, regola), cifre aggregate e i nomi host dei siti protetti. Mai il contenuto delle richieste né i visitatori legittimi. Disattivabile con un clic nella console (Impostazioni, Privacy e telemetria), oppure installa con --no-telemetry (o TOUTWAF_TELEMETRY=0) per la telemetria zero. Dettagli: docs/confidentialite-telemetrie.md
+pt|tele_on|Telemetria: por predefinição, o ToutWAF partilha com o espaço do editor (app.toutwaf.com) os ataques que bloqueou (endereço do atacante, país, tipo de ataque, regra), números agregados e os nomes de anfitrião dos sites protegidos. Nunca o conteúdo dos pedidos nem os visitantes legítimos. Desativável com um clique na consola (Definições, Privacidade e telemetria), ou instale com --no-telemetry (ou TOUTWAF_TELEMETRY=0) para telemetria zero. Detalhes: docs/confidentialite-telemetrie.md
+nl|tele_on|Telemetrie: standaard deelt ToutWAF met de ruimte van de uitgever (app.toutwaf.com) de geblokkeerde aanvallen (adres van de aanvaller, land, type aanval, regel), geaggregeerde cijfers en de hostnamen van de beschermde sites. Nooit de inhoud van verzoeken en nooit legitieme bezoekers. Met één klik uit te zetten in de console (Instellingen, Privacy en telemetrie), of installeer met --no-telemetry (of TOUTWAF_TELEMETRY=0) voor nultelemetrie. Details: docs/confidentialite-telemetrie.md
+ru|tele_on|Телеметрия: по умолчанию ToutWAF передаёт пространству издателя (app.toutwaf.com) заблокированные атаки (адрес атакующего, страна, тип атаки, правило), агрегированные цифры и имена хостов защищаемых сайтов. Никогда содержимое запросов и никогда законных посетителей. Отключается одним щелчком в консоли (Настройки, Конфиденциальность и телеметрия), либо установите с --no-telemetry (или TOUTWAF_TELEMETRY=0) для нулевой телеметрии. Подробности: docs/confidentialite-telemetrie.md
+zh|tele_on|遥测：默认情况下，ToutWAF 会与发布方空间（app.toutwaf.com）共享其拦截的攻击（攻击者地址、国家、攻击类型、规则）、汇总数据以及受保护站点的主机名。绝不包含请求内容，也绝不包含合法访客。可在控制台中一键关闭（设置 > 隐私与遥测），或使用 --no-telemetry（或 TOUTWAF_TELEMETRY=0）安装以获得零遥测。详情：docs/confidentialite-telemetrie.md
+ar|tele_on|القياس عن بُعد: يشارك ToutWAF افتراضيًا مع فضاء الناشر (app.toutwaf.com) الهجمات التي حجبها (عنوان المهاجم والبلد ونوع الهجوم والقاعدة) وأرقامًا مجمّعة وأسماء مضيفي المواقع المحمية. لا محتوى الطلبات أبدًا ولا الزوار الشرعيين. يمكن إيقافه بنقرة في الوحدة (الإعدادات، الخصوصية والقياس عن بُعد) أو ثبّت مع --no-telemetry (أو TOUTWAF_TELEMETRY=0) للحصول على قياس صفري. التفاصيل: docs/confidentialite-telemetrie.md
+en|tele_off|Telemetry: zero telemetry was requested (--no-telemetry / TOUTWAF_TELEMETRY=0). Nothing will be sent to the publisher space, nothing will be received from it, and the console starts with the "Zero telemetry" switch on. You can change this later in the console (Settings, Privacy and telemetry).
+fr|tele_off|Télémétrie : la télémétrie zéro a été demandée (--no-telemetry / TOUTWAF_TELEMETRY=0). Rien ne sera envoyé à l'espace éditeur, rien n'en sera reçu, et la console démarre avec l'interrupteur « Télémétrie zéro » activé. Vous pourrez changer cela plus tard dans la console (Paramètres, Confidentialité et télémétrie).
+es|tele_off|Telemetría: se pidió telemetría cero (--no-telemetry / TOUTWAF_TELEMETRY=0). No se enviará nada al espacio del editor, no se recibirá nada de él y la consola arrancará con el interruptor «Telemetría cero» activado. Podrá cambiarlo más tarde en la consola (Ajustes, Privacidad y telemetría).
+de|tele_off|Telemetrie: Null-Telemetrie wurde angefordert (--no-telemetry / TOUTWAF_TELEMETRY=0). Es wird nichts an den Herausgeberbereich gesendet und nichts von ihm empfangen; die Konsole startet mit aktivem Schalter „Null-Telemetrie“. Sie können das später in der Konsole ändern (Einstellungen, Datenschutz und Telemetrie).
+it|tele_off|Telemetria: è stata richiesta la telemetria zero (--no-telemetry / TOUTWAF_TELEMETRY=0). Non verrà inviato nulla allo spazio dell'editore né ricevuto da esso, e la console parte con l'interruttore «Telemetria zero» attivo. Potrai cambiarlo più tardi nella console (Impostazioni, Privacy e telemetria).
+pt|tele_off|Telemetria: foi pedida a telemetria zero (--no-telemetry / TOUTWAF_TELEMETRY=0). Nada será enviado ao espaço do editor nem recebido dele, e a consola arranca com o interruptor «Telemetria zero» ativo. Poderá alterá-lo mais tarde na consola (Definições, Privacidade e telemetria).
+nl|tele_off|Telemetrie: nultelemetrie is aangevraagd (--no-telemetry / TOUTWAF_TELEMETRY=0). Er wordt niets naar de ruimte van de uitgever gestuurd en niets van hem ontvangen; de console start met de schakelaar «Nultelemetrie» aan. U kunt dit later wijzigen in de console (Instellingen, Privacy en telemetrie).
+ru|tele_off|Телеметрия: запрошена нулевая телеметрия (--no-telemetry / TOUTWAF_TELEMETRY=0). Ничего не будет отправлено в пространство издателя и ничего не будет получено от него; консоль запустится с включённым переключателем «Нулевая телеметрия». Позже это можно изменить в консоли (Настройки, Конфиденциальность и телеметрия).
+zh|tele_off|遥测：已请求零遥测（--no-telemetry / TOUTWAF_TELEMETRY=0）。不会向发布方空间发送任何内容，也不会从它接收任何内容；控制台启动时“零遥测”开关为开启状态。您以后可在控制台中更改（设置 > 隐私与遥测）。
+ar|tele_off|القياس عن بُعد: طُلب القياس الصفري (--no-telemetry / TOUTWAF_TELEMETRY=0). لن يُرسل شيء إلى فضاء الناشر ولن يُستقبل منه شيء، وتبدأ الوحدة والمفتاح «القياس الصفري» مفعّل. يمكنك تغيير ذلك لاحقًا في الوحدة (الإعدادات، الخصوصية والقياس عن بُعد).
 en|fwmod_n2|Every change runs as a trial with a countdown and rolls back by itself unless you keep it; an anti-lockout guard refuses any rule that would cut SSH or the console.
 fr|fwmod_n2|Chaque changement passe par un essai avec compte à rebours et revient en arrière tout seul si vous ne le gardez pas ; un garde-fou anti-lockout refuse toute règle qui couperait SSH ou la console.
 es|fwmod_n2|Cada cambio se prueba con cuenta atrás y se revierte solo si no lo conserva; una protección anti-bloqueo rechaza toda regla que cortaría SSH o la consola.
@@ -2322,6 +2418,596 @@ nl|pr_ok|Schijfruimte, DNS en klok zijn in orde.
 ru|pr_ok|Место на диске, DNS и часы в порядке.
 zh|pr_ok|磁盘空间、DNS 和时钟均正常。
 ar|pr_ok|مساحة القرص وDNS والساعة بحالة جيدة.
+en|cloud_https|--cloud-url must be an https:// address (the node never talks to the cloud in clear).
+fr|cloud_https|--cloud-url doit être une adresse https:// (le nœud ne parle jamais au cloud en clair).
+es|cloud_https|--cloud-url debe ser una dirección https:// (el nodo nunca habla con la nube en claro).
+de|cloud_https|--cloud-url muss eine https://-Adresse sein (der Knoten spricht nie unverschlüsselt mit der Cloud).
+it|cloud_https|--cloud-url deve essere un indirizzo https:// (il nodo non parla mai con il cloud in chiaro).
+pt|cloud_https|--cloud-url tem de ser um endereço https:// (o nó nunca fala com a nuvem em claro).
+nl|cloud_https|--cloud-url moet een https://-adres zijn (de node praat nooit onversleuteld met de cloud).
+ru|cloud_https|--cloud-url должен быть адресом https:// (узел никогда не общается с облаком в открытом виде).
+zh|cloud_https|--cloud-url 必须是 https:// 地址（节点绝不以明文与云端通信）。
+ar|cloud_https|يجب أن يكون --cloud-url عنوان https:// (العقدة لا تتحدث إلى السحابة دون تشفير أبدًا).
+en|cloud_dp_only|--cloud-url installs a protection node: use it with --component dp (the default in cloud mode).
+fr|cloud_dp_only|--cloud-url installe un nœud de protection : utilisez-le avec --component dp (le défaut en mode cloud).
+es|cloud_dp_only|--cloud-url instala un nodo de protección: úselo con --component dp (el valor por defecto en modo nube).
+de|cloud_dp_only|--cloud-url installiert einen Schutzknoten: mit --component dp verwenden (Standard im Cloud-Modus).
+it|cloud_dp_only|--cloud-url installa un nodo di protezione: usarlo con --component dp (predefinito in modalità cloud).
+pt|cloud_dp_only|--cloud-url instala um nó de proteção: use-o com --component dp (o predefinido no modo nuvem).
+nl|cloud_dp_only|--cloud-url installeert een beschermingsnode: gebruik het met --component dp (de standaard in cloudmodus).
+ru|cloud_dp_only|--cloud-url устанавливает узел защиты: используйте его с --component dp (по умолчанию в облачном режиме).
+zh|cloud_dp_only|--cloud-url 安装防护节点：请与 --component dp 一起使用（云模式下的默认值）。
+ar|cloud_dp_only|--cloud-url يثبّت عقدة حماية: استخدمه مع --component dp (الافتراضي في وضع السحابة).
+en|cloud_need_token|An enrolment token is required to connect this node to your account (--enroll-token; console: Nodes > Add my first node).
+fr|cloud_need_token|Un jeton d'enrôlement est nécessaire pour relier ce nœud à votre compte (--enroll-token ; console : Nœuds > Ajouter mon premier nœud).
+es|cloud_need_token|Se necesita un token de alta para conectar este nodo a su cuenta (--enroll-token; consola: Nodos > Agregar mi primer nodo).
+de|cloud_need_token|Zum Verbinden dieses Knotens mit Ihrem Konto ist ein Registrierungstoken nötig (--enroll-token; Konsole: Knoten > Meinen ersten Knoten hinzufügen).
+it|cloud_need_token|Serve un token di iscrizione per collegare questo nodo al tuo account (--enroll-token; console: Nodi > Aggiungi il mio primo nodo).
+pt|cloud_need_token|É necessário um token de registo para ligar este nó à sua conta (--enroll-token; consola: Nós > Adicionar o meu primeiro nó).
+nl|cloud_need_token|Een registratietoken is nodig om deze node met uw account te verbinden (--enroll-token; console: Nodes > Mijn eerste node toevoegen).
+ru|cloud_need_token|Для подключения этого узла к вашей учётной записи нужен токен регистрации (--enroll-token; консоль: Узлы > Добавить первый узел).
+zh|cloud_need_token|将此节点连接到您的账户需要注册令牌（--enroll-token；控制台：节点 > 添加我的第一个节点）。
+ar|cloud_need_token|يلزم رمز تسجيل لربط هذه العقدة بحسابك (--enroll-token؛ لوحة التحكم: العقد > إضافة أول عقدة).
+en|cloud_ca_local|--cloud-ca must be a local file.
+fr|cloud_ca_local|--cloud-ca doit être un fichier local.
+es|cloud_ca_local|--cloud-ca debe ser un archivo local.
+de|cloud_ca_local|--cloud-ca muss eine lokale Datei sein.
+it|cloud_ca_local|--cloud-ca deve essere un file locale.
+pt|cloud_ca_local|--cloud-ca tem de ser um ficheiro local.
+nl|cloud_ca_local|--cloud-ca moet een lokaal bestand zijn.
+ru|cloud_ca_local|--cloud-ca должен быть локальным файлом.
+zh|cloud_ca_local|--cloud-ca 必须是本地文件。
+ar|cloud_ca_local|يجب أن يكون --cloud-ca ملفًا محليًا.
+en|cloud_nolink|This release does not contain the ToutWAF Cloud link (toutwaf-cloudlink): update the installer or use a newer release.
+fr|cloud_nolink|Cette version ne contient pas le lien ToutWAF Cloud (toutwaf-cloudlink) : mettez l'installateur à jour ou utilisez une version plus récente.
+es|cloud_nolink|Esta versión no incluye el enlace ToutWAF Cloud (toutwaf-cloudlink): actualice el instalador o use una versión más reciente.
+de|cloud_nolink|Diese Version enthält die ToutWAF-Cloud-Verbindung (toutwaf-cloudlink) nicht: Installer aktualisieren oder neuere Version verwenden.
+it|cloud_nolink|Questa versione non contiene il collegamento ToutWAF Cloud (toutwaf-cloudlink): aggiorna l'installer o usa una versione più recente.
+pt|cloud_nolink|Esta versão não contém a ligação ToutWAF Cloud (toutwaf-cloudlink): atualize o instalador ou use uma versão mais recente.
+nl|cloud_nolink|Deze versie bevat de ToutWAF Cloud-koppeling (toutwaf-cloudlink) niet: werk het installatieprogramma bij of gebruik een nieuwere versie.
+ru|cloud_nolink|В этой версии нет компонента связи ToutWAF Cloud (toutwaf-cloudlink): обновите установщик или используйте более новую версию.
+zh|cloud_nolink|此版本不包含 ToutWAF Cloud 链接组件（toutwaf-cloudlink）：请更新安装程序或使用更新的版本。
+ar|cloud_nolink|لا يتضمن هذا الإصدار رابط ToutWAF Cloud (toutwaf-cloudlink): حدّث المثبّت أو استخدم إصدارًا أحدث.
+en|cloud_enrol_failed|The node could not be enrolled with your account (see the lines above). The token may be used or expired: create a new one in the console.
+fr|cloud_enrol_failed|Le nœud n'a pas pu être enrôlé auprès de votre compte (voir les lignes ci-dessus). Le jeton est peut-être utilisé ou périmé : créez-en un nouveau dans la console.
+es|cloud_enrol_failed|No se pudo dar de alta el nodo en su cuenta (vea las líneas anteriores). El token puede estar usado o caducado: cree uno nuevo en la consola.
+de|cloud_enrol_failed|Der Knoten konnte nicht in Ihrem Konto registriert werden (siehe Zeilen oben). Das Token ist vielleicht verbraucht oder abgelaufen: Erstellen Sie in der Konsole ein neues.
+it|cloud_enrol_failed|Non è stato possibile iscrivere il nodo al tuo account (vedi le righe sopra). Il token potrebbe essere usato o scaduto: creane uno nuovo nella console.
+pt|cloud_enrol_failed|Não foi possível registar o nó na sua conta (veja as linhas acima). O token pode estar usado ou expirado: crie um novo na consola.
+nl|cloud_enrol_failed|De node kon niet bij uw account worden geregistreerd (zie de regels hierboven). Het token is misschien gebruikt of verlopen: maak een nieuw token in de console.
+ru|cloud_enrol_failed|Не удалось зарегистрировать узел в вашей учётной записи (см. строки выше). Токен мог быть использован или истечь: создайте новый в консоли.
+zh|cloud_enrol_failed|无法将节点注册到您的账户（见上方输出）。令牌可能已使用或已过期：请在控制台中创建新令牌。
+ar|cloud_enrol_failed|تعذّر تسجيل العقدة في حسابك (انظر الأسطر أعلاه). ربما استُخدم الرمز أو انتهت صلاحيته: أنشئ رمزًا جديدًا في لوحة التحكم.
+en|pf_cloud_action|Allow this machine to reach your ToutWAF Cloud address on port 443 (outbound only), or set HTTPS_PROXY if a proxy is required. Nothing needs to be opened for inbound traffic.
+fr|pf_cloud_action|Autorisez cette machine à joindre l'adresse de votre ToutWAF Cloud sur le port 443 (sortant uniquement), ou définissez HTTPS_PROXY si un proxy est nécessaire. Rien n'est à ouvrir en entrée.
+es|pf_cloud_action|Permita que esta máquina llegue a la dirección de su ToutWAF Cloud por el puerto 443 (solo saliente), o defina HTTPS_PROXY si se necesita un proxy. No hay que abrir nada de entrada.
+de|pf_cloud_action|Erlauben Sie diesem Rechner, die Adresse Ihrer ToutWAF Cloud über Port 443 zu erreichen (nur ausgehend), oder setzen Sie HTTPS_PROXY, falls ein Proxy nötig ist. Eingehend muss nichts geöffnet werden.
+it|pf_cloud_action|Consenti a questa macchina di raggiungere l'indirizzo del tuo ToutWAF Cloud sulla porta 443 (solo in uscita), oppure imposta HTTPS_PROXY se serve un proxy. Non va aperto nulla in ingresso.
+pt|pf_cloud_action|Permita que esta máquina alcance o endereço do seu ToutWAF Cloud na porta 443 (apenas saída), ou defina HTTPS_PROXY se for necessário um proxy. Nada precisa de ser aberto à entrada.
+nl|pf_cloud_action|Sta deze machine toe het adres van uw ToutWAF Cloud op poort 443 te bereiken (alleen uitgaand), of stel HTTPS_PROXY in als een proxy nodig is. Inkomend hoeft niets open.
+ru|pf_cloud_action|Разрешите этой машине обращаться к адресу вашего ToutWAF Cloud по порту 443 (только исходящие) или задайте HTTPS_PROXY, если нужен прокси. Для входящего трафика ничего открывать не нужно.
+zh|pf_cloud_action|允许本机通过 443 端口访问您的 ToutWAF Cloud 地址（仅出站），如需代理请设置 HTTPS_PROXY。入站方向无需开放任何端口。
+ar|pf_cloud_action|اسمح لهذا الجهاز بالوصول إلى عنوان ToutWAF Cloud الخاص بك عبر المنفذ 443 (صادر فقط)، أو عيّن HTTPS_PROXY إذا لزم وكيل. لا حاجة لفتح أي شيء للوارد.
+en|s_db|Preparing the database
+fr|s_db|Préparation de la base de données
+es|s_db|Preparando la base de datos
+de|s_db|Datenbank wird vorbereitet
+it|s_db|Preparazione del database
+pt|s_db|A preparar a base de dados
+nl|s_db|Database voorbereiden
+ru|s_db|Подготовка базы данных
+zh|s_db|正在准备数据库
+ar|s_db|تجهيز قاعدة البيانات
+en|db_choose|Which database should ToutWAF use?
+fr|db_choose|Quelle base de données ToutWAF doit-il utiliser ?
+es|db_choose|¿Qué base de datos debe usar ToutWAF?
+de|db_choose|Welche Datenbank soll ToutWAF verwenden?
+it|db_choose|Quale database deve usare ToutWAF?
+pt|db_choose|Que base de dados o ToutWAF deve usar?
+nl|db_choose|Welke database moet ToutWAF gebruiken?
+ru|db_choose|Какую базу данных использовать ToutWAF?
+zh|db_choose|ToutWAF 应使用哪种数据库？
+ar|db_choose|ما قاعدة البيانات التي سيستخدمها ToutWAF؟
+en|db_opt_pg|PostgreSQL (recommended)
+fr|db_opt_pg|PostgreSQL (recommandé)
+es|db_opt_pg|PostgreSQL (recomendado)
+de|db_opt_pg|PostgreSQL (empfohlen)
+it|db_opt_pg|PostgreSQL (consigliato)
+pt|db_opt_pg|PostgreSQL (recomendado)
+nl|db_opt_pg|PostgreSQL (aanbevolen)
+ru|db_opt_pg|PostgreSQL (рекомендуется)
+zh|db_opt_pg|PostgreSQL（推荐）
+ar|db_opt_pg|PostgreSQL (موصى به)
+en|db_opt_pg_local|Install PostgreSQL on this machine (created and configured for you)
+fr|db_opt_pg_local|Installer PostgreSQL sur cette machine (créé et configuré pour vous)
+es|db_opt_pg_local|Instalar PostgreSQL en esta máquina (creado y configurado por usted)
+de|db_opt_pg_local|PostgreSQL auf diesem Rechner installieren (wird für Sie eingerichtet)
+it|db_opt_pg_local|Installare PostgreSQL su questa macchina (creato e configurato per te)
+pt|db_opt_pg_local|Instalar o PostgreSQL nesta máquina (criado e configurado por si)
+nl|db_opt_pg_local|PostgreSQL op deze machine installeren (voor u aangemaakt en ingesteld)
+ru|db_opt_pg_local|Установить PostgreSQL на этой машине (создаётся и настраивается автоматически)
+zh|db_opt_pg_local|在本机安装 PostgreSQL（自动创建并配置）
+ar|db_opt_pg_local|تثبيت PostgreSQL على هذا الجهاز (يُنشأ ويُهيّأ تلقائيًا)
+en|db_opt_pg_remote|Use an existing PostgreSQL server (tested, then prepared if you allow it)
+fr|db_opt_pg_remote|Utiliser un serveur PostgreSQL existant (testé, puis préparé si vous l'autorisez)
+es|db_opt_pg_remote|Usar un servidor PostgreSQL existente (se prueba y se prepara si lo permite)
+de|db_opt_pg_remote|Vorhandenen PostgreSQL-Server verwenden (wird getestet und bei Erlaubnis vorbereitet)
+it|db_opt_pg_remote|Usare un server PostgreSQL esistente (testato, poi preparato se lo consenti)
+pt|db_opt_pg_remote|Usar um servidor PostgreSQL existente (testado e preparado, se permitir)
+nl|db_opt_pg_remote|Bestaande PostgreSQL-server gebruiken (getest en, indien toegestaan, voorbereid)
+ru|db_opt_pg_remote|Использовать существующий сервер PostgreSQL (проверка и подготовка, если разрешите)
+zh|db_opt_pg_remote|使用现有 PostgreSQL 服务器（先测试，经允许后自动准备）
+ar|db_opt_pg_remote|استخدام خادم PostgreSQL موجود (يُختبر ثم يُجهَّز إذا سمحت)
+en|db_opt_sqlite|SQLite (small installation, one server only)
+fr|db_opt_sqlite|SQLite (petite installation, un seul serveur)
+es|db_opt_sqlite|SQLite (instalación pequeña, un solo servidor)
+de|db_opt_sqlite|SQLite (kleine Installation, nur ein Server)
+it|db_opt_sqlite|SQLite (piccola installazione, un solo server)
+pt|db_opt_sqlite|SQLite (instalação pequena, um só servidor)
+nl|db_opt_sqlite|SQLite (kleine installatie, slechts één server)
+ru|db_opt_sqlite|SQLite (небольшая установка, один сервер)
+zh|db_opt_sqlite|SQLite（小型安装，仅单台服务器）
+ar|db_opt_sqlite|SQLite (تثبيت صغير، خادم واحد فقط)
+en|db_sqlite_note|SQLite is one file on this machine: fine for a small installation on one server. It cannot be shared by several control planes and has no replication. You can move to PostgreSQL later with: toutwaf-cp db migrate.
+fr|db_sqlite_note|SQLite est un fichier sur cette machine : adapté à une petite installation sur un seul serveur. Il ne peut pas être partagé entre plusieurs plans de contrôle et n'a pas de réplication. Vous pourrez passer à PostgreSQL plus tard avec : toutwaf-cp db migrate.
+es|db_sqlite_note|SQLite es un archivo en esta máquina: válido para una instalación pequeña en un servidor. No se puede compartir entre varios planos de control y no tiene replicación. Podrá pasar a PostgreSQL más tarde con: toutwaf-cp db migrate.
+de|db_sqlite_note|SQLite ist eine Datei auf diesem Rechner: gut für eine kleine Installation auf einem Server. Sie kann nicht von mehreren Control Planes geteilt werden und hat keine Replikation. Später können Sie zu PostgreSQL wechseln: toutwaf-cp db migrate.
+it|db_sqlite_note|SQLite è un file su questa macchina: va bene per una piccola installazione su un solo server. Non può essere condiviso tra più piani di controllo e non ha replica. Potrai passare a PostgreSQL più tardi con: toutwaf-cp db migrate.
+pt|db_sqlite_note|O SQLite é um ficheiro nesta máquina: adequado a uma instalação pequena num só servidor. Não pode ser partilhado por vários planos de controlo e não tem replicação. Poderá passar para PostgreSQL mais tarde com: toutwaf-cp db migrate.
+nl|db_sqlite_note|SQLite is één bestand op deze machine: prima voor een kleine installatie op één server. Het kan niet door meerdere control planes worden gedeeld en heeft geen replicatie. U kunt later overstappen naar PostgreSQL met: toutwaf-cp db migrate.
+ru|db_sqlite_note|SQLite — это один файл на этой машине: подходит для небольшой установки на одном сервере. Его нельзя разделять между несколькими control plane, репликации нет. Позже можно перейти на PostgreSQL: toutwaf-cp db migrate.
+zh|db_sqlite_note|SQLite 是本机上的一个文件：适合单台服务器的小型安装。它不能被多个控制平面共享，也没有复制功能。以后可用 toutwaf-cp db migrate 迁移到 PostgreSQL。
+ar|db_sqlite_note|SQLite ملف واحد على هذا الجهاز: مناسب لتثبيت صغير على خادم واحد. لا يمكن مشاركته بين عدة وحدات تحكم ولا يدعم النسخ المتماثل. يمكنك الانتقال إلى PostgreSQL لاحقًا عبر: toutwaf-cp db migrate.
+en|db_q_host|PostgreSQL host
+fr|db_q_host|Hôte PostgreSQL
+es|db_q_host|Host de PostgreSQL
+de|db_q_host|PostgreSQL-Host
+it|db_q_host|Host PostgreSQL
+pt|db_q_host|Anfitrião PostgreSQL
+nl|db_q_host|PostgreSQL-host
+ru|db_q_host|Хост PostgreSQL
+zh|db_q_host|PostgreSQL 主机
+ar|db_q_host|مضيف PostgreSQL
+en|db_q_port|Port
+fr|db_q_port|Port
+es|db_q_port|Puerto
+de|db_q_port|Port
+it|db_q_port|Porta
+pt|db_q_port|Porta
+nl|db_q_port|Poort
+ru|db_q_port|Порт
+zh|db_q_port|端口
+ar|db_q_port|المنفذ
+en|db_q_name|Database name
+fr|db_q_name|Nom de la base
+es|db_q_name|Nombre de la base de datos
+de|db_q_name|Datenbankname
+it|db_q_name|Nome del database
+pt|db_q_name|Nome da base de dados
+nl|db_q_name|Naam van de database
+ru|db_q_name|Имя базы данных
+zh|db_q_name|数据库名称
+ar|db_q_name|اسم قاعدة البيانات
+en|db_q_user|Database user
+fr|db_q_user|Utilisateur de la base
+es|db_q_user|Usuario de la base de datos
+de|db_q_user|Datenbankbenutzer
+it|db_q_user|Utente del database
+pt|db_q_user|Utilizador da base de dados
+nl|db_q_user|Databasegebruiker
+ru|db_q_user|Пользователь базы данных
+zh|db_q_user|数据库用户
+ar|db_q_user|مستخدم قاعدة البيانات
+en|db_q_pw|Password of that user (empty if an administrator account creates it)
+fr|db_q_pw|Mot de passe de cet utilisateur (vide si un compte administrateur le crée)
+es|db_q_pw|Contraseña de ese usuario (vacía si lo crea una cuenta de administrador)
+de|db_q_pw|Passwort dieses Benutzers (leer, wenn ein Administratorkonto ihn anlegt)
+it|db_q_pw|Password di quell'utente (vuota se lo crea un account amministratore)
+pt|db_q_pw|Palavra-passe desse utilizador (vazia se uma conta de administrador o criar)
+nl|db_q_pw|Wachtwoord van die gebruiker (leeg als een beheerdersaccount hem aanmaakt)
+ru|db_q_pw|Пароль этого пользователя (пусто, если его создаёт учётная запись администратора)
+zh|db_q_pw|该用户的密码（若由管理员账户创建则留空）
+ar|db_q_pw|كلمة مرور هذا المستخدم (اتركها فارغة إذا أنشأه حساب مسؤول)
+en|db_q_tls|TLS mode (disable, prefer, require, verify-ca, verify-full)
+fr|db_q_tls|Mode TLS (disable, prefer, require, verify-ca, verify-full)
+es|db_q_tls|Modo TLS (disable, prefer, require, verify-ca, verify-full)
+de|db_q_tls|TLS-Modus (disable, prefer, require, verify-ca, verify-full)
+it|db_q_tls|Modalità TLS (disable, prefer, require, verify-ca, verify-full)
+pt|db_q_tls|Modo TLS (disable, prefer, require, verify-ca, verify-full)
+nl|db_q_tls|TLS-modus (disable, prefer, require, verify-ca, verify-full)
+ru|db_q_tls|Режим TLS (disable, prefer, require, verify-ca, verify-full)
+zh|db_q_tls|TLS 模式（disable、prefer、require、verify-ca、verify-full）
+ar|db_q_tls|وضع TLS (disable، prefer، require، verify-ca، verify-full)
+en|db_q_ca|CA certificate file of the server (for verify-ca / verify-full)
+fr|db_q_ca|Fichier du certificat de l'autorité du serveur (pour verify-ca / verify-full)
+es|db_q_ca|Archivo del certificado de la CA del servidor (para verify-ca / verify-full)
+de|db_q_ca|CA-Zertifikatsdatei des Servers (für verify-ca / verify-full)
+it|db_q_ca|File del certificato CA del server (per verify-ca / verify-full)
+pt|db_q_ca|Ficheiro do certificado da CA do servidor (para verify-ca / verify-full)
+nl|db_q_ca|CA-certificaatbestand van de server (voor verify-ca / verify-full)
+ru|db_q_ca|Файл сертификата ЦС сервера (для verify-ca / verify-full)
+zh|db_q_ca|服务器 CA 证书文件（用于 verify-ca / verify-full）
+ar|db_q_ca|ملف شهادة CA للخادم (لوضعي verify-ca / verify-full)
+en|db_q_admin|Administrator account that creates the user and the database (empty = they already exist)
+fr|db_q_admin|Compte administrateur qui crée l'utilisateur et la base (vide = ils existent déjà)
+es|db_q_admin|Cuenta de administrador que crea el usuario y la base (vacío = ya existen)
+de|db_q_admin|Administratorkonto, das Benutzer und Datenbank anlegt (leer = existieren bereits)
+it|db_q_admin|Account amministratore che crea utente e database (vuoto = esistono già)
+pt|db_q_admin|Conta de administrador que cria o utilizador e a base (vazio = já existem)
+nl|db_q_admin|Beheerdersaccount dat gebruiker en database aanmaakt (leeg = bestaan al)
+ru|db_q_admin|Учётная запись администратора, создающая пользователя и базу (пусто = уже существуют)
+zh|db_q_admin|用于创建用户和数据库的管理员账户（留空 = 已存在）
+ar|db_q_admin|حساب المسؤول الذي ينشئ المستخدم وقاعدة البيانات (فارغ = موجودان مسبقًا)
+en|db_q_adminpw|Password of the administrator account (used once, never stored)
+fr|db_q_adminpw|Mot de passe du compte administrateur (utilisé une fois, jamais stocké)
+es|db_q_adminpw|Contraseña de la cuenta de administrador (se usa una vez, nunca se guarda)
+de|db_q_adminpw|Passwort des Administratorkontos (einmal verwendet, nie gespeichert)
+it|db_q_adminpw|Password dell'account amministratore (usata una volta, mai salvata)
+pt|db_q_adminpw|Palavra-passe da conta de administrador (usada uma vez, nunca guardada)
+nl|db_q_adminpw|Wachtwoord van het beheerdersaccount (eenmalig gebruikt, nooit opgeslagen)
+ru|db_q_adminpw|Пароль администратора (используется один раз, не сохраняется)
+zh|db_q_adminpw|管理员账户密码（仅使用一次，不会保存）
+ar|db_q_adminpw|كلمة مرور حساب المسؤول (تُستخدم مرة واحدة ولا تُحفظ)
+en|db_hint|Database: SQLite (default). For a server install or several control planes use --db postgres (--db-install-local installs it for you).
+fr|db_hint|Base de données : SQLite (par défaut). Pour une installation serveur ou plusieurs plans de contrôle, utilisez --db postgres (--db-install-local l'installe pour vous).
+es|db_hint|Base de datos: SQLite (por defecto). Para un servidor o varios planos de control use --db postgres (--db-install-local lo instala por usted).
+de|db_hint|Datenbank: SQLite (Standard). Für eine Server-Installation oder mehrere Control Planes verwenden Sie --db postgres (--db-install-local installiert es für Sie).
+it|db_hint|Database: SQLite (predefinito). Per un'installazione server o più piani di controllo usa --db postgres (--db-install-local lo installa per te).
+pt|db_hint|Base de dados: SQLite (predefinição). Para um servidor ou vários planos de controlo use --db postgres (--db-install-local instala-o por si).
+nl|db_hint|Database: SQLite (standaard). Voor een serverinstallatie of meerdere control planes gebruikt u --db postgres (--db-install-local installeert het voor u).
+ru|db_hint|База данных: SQLite (по умолчанию). Для серверной установки или нескольких control plane используйте --db postgres (--db-install-local установит её).
+zh|db_hint|数据库：SQLite（默认）。服务器安装或多个控制平面请使用 --db postgres（--db-install-local 会自动安装）。
+ar|db_hint|قاعدة البيانات: SQLite (افتراضي). للتثبيت على خادم أو لعدة وحدات تحكم استخدم --db postgres (و--db-install-local يثبّتها لك).
+en|db_no_pkg|PostgreSQL cannot be installed automatically on this system: install the server package yourself, then run the installer again with --db postgres.
+fr|db_no_pkg|PostgreSQL ne peut pas être installé automatiquement sur ce système : installez vous-même le paquet serveur, puis relancez l'installateur avec --db postgres.
+es|db_no_pkg|PostgreSQL no se puede instalar automáticamente en este sistema: instale usted el paquete del servidor y vuelva a ejecutar el instalador con --db postgres.
+de|db_no_pkg|PostgreSQL lässt sich auf diesem System nicht automatisch installieren: installieren Sie das Serverpaket selbst und starten Sie den Installer erneut mit --db postgres.
+it|db_no_pkg|PostgreSQL non può essere installato automaticamente su questo sistema: installa tu il pacchetto server, poi riesegui l'installer con --db postgres.
+pt|db_no_pkg|O PostgreSQL não pode ser instalado automaticamente neste sistema: instale o pacote do servidor e volte a executar o instalador com --db postgres.
+nl|db_no_pkg|PostgreSQL kan op dit systeem niet automatisch worden geïnstalleerd: installeer zelf het serverpakket en start het installatieprogramma opnieuw met --db postgres.
+ru|db_no_pkg|PostgreSQL нельзя установить автоматически в этой системе: установите серверный пакет сами и снова запустите установщик с --db postgres.
+zh|db_no_pkg|无法在此系统上自动安装 PostgreSQL：请自行安装服务器软件包，然后使用 --db postgres 重新运行安装程序。
+ar|db_no_pkg|تعذّر تثبيت PostgreSQL تلقائيًا على هذا النظام: ثبّت حزمة الخادم بنفسك ثم أعد تشغيل المثبّت مع --db postgres.
+en|db_install_failed|Installing the PostgreSQL package failed. The log says why (/var/log/toutwaf-install.log).
+fr|db_install_failed|L'installation du paquet PostgreSQL a échoué. Le journal dit pourquoi (/var/log/toutwaf-install.log).
+es|db_install_failed|Falló la instalación del paquete PostgreSQL. El registro dice por qué (/var/log/toutwaf-install.log).
+de|db_install_failed|Die Installation des PostgreSQL-Pakets ist fehlgeschlagen. Das Protokoll nennt den Grund (/var/log/toutwaf-install.log).
+it|db_install_failed|L'installazione del pacchetto PostgreSQL è fallita. Il registro ne indica il motivo (/var/log/toutwaf-install.log).
+pt|db_install_failed|A instalação do pacote PostgreSQL falhou. O registo diz porquê (/var/log/toutwaf-install.log).
+nl|db_install_failed|Het installeren van het PostgreSQL-pakket is mislukt. Het logboek zegt waarom (/var/log/toutwaf-install.log).
+ru|db_install_failed|Не удалось установить пакет PostgreSQL. Причина — в журнале (/var/log/toutwaf-install.log).
+zh|db_install_failed|安装 PostgreSQL 软件包失败。原因见日志（/var/log/toutwaf-install.log）。
+ar|db_install_failed|فشل تثبيت حزمة PostgreSQL. السبب في السجل (/var/log/toutwaf-install.log).
+en|db_init_failed|The PostgreSQL cluster could not be initialised. The log says why.
+fr|db_init_failed|Le cluster PostgreSQL n'a pas pu être initialisé. Le journal dit pourquoi.
+es|db_init_failed|No se pudo inicializar el clúster de PostgreSQL. El registro dice por qué.
+de|db_init_failed|Der PostgreSQL-Cluster konnte nicht initialisiert werden. Das Protokoll nennt den Grund.
+it|db_init_failed|Impossibile inizializzare il cluster PostgreSQL. Il registro ne indica il motivo.
+pt|db_init_failed|Não foi possível inicializar o cluster PostgreSQL. O registo diz porquê.
+nl|db_init_failed|Het PostgreSQL-cluster kon niet worden geïnitialiseerd. Het logboek zegt waarom.
+ru|db_init_failed|Не удалось инициализировать кластер PostgreSQL. Причина — в журнале.
+zh|db_init_failed|无法初始化 PostgreSQL 集群。原因见日志。
+ar|db_init_failed|تعذّرت تهيئة مجموعة PostgreSQL. السبب في السجل.
+en|db_start_failed|PostgreSQL does not start. Check: systemctl status postgresql, and the log.
+fr|db_start_failed|PostgreSQL ne démarre pas. Vérifiez : systemctl status postgresql, et le journal.
+es|db_start_failed|PostgreSQL no arranca. Compruebe: systemctl status postgresql y el registro.
+de|db_start_failed|PostgreSQL startet nicht. Prüfen Sie: systemctl status postgresql und das Protokoll.
+it|db_start_failed|PostgreSQL non si avvia. Controlla: systemctl status postgresql e il registro.
+pt|db_start_failed|O PostgreSQL não arranca. Verifique: systemctl status postgresql e o registo.
+nl|db_start_failed|PostgreSQL start niet. Controleer: systemctl status postgresql en het logboek.
+ru|db_start_failed|PostgreSQL не запускается. Проверьте: systemctl status postgresql и журнал.
+zh|db_start_failed|PostgreSQL 无法启动。请检查：systemctl status postgresql 和日志。
+ar|db_start_failed|لا يبدأ PostgreSQL. افحص: systemctl status postgresql والسجل.
+en|db_too_old|The PostgreSQL version installed here (%s) is too old: version 13 or newer is required.
+fr|db_too_old|La version de PostgreSQL installée ici (%s) est trop ancienne : la version 13 ou plus récente est requise.
+es|db_too_old|La versión de PostgreSQL instalada aquí (%s) es demasiado antigua: se requiere la versión 13 o posterior.
+de|db_too_old|Die hier installierte PostgreSQL-Version (%s) ist zu alt: Version 13 oder neuer ist erforderlich.
+it|db_too_old|La versione di PostgreSQL installata qui (%s) è troppo vecchia: serve la versione 13 o successiva.
+pt|db_too_old|A versão do PostgreSQL instalada aqui (%s) é demasiado antiga: é necessária a versão 13 ou posterior.
+nl|db_too_old|De hier geïnstalleerde PostgreSQL-versie (%s) is te oud: versie 13 of nieuwer is vereist.
+ru|db_too_old|Установленная версия PostgreSQL (%s) слишком старая: нужна версия 13 или новее.
+zh|db_too_old|此处安装的 PostgreSQL 版本（%s）过旧：需要 13 或更高版本。
+ar|db_too_old|إصدار PostgreSQL المثبّت هنا (%s) قديم جدًا: يلزم الإصدار 13 أو أحدث.
+en|db_exists|A database user "%s" or a database "%s" already exists and was not created by this installer: nothing was changed. Choose other names (--db-name, --db-user) or give the existing connection (--db-dsn-file).
+fr|db_exists|Un utilisateur "%s" ou une base "%s" existe déjà et n'a pas été créé par cet installateur : rien n'a été modifié. Choisissez d'autres noms (--db-name, --db-user) ou donnez la connexion existante (--db-dsn-file).
+es|db_exists|Ya existe un usuario "%s" o una base "%s" que no creó este instalador: no se cambió nada. Elija otros nombres (--db-name, --db-user) o indique la conexión existente (--db-dsn-file).
+de|db_exists|Ein Benutzer "%s" oder eine Datenbank "%s" existiert bereits und wurde nicht von diesem Installer angelegt: nichts wurde geändert. Wählen Sie andere Namen (--db-name, --db-user) oder geben Sie die vorhandene Verbindung an (--db-dsn-file).
+it|db_exists|Esiste già un utente "%s" o un database "%s" non creato da questo installer: nulla è stato modificato. Scegli altri nomi (--db-name, --db-user) o indica la connessione esistente (--db-dsn-file).
+pt|db_exists|Já existe um utilizador "%s" ou uma base "%s" que não foi criado por este instalador: nada foi alterado. Escolha outros nomes (--db-name, --db-user) ou indique a ligação existente (--db-dsn-file).
+nl|db_exists|Er bestaat al een gebruiker "%s" of database "%s" die niet door dit installatieprogramma is aangemaakt: er is niets gewijzigd. Kies andere namen (--db-name, --db-user) of geef de bestaande verbinding op (--db-dsn-file).
+ru|db_exists|Пользователь "%s" или база "%s" уже существует и создана не этим установщиком: ничего не изменено. Выберите другие имена (--db-name, --db-user) или укажите существующее подключение (--db-dsn-file).
+zh|db_exists|已存在用户“%s”或数据库“%s”，且不是由本安装程序创建的：未做任何更改。请选择其他名称（--db-name、--db-user）或提供现有连接（--db-dsn-file）。
+ar|db_exists|يوجد مستخدم "%s" أو قاعدة "%s" لم ينشئها هذا المثبّت: لم يُغيَّر شيء. اختر أسماء أخرى (--db-name و--db-user) أو قدّم الاتصال الموجود (--db-dsn-file).
+en|db_create_failed|The user or the database could not be created. What was created was removed again.
+fr|db_create_failed|L'utilisateur ou la base n'a pas pu être créé. Ce qui avait été créé a été supprimé.
+es|db_create_failed|No se pudo crear el usuario o la base de datos. Lo creado se eliminó de nuevo.
+de|db_create_failed|Benutzer oder Datenbank konnten nicht angelegt werden. Was angelegt wurde, wurde wieder entfernt.
+it|db_create_failed|Impossibile creare l'utente o il database. Quanto creato è stato rimosso.
+pt|db_create_failed|Não foi possível criar o utilizador ou a base de dados. O que foi criado foi removido.
+nl|db_create_failed|De gebruiker of database kon niet worden aangemaakt. Wat was aangemaakt is weer verwijderd.
+ru|db_create_failed|Не удалось создать пользователя или базу. Созданное удалено.
+zh|db_create_failed|无法创建用户或数据库。已创建的内容已被删除。
+ar|db_create_failed|تعذّر إنشاء المستخدم أو قاعدة البيانات. أُزيل ما أُنشئ.
+en|db_rights|The account is not allowed to do this. The statements above are the minimum an administrator of the server has to run; then run the installer again.
+fr|db_rights|Le compte n'a pas les droits nécessaires. Les instructions ci-dessus sont le minimum qu'un administrateur du serveur doit exécuter ; relancez ensuite l'installateur.
+es|db_rights|La cuenta no tiene permiso para hacerlo. Las instrucciones anteriores son lo mínimo que un administrador del servidor debe ejecutar; luego vuelva a ejecutar el instalador.
+de|db_rights|Das Konto darf das nicht. Die obigen Anweisungen sind das Minimum, das ein Serveradministrator ausführen muss; starten Sie danach den Installer erneut.
+it|db_rights|L'account non ha i permessi necessari. Le istruzioni qui sopra sono il minimo che un amministratore del server deve eseguire; poi riesegui l'installer.
+pt|db_rights|A conta não tem permissão para isto. As instruções acima são o mínimo que um administrador do servidor tem de executar; depois volte a executar o instalador.
+nl|db_rights|Het account heeft hiervoor geen rechten. De bovenstaande opdrachten zijn het minimum dat een serverbeheerder moet uitvoeren; start daarna het installatieprogramma opnieuw.
+ru|db_rights|У учётной записи нет прав. Команды выше — минимум, который должен выполнить администратор сервера; затем снова запустите установщик.
+zh|db_rights|该账户无权执行此操作。上面的语句是服务器管理员至少需要执行的内容；执行后请重新运行安装程序。
+ar|db_rights|ليس لهذا الحساب صلاحية. التعليمات أعلاه هي الحد الأدنى الذي يجب أن ينفذه مسؤول الخادم؛ ثم أعد تشغيل المثبّت.
+en|db_need_conn|No connection to the PostgreSQL server was given: use --db-dsn-file, or --db-host with --db-password-file, or --db-install-local.
+fr|db_need_conn|Aucune connexion au serveur PostgreSQL n'a été donnée : utilisez --db-dsn-file, ou --db-host avec --db-password-file, ou --db-install-local.
+es|db_need_conn|No se indicó ninguna conexión al servidor PostgreSQL: use --db-dsn-file, o --db-host con --db-password-file, o --db-install-local.
+de|db_need_conn|Es wurde keine Verbindung zum PostgreSQL-Server angegeben: verwenden Sie --db-dsn-file, oder --db-host mit --db-password-file, oder --db-install-local.
+it|db_need_conn|Nessuna connessione al server PostgreSQL indicata: usa --db-dsn-file, oppure --db-host con --db-password-file, oppure --db-install-local.
+pt|db_need_conn|Não foi indicada nenhuma ligação ao servidor PostgreSQL: use --db-dsn-file, ou --db-host com --db-password-file, ou --db-install-local.
+nl|db_need_conn|Er is geen verbinding met de PostgreSQL-server opgegeven: gebruik --db-dsn-file, of --db-host met --db-password-file, of --db-install-local.
+ru|db_need_conn|Подключение к серверу PostgreSQL не задано: используйте --db-dsn-file, либо --db-host с --db-password-file, либо --db-install-local.
+zh|db_need_conn|未提供到 PostgreSQL 服务器的连接：请使用 --db-dsn-file，或 --db-host 加 --db-password-file，或 --db-install-local。
+ar|db_need_conn|لم تُحدَّد أي معلومات اتصال بخادم PostgreSQL: استخدم --db-dsn-file أو --db-host مع --db-password-file أو --db-install-local.
+en|db_schema_failed|The tables could not be created in the database. The log says why.
+fr|db_schema_failed|Les tables n'ont pas pu être créées dans la base. Le journal dit pourquoi.
+es|db_schema_failed|No se pudieron crear las tablas en la base de datos. El registro dice por qué.
+de|db_schema_failed|Die Tabellen konnten in der Datenbank nicht angelegt werden. Das Protokoll nennt den Grund.
+it|db_schema_failed|Impossibile creare le tabelle nel database. Il registro ne indica il motivo.
+pt|db_schema_failed|Não foi possível criar as tabelas na base de dados. O registo diz porquê.
+nl|db_schema_failed|De tabellen konden niet in de database worden aangemaakt. Het logboek zegt waarom.
+ru|db_schema_failed|Не удалось создать таблицы в базе. Причина — в журнале.
+zh|db_schema_failed|无法在数据库中创建表。原因见日志。
+ar|db_schema_failed|تعذّر إنشاء الجداول في قاعدة البيانات. السبب في السجل.
+en|db_no_pgdump|pg_dump is missing: the daily database backup will report an error until the PostgreSQL client package is installed.
+fr|db_no_pgdump|pg_dump est absent : la sauvegarde quotidienne de la base signalera une erreur tant que le paquet client PostgreSQL n'est pas installé.
+es|db_no_pgdump|Falta pg_dump: la copia diaria de la base dará error hasta que se instale el paquete cliente de PostgreSQL.
+de|db_no_pgdump|pg_dump fehlt: die tägliche Datenbanksicherung meldet einen Fehler, bis das PostgreSQL-Client-Paket installiert ist.
+it|db_no_pgdump|pg_dump manca: il backup giornaliero del database segnalerà un errore finché non sarà installato il pacchetto client PostgreSQL.
+pt|db_no_pgdump|Falta o pg_dump: a cópia diária da base de dados dará erro até o pacote cliente PostgreSQL ser instalado.
+nl|db_no_pgdump|pg_dump ontbreekt: de dagelijkse databaseback-up meldt een fout totdat het PostgreSQL-clientpakket is geïnstalleerd.
+ru|db_no_pgdump|pg_dump отсутствует: ежедневная копия базы будет выдавать ошибку, пока не установлен клиентский пакет PostgreSQL.
+zh|db_no_pgdump|缺少 pg_dump：在安装 PostgreSQL 客户端软件包之前，每日数据库备份会报错。
+ar|db_no_pgdump|pg_dump غير موجود: ستُبلغ النسخة اليومية لقاعدة البيانات عن خطأ حتى تُثبَّت حزمة عميل PostgreSQL.
+en|db_sum_engine|Database: %s
+fr|db_sum_engine|Base de données : %s
+es|db_sum_engine|Base de datos: %s
+de|db_sum_engine|Datenbank: %s
+it|db_sum_engine|Database: %s
+pt|db_sum_engine|Base de dados: %s
+nl|db_sum_engine|Database: %s
+ru|db_sum_engine|База данных: %s
+zh|db_sum_engine|数据库：%s
+ar|db_sum_engine|قاعدة البيانات: %s
+en|db_sum_local|PostgreSQL runs on this machine (loopback only); database %s, user %s (no administrator rights)
+fr|db_sum_local|PostgreSQL tourne sur cette machine (boucle locale uniquement) ; base %s, utilisateur %s (sans droits d'administration)
+es|db_sum_local|PostgreSQL funciona en esta máquina (solo bucle local); base %s, usuario %s (sin derechos de administración)
+de|db_sum_local|PostgreSQL läuft auf diesem Rechner (nur Loopback); Datenbank %s, Benutzer %s (ohne Administratorrechte)
+it|db_sum_local|PostgreSQL gira su questa macchina (solo loopback); database %s, utente %s (senza diritti di amministrazione)
+pt|db_sum_local|O PostgreSQL corre nesta máquina (apenas loopback); base %s, utilizador %s (sem direitos de administração)
+nl|db_sum_local|PostgreSQL draait op deze machine (alleen loopback); database %s, gebruiker %s (zonder beheerdersrechten)
+ru|db_sum_local|PostgreSQL работает на этой машине (только loopback); база %s, пользователь %s (без прав администратора)
+zh|db_sum_local|PostgreSQL 运行在本机（仅回环地址）；数据库 %s，用户 %s（无管理员权限）
+ar|db_sum_local|يعمل PostgreSQL على هذا الجهاز (الواجهة المحلية فقط)؛ القاعدة %s والمستخدم %s (بلا صلاحيات إدارية)
+en|db_sum_remote|Existing PostgreSQL server; database %s, user %s
+fr|db_sum_remote|Serveur PostgreSQL existant ; base %s, utilisateur %s
+es|db_sum_remote|Servidor PostgreSQL existente; base %s, usuario %s
+de|db_sum_remote|Vorhandener PostgreSQL-Server; Datenbank %s, Benutzer %s
+it|db_sum_remote|Server PostgreSQL esistente; database %s, utente %s
+pt|db_sum_remote|Servidor PostgreSQL existente; base %s, utilizador %s
+nl|db_sum_remote|Bestaande PostgreSQL-server; database %s, gebruiker %s
+ru|db_sum_remote|Существующий сервер PostgreSQL; база %s, пользователь %s
+zh|db_sum_remote|现有 PostgreSQL 服务器；数据库 %s，用户 %s
+ar|db_sum_remote|خادم PostgreSQL موجود؛ القاعدة %s والمستخدم %s
+en|db_sum_schema|Schema: %s
+fr|db_sum_schema|Schéma : %s
+es|db_sum_schema|Esquema: %s
+de|db_sum_schema|Schema: %s
+it|db_sum_schema|Schema: %s
+pt|db_sum_schema|Esquema: %s
+nl|db_sum_schema|Schema: %s
+ru|db_sum_schema|Схема: %s
+zh|db_sum_schema|架构：%s
+ar|db_sum_schema|المخطط: %s
+en|db_sum_secret|The connection (with its password) is in %s, readable by the ToutWAF service only
+fr|db_sum_secret|La connexion (avec son mot de passe) est dans %s, lisible par le seul service ToutWAF
+es|db_sum_secret|La conexión (con su contraseña) está en %s, legible solo por el servicio ToutWAF
+de|db_sum_secret|Die Verbindung (mit Passwort) liegt in %s und ist nur für den ToutWAF-Dienst lesbar
+it|db_sum_secret|La connessione (con la password) è in %s, leggibile solo dal servizio ToutWAF
+pt|db_sum_secret|A ligação (com a palavra-passe) está em %s, legível apenas pelo serviço ToutWAF
+nl|db_sum_secret|De verbinding (met wachtwoord) staat in %s, alleen leesbaar voor de ToutWAF-dienst
+ru|db_sum_secret|Подключение (с паролем) хранится в %s и читается только службой ToutWAF
+zh|db_sum_secret|连接信息（含密码）保存在 %s，仅 ToutWAF 服务可读
+ar|db_sum_secret|الاتصال (مع كلمة المرور) في %s ولا يقرؤه إلا خدمة ToutWAF
+en|db_sum_backup|A verified pg_dump runs every night (7 kept); status in the console, Santé
+fr|db_sum_backup|Un pg_dump vérifié s'exécute chaque nuit (7 conservés) ; état dans la console, Santé
+es|db_sum_backup|Cada noche se ejecuta un pg_dump verificado (se conservan 7); estado en la consola, Salud
+de|db_sum_backup|Jede Nacht läuft ein geprüftes pg_dump (7 bleiben erhalten); Status in der Konsole, Santé
+it|db_sum_backup|Ogni notte gira un pg_dump verificato (se ne conservano 7); stato nella console, Santé
+pt|db_sum_backup|Todas as noites corre um pg_dump verificado (guardam-se 7); estado na consola, Santé
+nl|db_sum_backup|Elke nacht draait een gecontroleerde pg_dump (7 bewaard); status in de console, Santé
+ru|db_sum_backup|Каждую ночь выполняется проверенный pg_dump (хранится 7); состояние в консоли, Santé
+zh|db_sum_backup|每晚运行经验证的 pg_dump（保留 7 份）；状态见控制台 Santé
+ar|db_sum_backup|يعمل pg_dump موثَّق كل ليلة (يُحتفظ بـ 7)؛ الحالة في وحدة التحكم، Santé
+en|db_sum_nobackup|No automatic database backup: schedule pg_dump or use the backup of your database provider
+fr|db_sum_nobackup|Pas de sauvegarde automatique de la base : planifiez pg_dump ou utilisez la sauvegarde de votre hébergeur de base
+es|db_sum_nobackup|Sin copia automática de la base: programe pg_dump o use la copia de su proveedor de base de datos
+de|db_sum_nobackup|Keine automatische Datenbanksicherung: planen Sie pg_dump oder nutzen Sie die Sicherung Ihres Datenbankanbieters
+it|db_sum_nobackup|Nessun backup automatico del database: pianifica pg_dump o usa il backup del tuo fornitore di database
+pt|db_sum_nobackup|Sem cópia automática da base: agende o pg_dump ou use a cópia do seu fornecedor de base de dados
+nl|db_sum_nobackup|Geen automatische databaseback-up: plan pg_dump in of gebruik de back-up van uw databaseaanbieder
+ru|db_sum_nobackup|Автоматической копии базы нет: запланируйте pg_dump или используйте копирование вашего поставщика БД
+zh|db_sum_nobackup|没有自动数据库备份：请安排 pg_dump 或使用数据库提供商的备份
+ar|db_sum_nobackup|لا توجد نسخة احتياطية تلقائية لقاعدة البيانات: جدول pg_dump أو استخدم نسخ مزوّد قاعدة البيانات
+en|db_sum_sqlite|Database: SQLite, one file on this machine (small installation). Move to PostgreSQL later: toutwaf-cp db migrate
+fr|db_sum_sqlite|Base de données : SQLite, un fichier sur cette machine (petite installation). Passer à PostgreSQL plus tard : toutwaf-cp db migrate
+es|db_sum_sqlite|Base de datos: SQLite, un archivo en esta máquina (instalación pequeña). Pasar a PostgreSQL más tarde: toutwaf-cp db migrate
+de|db_sum_sqlite|Datenbank: SQLite, eine Datei auf diesem Rechner (kleine Installation). Später zu PostgreSQL wechseln: toutwaf-cp db migrate
+it|db_sum_sqlite|Database: SQLite, un file su questa macchina (piccola installazione). Passare a PostgreSQL più tardi: toutwaf-cp db migrate
+pt|db_sum_sqlite|Base de dados: SQLite, um ficheiro nesta máquina (instalação pequena). Passar para PostgreSQL mais tarde: toutwaf-cp db migrate
+nl|db_sum_sqlite|Database: SQLite, één bestand op deze machine (kleine installatie). Later overstappen naar PostgreSQL: toutwaf-cp db migrate
+ru|db_sum_sqlite|База данных: SQLite, один файл на этой машине (небольшая установка). Позже перейти на PostgreSQL: toutwaf-cp db migrate
+zh|db_sum_sqlite|数据库：SQLite，本机上的一个文件（小型安装）。以后可迁移到 PostgreSQL：toutwaf-cp db migrate
+ar|db_sum_sqlite|قاعدة البيانات: SQLite، ملف واحد على هذا الجهاز (تثبيت صغير). الانتقال إلى PostgreSQL لاحقًا: toutwaf-cp db migrate
+en|s_extras|Extras: Windows agent and antivirus programs
+fr|s_extras|Extras : agent Windows et programmes de l'antivirus
+es|s_extras|Extras: agente de Windows y programas del antivirus
+de|s_extras|Extras: Windows-Agent und Antivirus-Programme
+it|s_extras|Extra: agente Windows e programmi dell'antivirus
+pt|s_extras|Extras: agente Windows e programas do antivírus
+nl|s_extras|Extra's: Windows-agent en antivirusprogramma's
+ru|s_extras|Дополнения: агент для Windows и программы антивируса
+zh|s_extras|附加包：Windows 代理和杀毒程序
+ar|s_extras|الإضافات: وكيل Windows وبرامج مكافحة الفيروسات
+en|s_extras_ok|Extras installed: %s programs in %s
+fr|s_extras_ok|Extras installés : %s programmes dans %s
+es|s_extras_ok|Extras instalados: %s programas en %s
+de|s_extras_ok|Extras installiert: %s Programme in %s
+it|s_extras_ok|Extra installati: %s programmi in %s
+pt|s_extras_ok|Extras instalados: %s programas em %s
+nl|s_extras_ok|Extra's geïnstalleerd: %s programma's in %s
+ru|s_extras_ok|Дополнения установлены: %s программ в %s
+zh|s_extras_ok|附加包已安装：%s 个程序，位于 %s
+ar|s_extras_ok|تم تثبيت الإضافات: %s برنامج في %s
+en|s_extras_sha|Extras verified: %s file(s), %s MiB (SHA-256 and signature)
+fr|s_extras_sha|Extras vérifiés : %s fichier(s), %s Mio (SHA-256 et signature)
+es|s_extras_sha|Extras verificados: %s archivo(s), %s MiB (SHA-256 y firma)
+de|s_extras_sha|Extras geprüft: %s Datei(en), %s MiB (SHA-256 und Signatur)
+it|s_extras_sha|Extra verificati: %s file, %s MiB (SHA-256 e firma)
+pt|s_extras_sha|Extras verificados: %s ficheiro(s), %s MiB (SHA-256 e assinatura)
+nl|s_extras_sha|Extra's gecontroleerd: %s bestand(en), %s MiB (SHA-256 en handtekening)
+ru|s_extras_sha|Дополнения проверены: файлов %s, %s МиБ (SHA-256 и подпись)
+zh|s_extras_sha|附加包已校验：%s 个文件，%s MiB（SHA-256 与签名）
+ar|s_extras_sha|تم التحقق من الإضافات: %s ملف، %s ميبيبايت (SHA-256 والتوقيع)
+en|s_extras_unchecked|Extras taken as given, without a SHA256SUMS to check them: %s
+fr|s_extras_unchecked|Extras pris tels quels, sans SHA256SUMS pour les vérifier : %s
+es|s_extras_unchecked|Extras tomados tal cual, sin SHA256SUMS para verificarlos: %s
+de|s_extras_unchecked|Extras unverändert übernommen, ohne SHA256SUMS zur Prüfung: %s
+it|s_extras_unchecked|Extra usati così come sono, senza SHA256SUMS per verificarli: %s
+pt|s_extras_unchecked|Extras usados tal como estão, sem SHA256SUMS para os verificar: %s
+nl|s_extras_unchecked|Extra's zoals ze zijn overgenomen, zonder SHA256SUMS om ze te controleren: %s
+ru|s_extras_unchecked|Дополнения взяты как есть, без SHA256SUMS для проверки: %s
+zh|s_extras_unchecked|附加包按原样使用，没有 SHA256SUMS 可供校验：%s
+ar|s_extras_unchecked|تم أخذ الإضافات كما هي دون SHA256SUMS للتحقق منها: %s
+en|w_extras_dl|The extras could not be downloaded (%s). ToutWAF works without them, but this console will not offer Windows nor the antivirus until they are installed.
+fr|w_extras_dl|Les extras n'ont pas pu être téléchargés (%s). ToutWAF fonctionne sans eux, mais cette console ne proposera ni Windows ni l'antivirus tant qu'ils ne sont pas installés.
+es|w_extras_dl|No se pudieron descargar los extras (%s). ToutWAF funciona sin ellos, pero esta consola no ofrecerá Windows ni el antivirus hasta que se instalen.
+de|w_extras_dl|Die Extras konnten nicht heruntergeladen werden (%s). ToutWAF läuft auch ohne sie, doch diese Konsole bietet weder Windows noch den Virenschutz an, bis sie installiert sind.
+it|w_extras_dl|Impossibile scaricare gli extra (%s). ToutWAF funziona senza, ma questa console non proporrà Windows né l'antivirus finché non saranno installati.
+pt|w_extras_dl|Não foi possível transferir os extras (%s). O ToutWAF funciona sem eles, mas esta consola não oferecerá o Windows nem o antivírus enquanto não estiverem instalados.
+nl|w_extras_dl|De extra's konden niet worden gedownload (%s). ToutWAF werkt zonder, maar deze console biedt geen Windows of antivirus aan zolang ze niet geïnstalleerd zijn.
+ru|w_extras_dl|Не удалось загрузить дополнения (%s). ToutWAF работает без них, но эта консоль не предложит Windows и антивирус, пока они не установлены.
+zh|w_extras_dl|无法下载附加包（%s）。ToutWAF 没有它们也能运行，但在安装之前，此控制台不会提供 Windows 和杀毒功能。
+ar|w_extras_dl|تعذر تنزيل الإضافات (%s). يعمل ToutWAF بدونها، لكن هذه اللوحة لن تعرض Windows ولا مكافحة الفيروسات حتى يتم تثبيتها.
+en|w_extras_sum|The extras %s do not match their SHA-256 in the signed SHA256SUMS: they were NOT installed.
+fr|w_extras_sum|Les extras %s ne correspondent pas à leur SHA-256 du SHA256SUMS signé : ils n'ont PAS été installés.
+es|w_extras_sum|Los extras %s no coinciden con su SHA-256 del SHA256SUMS firmado: NO se instalaron.
+de|w_extras_sum|Die Extras %s stimmen nicht mit ihrem SHA-256 im signierten SHA256SUMS überein: sie wurden NICHT installiert.
+it|w_extras_sum|Gli extra %s non corrispondono al loro SHA-256 nel SHA256SUMS firmato: NON sono stati installati.
+pt|w_extras_sum|Os extras %s não correspondem ao seu SHA-256 no SHA256SUMS assinado: NÃO foram instalados.
+nl|w_extras_sum|De extra's %s komen niet overeen met hun SHA-256 in de ondertekende SHA256SUMS: ze zijn NIET geïnstalleerd.
+ru|w_extras_sum|Дополнения %s не совпадают со своей суммой SHA-256 в подписанном SHA256SUMS: они НЕ установлены.
+zh|w_extras_sum|附加包 %s 与已签名 SHA256SUMS 中的 SHA-256 不一致：未安装。
+ar|w_extras_sum|الإضافات %s لا تطابق قيمة SHA-256 في SHA256SUMS الموقّع: لم يتم تثبيتها.
+en|w_extras_bad|The extras file %s is not a valid extras archive: it was NOT installed.
+fr|w_extras_bad|Le fichier d'extras %s n'est pas une archive d'extras valide : il n'a PAS été installé.
+es|w_extras_bad|El archivo de extras %s no es un archivo de extras válido: NO se instaló.
+de|w_extras_bad|Die Extras-Datei %s ist kein gültiges Extras-Archiv: sie wurde NICHT installiert.
+it|w_extras_bad|Il file di extra %s non è un archivio di extra valido: NON è stato installato.
+pt|w_extras_bad|O ficheiro de extras %s não é um arquivo de extras válido: NÃO foi instalado.
+nl|w_extras_bad|Het extra-bestand %s is geen geldig extra-archief: het is NIET geïnstalleerd.
+ru|w_extras_bad|Файл дополнений %s не является допустимым архивом дополнений: он НЕ установлен.
+zh|w_extras_bad|附加包文件 %s 不是有效的附加包归档：未安装。
+ar|w_extras_bad|ملف الإضافات %s ليس أرشيف إضافات صالحا: لم يتم تثبيته.
+en|w_extras_ver|The extras are for version %s, this installation is %s: they were NOT installed.
+fr|w_extras_ver|Les extras sont de la version %s, cette installation est en %s : ils n'ont PAS été installés.
+es|w_extras_ver|Los extras son de la versión %s, esta instalación es %s: NO se instalaron.
+de|w_extras_ver|Die Extras gehören zu Version %s, diese Installation ist %s: sie wurden NICHT installiert.
+it|w_extras_ver|Gli extra sono della versione %s, questa installazione è %s: NON sono stati installati.
+pt|w_extras_ver|Os extras são da versão %s, esta instalação é %s: NÃO foram instalados.
+nl|w_extras_ver|De extra's zijn van versie %s, deze installatie is %s: ze zijn NIET geïnstalleerd.
+ru|w_extras_ver|Дополнения от версии %s, а эта установка — %s: они НЕ установлены.
+zh|w_extras_ver|附加包适用于版本 %s，而此安装为 %s：未安装。
+ar|w_extras_ver|الإضافات خاصة بالإصدار %s وهذا التثبيت هو %s: لم يتم تثبيتها.
+en|w_extras_inc|The release lists %s part(s) of the extras but says it has %s: the publication is damaged, the extras were NOT installed.
+fr|w_extras_inc|La version liste %s partie(s) des extras mais annonce %s : la publication est abîmée, les extras n'ont PAS été installés.
+es|w_extras_inc|La versión lista %s parte(s) de los extras pero indica %s: la publicación está dañada, los extras NO se instalaron.
+de|w_extras_inc|Die Version listet %s Teil(e) der Extras, nennt aber %s: die Veröffentlichung ist beschädigt, die Extras wurden NICHT installiert.
+it|w_extras_inc|La versione elenca %s parte/i degli extra ma ne dichiara %s: la pubblicazione è danneggiata, gli extra NON sono stati installati.
+pt|w_extras_inc|A versão lista %s parte(s) dos extras mas indica %s: a publicação está danificada, os extras NÃO foram instalados.
+nl|w_extras_inc|De versie vermeldt %s deel/delen van de extra's maar zegt er %s te hebben: de publicatie is beschadigd, de extra's zijn NIET geïnstalleerd.
+ru|w_extras_inc|Релиз перечисляет %s частей дополнений, но заявляет %s: публикация повреждена, дополнения НЕ установлены.
+zh|w_extras_inc|该版本列出了附加包的 %s 个部分，但声明共有 %s 个：发布已损坏，未安装附加包。
+ar|w_extras_inc|يسرد الإصدار %s جزءا من الإضافات لكنه يذكر %s: النشر تالف ولم يتم تثبيت الإضافات.
+en|w_extras_nofile|The extras file %s does not exist.
+fr|w_extras_nofile|Le fichier d'extras %s n'existe pas.
+es|w_extras_nofile|El archivo de extras %s no existe.
+de|w_extras_nofile|Die Extras-Datei %s existiert nicht.
+it|w_extras_nofile|Il file di extra %s non esiste.
+pt|w_extras_nofile|O ficheiro de extras %s não existe.
+nl|w_extras_nofile|Het extra-bestand %s bestaat niet.
+ru|w_extras_nofile|Файл дополнений %s не существует.
+zh|w_extras_nofile|附加包文件 %s 不存在。
+ar|w_extras_nofile|ملف الإضافات %s غير موجود.
+en|w_extras_none|This release carries no extras: this console will not offer Windows nor the antivirus.
+fr|w_extras_none|Cette version ne contient pas d'extras : cette console ne proposera ni Windows ni l'antivirus.
+es|w_extras_none|Esta versión no incluye extras: esta consola no ofrecerá Windows ni el antivirus.
+de|w_extras_none|Diese Version enthält keine Extras: diese Konsole bietet weder Windows noch den Virenschutz an.
+it|w_extras_none|Questa versione non contiene extra: questa console non proporrà Windows né l'antivirus.
+pt|w_extras_none|Esta versão não inclui extras: esta consola não oferecerá o Windows nem o antivírus.
+nl|w_extras_none|Deze versie bevat geen extra's: deze console biedt geen Windows of antivirus aan.
+ru|w_extras_none|В этом релизе нет дополнений: эта консоль не предложит Windows и антивирус.
+zh|w_extras_none|此版本不含附加包：此控制台不会提供 Windows 和杀毒功能。
+ar|w_extras_none|لا يحتوي هذا الإصدار على إضافات: لن تعرض هذه اللوحة Windows ولا مكافحة الفيروسات.
+en|w_extras_todo|Extras not installed. When the network allows it, run as root: %s
+fr|w_extras_todo|Extras non installés. Quand le réseau le permet, lancez en root : %s
+es|w_extras_todo|Extras no instalados. Cuando la red lo permita, ejecute como root: %s
+de|w_extras_todo|Extras nicht installiert. Sobald das Netz es erlaubt, als root ausführen: %s
+it|w_extras_todo|Extra non installati. Quando la rete lo consente, eseguire come root: %s
+pt|w_extras_todo|Extras não instalados. Quando a rede o permitir, execute como root: %s
+nl|w_extras_todo|Extra's niet geïnstalleerd. Zodra het netwerk het toelaat, voer uit als root: %s
+ru|w_extras_todo|Дополнения не установлены. Когда сеть позволит, выполните от root: %s
+zh|w_extras_todo|附加包未安装。网络可用时请以 root 运行：%s
+ar|w_extras_todo|لم يتم تثبيت الإضافات. عندما تسمح الشبكة، شغّل بصلاحيات root: %s
+en|extras_needs_cp|The extras belong to the control plane: it is not installed on this machine.
+fr|extras_needs_cp|Les extras appartiennent au plan de contrôle : il n'est pas installé sur cette machine.
+es|extras_needs_cp|Los extras pertenecen al plano de control: no está instalado en esta máquina.
+de|extras_needs_cp|Die Extras gehören zur Control Plane: sie ist auf diesem Rechner nicht installiert.
+it|extras_needs_cp|Gli extra appartengono al control plane: non è installato su questa macchina.
+pt|extras_needs_cp|Os extras pertencem ao plano de controlo: não está instalado nesta máquina.
+nl|extras_needs_cp|De extra's horen bij de control plane: die is niet geïnstalleerd op deze machine.
+ru|extras_needs_cp|Дополнения относятся к control plane: он не установлен на этой машине.
+zh|extras_needs_cp|附加包属于控制平面：本机未安装控制平面。
+ar|extras_needs_cp|الإضافات تخص مستوى التحكم: وهو غير مثبت على هذا الجهاز.
+en|extras_other_release|The published release (%s) is not the installed one (%s): the extras come with it. Run --update.
+fr|extras_other_release|La version publiée (%s) n'est pas celle qui est installée (%s) : les extras viennent avec elle. Lancez --update.
+es|extras_other_release|La versión publicada (%s) no es la instalada (%s): los extras vienen con ella. Ejecute --update.
+de|extras_other_release|Die veröffentlichte Version (%s) ist nicht die installierte (%s): die Extras kommen mit ihr. --update ausführen.
+it|extras_other_release|La versione pubblicata (%s) non è quella installata (%s): gli extra arrivano con essa. Eseguire --update.
+pt|extras_other_release|A versão publicada (%s) não é a instalada (%s): os extras vêm com ela. Execute --update.
+nl|extras_other_release|De gepubliceerde versie (%s) is niet de geïnstalleerde (%s): de extra's komen daarmee mee. Voer --update uit.
+ru|extras_other_release|Опубликованный релиз (%s) не совпадает с установленным (%s): дополнения идут вместе с ним. Выполните --update.
+zh|extras_other_release|已发布的版本（%s）不是已安装的版本（%s）：附加包随它一起提供。请运行 --update。
+ar|extras_other_release|الإصدار المنشور (%s) ليس المثبت (%s): الإضافات تأتي معه. شغّل --update.
+en|st_extras_ok|Extras: installed (Windows agent, antivirus programs)
+fr|st_extras_ok|Extras : installés (agent Windows, programmes de l'antivirus)
+es|st_extras_ok|Extras: instalados (agente de Windows, programas del antivirus)
+de|st_extras_ok|Extras: installiert (Windows-Agent, Antivirus-Programme)
+it|st_extras_ok|Extra: installati (agente Windows, programmi dell'antivirus)
+pt|st_extras_ok|Extras: instalados (agente Windows, programas do antivírus)
+nl|st_extras_ok|Extra's: geïnstalleerd (Windows-agent, antivirusprogramma's)
+ru|st_extras_ok|Дополнения: установлены (агент для Windows, программы антивируса)
+zh|st_extras_ok|附加包：已安装（Windows 代理、杀毒程序）
+ar|st_extras_ok|الإضافات: مثبتة (وكيل Windows وبرامج مكافحة الفيروسات)
+en|st_extras_none|Extras missing: Windows and the antivirus are not offered. Run as root: %s
+fr|st_extras_none|Extras absents : Windows et l'antivirus ne sont pas proposés. Lancez en root : %s
+es|st_extras_none|Extras ausentes: Windows y el antivirus no se ofrecen. Ejecute como root: %s
+de|st_extras_none|Extras fehlen: Windows und der Virenschutz werden nicht angeboten. Als root ausführen: %s
+it|st_extras_none|Extra mancanti: Windows e l'antivirus non sono proposti. Eseguire come root: %s
+pt|st_extras_none|Extras em falta: o Windows e o antivírus não são oferecidos. Execute como root: %s
+nl|st_extras_none|Extra's ontbreken: Windows en antivirus worden niet aangeboden. Voer uit als root: %s
+ru|st_extras_none|Дополнения отсутствуют: Windows и антивирус не предлагаются. Выполните от root: %s
+zh|st_extras_none|缺少附加包：不提供 Windows 和杀毒功能。请以 root 运行：%s
+ar|st_extras_none|الإضافات مفقودة: لا يتم عرض Windows ولا مكافحة الفيروسات. شغّل بصلاحيات root: %s
 # END CATALOG
 TW_CATALOG
 }
@@ -3001,19 +3687,27 @@ env_check() {   # fills EC_LV / EC_CA / EC_AC from what this machine is; changes
   fi
 
   # 4. a data plane that has to enrol with a control plane it cannot reach
-  if want_dp && [ -n "$CP_URL" ] && [ "$COMPONENT" = dp ]; then
+  if want_dp && [ -n "$CLOUD_URL" ] && [ "$COMPONENT" = dp ]; then
+    local ok=1
+    # the cloud is reached with the proxy of the environment (HTTPS_PROXY), certificate verified: a node that cannot get out cannot enrol
+    # a platform with a private certificate authority (--cloud-ca) is checked with that authority, like the link will do
+    if have curl; then curl -s -o /dev/null --max-time 15 ${CLOUD_CA:+--cacert "$CLOUD_CA"} "$CLOUD_URL/cloud/v1/node/info" >/dev/null 2>&1 || ok=0
+    elif have wget; then wget -q -O /dev/null --timeout=15 ${CLOUD_CA:+--ca-certificate="$CLOUD_CA"} "$CLOUD_URL/cloud/v1/node/info" >/dev/null 2>&1 || ok=0; fi
+    [ "$ok" = 1 ] || ec_add "$refuse" "$(t pf_cp_cause "$CLOUD_URL")$nostart" "$(t pf_cloud_action)"
+  elif want_dp && [ -n "$CP_URL" ] && [ "$COMPONENT" = dp ]; then
     local ok=1
     if have curl; then curl -sk -o /dev/null --max-time 8 "$CP_URL" >/dev/null 2>&1 || ok=0
     else
-      local hp="${CP_URL#*://}"; hp="${hp%%/*}"
-      { if have timeout; then timeout 8 bash -c "exec 4<>/dev/tcp/${hp%%:*}/${hp##*:}"; else bash -c "exec 4<>/dev/tcp/${hp%%:*}/${hp##*:}"; fi; } >/dev/null 2>&1 || ok=0
+      local hp="${CP_URL#*://}"; hp="${hp%%/*}" hh hpt
+      hpt="${hp##*:}"; hh="${hp%:*}"; hh="${hh#[}"; hh="${hh%]}"   # https://[2001:db8::1]:9444 -> 2001:db8::1 and 9444
+      { if have timeout; then timeout 8 bash -c "exec 4<>/dev/tcp/$hh/$hpt"; else bash -c "exec 4<>/dev/tcp/$hh/$hpt"; fi; } >/dev/null 2>&1 || ok=0
     fi
     [ "$ok" = 1 ] || ec_add "$refuse" "$(t pf_cp_cause "$CP_URL")$nostart" "$(t pf_cp_action)"
   fi
 
   # 5. a private address: probably behind a router (said once installed, by the console; here a note so that nothing is a surprise)
   if want_dp && [ "$STAGING" = 0 ]; then
-    local lip; lip="$(local_ips | head -n1 || true)"
+    local lip; lip="$(local_ips4 | head -n1 || true)"
     if [ -n "$lip" ] && ec_is_private "$lip"; then ec_add info "$(t pf_router_cause "$lip")" "$(t pf_router_action)"; fi
   fi
   return 0
@@ -3138,6 +3832,7 @@ prereq_gate() {   # before an installation or an update; exits 4 only for a full
   [ "$QUIET" = 1 ] || ec_print 1
   return 0
 }
+# shellcheck disable=SC2034  # the outcome of the update: read by deploy/tests/prereq-test.sh, which sources this block
 SYSUPD=skipped
 sysupdate_do() {   # the update itself, run as a step (output goes to the log); never fails
   local pm="" rc=0 to=() fam="${FAMILY:-${FAMILY_GUESS:-}}" stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}"
@@ -3169,6 +3864,7 @@ sysupdate_do() {   # the update itself, run as a step (output goes to the log); 
   return 0
 }
 sysupdate_run() {   # before the prerequisites are installed: a failed or skipped update never changes what follows
+  # shellcheck disable=SC2034  # the outcome of the update: read by deploy/tests/prereq-test.sh, which sources this block
   SYSUPD=skipped
   { [ "$STAGING" = 0 ] && [ "$ACTION" = install ]; } || return 0
   if [ "$SKIP_SYSUPDATE" = 1 ]; then say "  $BUL $(t su_skipped)"; return 0; fi
@@ -3320,19 +4016,38 @@ Without options on a terminal the interactive menu is shown. Unattended examples
   install.sh --install --component dp --cp-url https://cp.example.com:9444 --enroll-token XXXX --yes
 
 Actions:
-  --install | --update | --uninstall | --status | --links
+  --install | --update | --uninstall | --status | --links | --extras-only
                              install (default), update to the newest release, remove, health check, show panel links
 Options:
   --component dp|cp|all      what to install (default: all)
   --version X.Y.Z|latest     release to install (default: latest of the channel)
   --channel stable|dev       release channel: stable = branch main, dev = branch dev (remembered in <home>/conf/installer.conf)
   --tarball FILE             install from a local release tarball (offline)
+  --extras FILE              also install the extras of the release (host agent for Windows, antivirus programs) from a local file
+                             toutwaf-extras*.tar.gz (offline; repeat for a release cut in parts). Without it the extras are downloaded with the
+                             archive, checked like it (SHA-256 and signature) and installed; a failure is a warning, the installation goes on
+  --no-extras                do not download nor install the extras (also TOUTWAF_NO_EXTRAS=1): the console then offers neither Windows nor the antivirus
+  --extras-only              install (or refresh) only the extras of the release that is installed, stopping nothing
   --base-url URL             mirror of the release tree (expects <URL>/channel.json and <URL>/releases/<version>/..., see deploy/RELEASE-LAYOUT.md)
   --via-repo                 install from ToutWAF's own package repository (adds a signed dnf .repo / apt .list, installs the package \`toutwaf\`);
                              when it is unreachable or the system is not covered, falls back to the direct download (GitLab, then GitHub)
+  --licence-api-url URL      address of the licence site of the common licence (license.common.api_url), written to the configuration before the
+                             first start (also TOUTWAF_LICENCE_API_URL). The default, and the ONLY licence server, is https://licences.toutwaf.com:
+                             give this option for a self-test only (a local test site); another host is flagged with a warning, here and in the console.
+                             https only (http on a loopback address only)
+  --licence-pin FP:KEY       pin the public key of the licence site without the console: FP is its fingerprint (SHA-256 of the raw key, the 32 first
+                             hex characters, in groups of 4 or not), KEY the key in base64 (32 bytes). Refused when FP is not the fingerprint of KEY.
+                             Repeat it for a rotation (four keys at most)
+  --licence-pin-file FILE    the same, one FP:KEY per line (lines starting with # ignored): the key does not show in the process list
+                             (also TOUTWAF_LICENCE_PIN_FILE)
   --cp-url URL               enrol the data plane with this control plane (e.g. https://cp:9444)
   --enroll-token TOKEN       one-time enrolment token (console: Nodes > Add node)
   --node-token TOKEN         existing node token instead of enrolment
+  --cloud-url URL            ToutWAF CLOUD: enrol this node with your hosted account (https://<account>.cloud.<domain>) with --enroll-token. Installs the
+                             data plane and the cloud link; the node connects OUTBOUND over HTTPS (port 443, HTTPS_PROXY honoured), no port is opened
+                             for the platform, and your visitors' traffic never goes through ToutWAF servers
+  --cloud-pin PIN            (cloud) sha256//<base64> pin of the key of the platform certificate (repeatable); the console gives it when needed
+  --cloud-ca FILE            (cloud) PEM CA of a platform that uses a private CA
   --cp-ca FILE               PEM CA / certificate of the control plane (self-signed control planes)
   --group NAME               node group (default: default)
   --cp-port N                console port (default 9443)        --http-port N / --https-port N   data-plane ports (80 / 443)
@@ -3341,11 +4056,35 @@ Options:
                              console port. The data-plane API port (9444) is never opened by the installer.
   --console-from CIDR        only allow this address / network to reach the console port (e.g. 203.0.113.0/24); default: anywhere
   --no-firewall              never touch the firewall (nftables / iptables hosts are never modified either: the commands are printed)
+  --no-telemetry             install with ZERO telemetry: nothing is sent to the publisher space (also TOUTWAF_TELEMETRY=0). Without it,
+                             the attacks ToutWAF blocks and aggregate figures are shared with app.toutwaf.com, never the content of
+                             requests nor legitimate visitors; it can be switched off at any time in the console (Settings, Privacy and telemetry)
   --with-firewall            ALSO let ToutWAF manage this machine's firewall (the optional Firewall module, off by default; also
                              TOUTWAF_WITH_FIREWALL=1). It only switches the module on: no rule is applied by the installation, and every
                              later change runs as a trial with automatic rollback and an anti-lockout guard (SSH and the console stay reachable).
                              Not the same as the options above, which only decide whether the installer opens the ports ToutWAF needs.
   --no-firewall-module       do not enable the Firewall module (the default; skips the question of the interactive mode)
+  --with-backup-client       ALSO install the ToutWAF Backup client (toutwaf-backup) next to the control plane, so that this machine can back itself up to a
+                             ToutWAF Backup server (console: Backups > Backup servers). Downloaded from the release channel of that product; the Ed25519
+                             signature of SHA256SUMS and the SHA-256 of the archive are verified BEFORE anything is installed (fail closed). Needs the public key
+                             of that product: --backup-client-pubkey (base64 of the raw key, or a PEM file), TOUTWAF_BACKUP_PUBKEY or $CONF_DIR/backup-release.pub.
+                             Also TOUTWAF_WITH_BACKUP_CLIENT=1. A failure is a warning: the installation goes on.
+  --backup-client-pubkey K   the release public key of ToutWAF Backup     --backup-client-version V   a version instead of the latest of the channel
+  --backup-client-base-url U where channel.json and releases/ of ToutWAF Backup are served (https://, or file:// for a mirror; default: the public repository)
+  --db postgres|sqlite       the database of the control plane (default: asked in the interactive mode, SQLite otherwise = unchanged behaviour).
+                             PostgreSQL is recommended for a server install and is required for several control planes; it is prepared
+                             COMPLETELY by the installer, no SQL to type. SQLite: one file, small installation on one server.
+  --db-install-local         install PostgreSQL on this machine if missing (package of the distribution), initialise it, listen on the loopback
+                             only, create the database and a dedicated user with a random password, schedule a daily verified pg_dump
+  --db-host H --db-port N --db-name NAME --db-user USER --db-password-file FILE
+                             use an existing PostgreSQL server (the user must exist, or give --db-admin-dsn-file)
+  --db-dsn-file FILE         the connection URL of the application user, in a file (copied to $CONF_DIR/db.dsn, mode 0600). --db-dsn URL does
+                             the same but the password is then visible in the process list: avoid it. TOUTWAF_DB_DSN / TOUTWAF_DB_DSN_FILE too.
+  --db-admin-dsn-file FILE   a privileged connection URL, used ONCE to create the user and the database, kept in memory only, never stored
+                             (TOUTWAF_DB_ADMIN_DSN does the same). Without it the user and the database must already exist; if the account
+                             lacks a right, the exact GRANT statements to ask the administrator for are printed.
+  --db-tls-mode MODE --db-ca FILE   disable|prefer|require|verify-ca|verify-full and the CA file of the server (TLS to the database)
+  --no-db-backup             do not schedule the daily pg_dump of a PostgreSQL database
   --no-selinux --no-sysctl --no-start --no-enable
   --check-compat             print whether this system is compatible (and the list of compatible distributions), change nothing;
                              exit 0 when compatible, 3 when not
@@ -3371,10 +4110,110 @@ Options:
 EOF
 }
 
+# BEGIN db-options
+db_valid_ident() { [[ "${1:-}" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; }
+db_valid_mode() { case "${1:-}" in ""|disable|allow|prefer|require|verify-ca|verify-full) return 0;; esac; return 1; }
+
+# options -> variables (called once, after the command line is read)
+db_check_options() {
+  case "$DB_ENGINE" in
+    ""|sqlite|postgres) ;;
+    postgresql|pg) DB_ENGINE=postgres;;
+    mysql|mariadb) die "the database engine \"$DB_ENGINE\" is not supported by this version: use postgres (recommended) or sqlite";;
+    *) die "--db must be postgres or sqlite";;
+  esac
+  db_valid_ident "$DB_NAME" || die "--db-name: lower case letters, digits and underscores only"
+  db_valid_ident "$DB_USER" || die "--db-user: lower case letters, digits and underscores only"
+  db_valid_mode "$DB_TLS_MODE" || die "--db-tls-mode must be disable, allow, prefer, require, verify-ca or verify-full"
+  if [ -n "$DB_PORT" ] && ! { [[ "$DB_PORT" =~ ^[0-9]+$ ]] && [ "$DB_PORT" -ge 1 ] && [ "$DB_PORT" -le 65535 ]; }; then die "--db-port: invalid port"; fi
+  [ -z "$DB_PASSWORD_FILE" ] || [ -r "$DB_PASSWORD_FILE" ] || die "--db-password-file: cannot read $DB_PASSWORD_FILE"
+  [ -z "$DB_CA" ] || [ -r "$DB_CA" ] || die "--db-ca: cannot read $DB_CA"
+  [ -z "$DB_ADMIN_DSN_FILE" ] || [ -r "$DB_ADMIN_DSN_FILE" ] || die "--db-admin-dsn-file: cannot read $DB_ADMIN_DSN_FILE"
+  if [ -z "$DB_ENGINE" ]; then
+    # the options say what is wanted when --db is not given
+    if [ "$DB_LOCAL" = 1 ] || [ -n "$DB_DSN$DB_DSN_FILE$DB_HOST" ]; then DB_ENGINE=postgres; fi
+  fi
+  if [ "$DB_ENGINE" = sqlite ] && { [ "$DB_LOCAL" = 1 ] || [ -n "$DB_DSN$DB_DSN_FILE$DB_HOST" ]; }; then die "--db sqlite cannot be combined with the options of a PostgreSQL server"; fi
+  return 0
+}
+# END db-options
+
+# BEGIN licence-options
+# the common licence, non interactive: the address of the licence site and its public key(s), checked here and written to toutwaf-cp.yaml
+# (license.common.api_url / pinned_keys) before the first start. The public key is not a secret; nothing but the fingerprint is ever logged.
+licence_pin_parse() {   # "FP:KEY" -> LP_FP (32 lower case hex) LP_KEY (canonical base64); returns 1 and sets LP_ERR when it is not valid
+  local v="$1" fp key f size sum
+  LP_ERR=""; LP_FP=""; LP_KEY=""
+  case "$v" in *:*) ;; *) LP_ERR="expected FINGERPRINT:KEY"; return 1;; esac
+  key="${v##*:}"; fp="${v%:*}"
+  fp="$(printf '%s' "$fp" | tr -d ' \t-' | tr 'A-F' 'a-f')"
+  [[ "$fp" =~ ^[0-9a-f]{32}$ ]] || { LP_ERR="the fingerprint must be 32 hexadecimal characters (groups of 4 allowed)"; return 1; }
+  key="$(printf '%s' "$key" | tr -d ' \t\r\n' | tr '_-' '/+' | tr -d '=')"
+  [[ "$key" =~ ^[A-Za-z0-9+/]{43}$ ]] || { LP_ERR="the key must be a base64 Ed25519 public key of 32 bytes"; return 1; }
+  f="$(mktemp)" || { LP_ERR="no temporary file"; return 1; }
+  printf '%s=' "$key" | base64 -d >"$f" 2>/dev/null || true
+  size="$(wc -c <"$f" | tr -d ' ')"
+  sum="$(sha256sum "$f" | cut -c1-32)"; rm -f "$f"
+  [ "$size" = 32 ] || { LP_ERR="the key must be a base64 Ed25519 public key of 32 bytes"; return 1; }
+  [ "$sum" = "$fp" ] || { LP_ERR="the fingerprint is not the one of this key: nothing is pinned"; return 1; }
+  LP_FP="$fp"; LP_KEY="$key="
+  return 0
+}
+licence_warn() { if declare -F warn >/dev/null 2>&1; then warn "$@"; else printf 'WARNING: %s\n' "$*" >&2; fi; }
+licence_check_options() {
+  local line n=0 all=""
+  if [ -n "$LICENCE_API_URL" ]; then
+    [[ "$LICENCE_API_URL" =~ ^(https://[A-Za-z0-9.-]+|http://(localhost|127\.0\.0\.1|\[::1\]))(:[0-9]{1,5})?(/[A-Za-z0-9._~%+/-]*)?$ ]] \
+      || die "--licence-api-url: an https address without credentials nor query (http only on a loopback address)"
+    case "${LICENCE_API_URL%/}" in
+      https://licences.toutwaf.com|https://licences.toutwaf.com/api/licence) ;;
+      *) licence_warn "--licence-api-url $LICENCE_API_URL is NOT the official licence server (https://licences.toutwaf.com): for self-tests and development only; a licence checked elsewhere is not an official licence" ;;
+    esac
+  fi
+  if [ -n "$LICENCE_PIN_FILE" ]; then
+    [ -r "$LICENCE_PIN_FILE" ] || die "--licence-pin-file: cannot read $LICENCE_PIN_FILE"
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"; case "$line" in ""|"#"*) continue;; esac
+      all="${all:+$all
+}$line"
+    done <"$LICENCE_PIN_FILE"
+  fi
+  [ -z "$LICENCE_PINS" ] || all="${all:+$all
+}$LICENCE_PINS"
+  LICENCE_PINNED=""
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    licence_pin_parse "$line" || die "--licence-pin: $LP_ERR"
+    case "
+$LICENCE_PINNED
+" in *"
+$LP_FP $LP_KEY
+"*) continue;; esac
+    LICENCE_PINNED="${LICENCE_PINNED:+$LICENCE_PINNED
+}$LP_FP $LP_KEY"; n=$((n + 1))
+  done <<<"$all"
+  [ "$n" -le 4 ] || die "--licence-pin: four keys at most"
+  return 0
+}
+# the license: section of toutwaf-cp.yaml for the options above (empty when none was given)
+licence_yaml() {
+  local fp key
+  [ -n "$LICENCE_API_URL$LICENCE_PINNED" ] || return 0
+  printf 'license:\n  common:\n'
+  [ -z "$LICENCE_API_URL" ] || printf '    api_url: "%s"\n' "$LICENCE_API_URL"
+  if [ -n "$LICENCE_PINNED" ]; then
+    printf '    pinned_keys:\n'
+    while IFS=' ' read -r fp key; do [ -n "$key" ] && printf '      - "%s"\n' "$key"; done <<<"$LICENCE_PINNED"
+  fi
+  return 0
+}
+# END licence-options
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --install) ACTION=install; shift;;
     --update) ACTION=update; shift;;
+    --db-prepare) ACTION=dbprepare; shift;;
     --uninstall) ACTION=uninstall; shift;;
     --status) ACTION=status; shift;;
     --links|--show-links) ACTION=links; shift;;
@@ -3382,11 +4221,21 @@ while [ $# -gt 0 ]; do
     --version) VERSION="$2"; shift 2;;
     --channel) CHANNEL="$2"; shift 2;;
     --tarball) TARBALL="$2"; shift 2;;
+    --extras) EXTRAS_LOCAL="${EXTRAS_LOCAL:+$EXTRAS_LOCAL:}$2"; shift 2;;
+    --no-extras) NO_EXTRAS=1; shift;;
+    --extras-only) ACTION=extras; shift;;
     --base-url) BASE_URL="$2"; shift 2;;
     --via-repo) VIA_REPO=1; shift;;
+    --licence-api-url|--license-api-url) LICENCE_API_URL="$2"; shift 2;;
+    --licence-pin|--license-pin) LICENCE_PINS="${LICENCE_PINS:+$LICENCE_PINS
+}$2"; shift 2;;
+    --licence-pin-file|--license-pin-file) LICENCE_PIN_FILE="$2"; shift 2;;
     --cp-url) CP_URL="$2"; shift 2;;
     --enroll-token) ENROLL_TOKEN="$2"; shift 2;;
     --node-token) NODE_TOKEN="$2"; shift 2;;
+    --cloud-url) CLOUD_URL="$2"; shift 2;;
+    --cloud-pin) CLOUD_PINS="$CLOUD_PINS $2"; shift 2;;
+    --cloud-ca) CLOUD_CA="$2"; shift 2;;
     --cp-ca) CP_CA="$2"; shift 2;;
     --group) NODE_GROUP="$2"; shift 2;;
     --cp-port) CP_PORT="$2"; shift 2;;
@@ -3397,8 +4246,26 @@ while [ $# -gt 0 ]; do
     --open-cp-port) OPEN_CP_PORT=1; shift;;
     --console-from) CONSOLE_FROM="$2"; shift 2;;
     --no-firewall) OPEN_FW=0; shift;;
+    --no-telemetry) NO_TELEMETRY=1; shift;;
     --with-firewall|--with-firewall-module) FW_MODULE=1; shift;;
     --no-firewall-module) FW_MODULE=0; shift;;
+    --with-backup-client) BACKUP_CLIENT=1; shift;;
+    --backup-client-pubkey) BACKUP_CLIENT_PUBKEY="$2"; shift 2;;
+    --backup-client-version) BACKUP_CLIENT_VERSION="$2"; shift 2;;
+    --backup-client-base-url) BACKUP_CLIENT_BASE="$2"; shift 2;;
+    --db) DB_ENGINE="$2"; shift 2;;
+    --db-dsn) DB_DSN="$2"; shift 2;;
+    --db-dsn-file) DB_DSN_FILE="$2"; shift 2;;
+    --db-install-local) DB_LOCAL=1; shift;;
+    --db-host) DB_HOST="$2"; shift 2;;
+    --db-port) DB_PORT="$2"; shift 2;;
+    --db-name) DB_NAME="$2"; shift 2;;
+    --db-user) DB_USER="$2"; shift 2;;
+    --db-password-file) DB_PASSWORD_FILE="$2"; shift 2;;
+    --db-tls-mode) DB_TLS_MODE="$2"; shift 2;;
+    --db-ca) DB_CA="$2"; shift 2;;
+    --db-admin-dsn-file) DB_ADMIN_DSN_FILE="$2"; shift 2;;
+    --no-db-backup) DB_BACKUP_TIMER=0; shift;;
     --no-selinux) NO_SELINUX=1; shift;;
     --no-sysctl) NO_SYSCTL=1; shift;;
     --no-start) NO_START=1; shift;;
@@ -3426,6 +4293,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 detect_lang; detect_ui
+db_check_options
+licence_check_options
 case "$COMPONENT" in dp|cp|all) ;; *) die "--component must be dp, cp or all";; esac
 case "$CHANNEL" in beta) CHANNEL=dev;; esac
 case "$CHANNEL" in ""|stable|dev) ;; *) die "--channel must be stable or dev";; esac
@@ -3703,7 +4572,22 @@ ch_asset_sha() {   # asset name -> sha256 from channel.json
 }
 
 # ------------------------------------------------------------------------------------------------ addresses + panel data
-local_ips() {
+# urlhost ADDR: an IPv6 literal goes between brackets in a URL (https://[2001:db8::1]:9443/), a name or an IPv4 address does not
+urlhost() { case "$1" in \[*) printf '%s' "$1";; *:*) printf '[%s]' "$1";; *) printf '%s' "$1";; esac; }
+# hostport HOST PORT: host:port for a URL or a bracketed IPv6 literal
+hostport() { printf '%s:%s' "$(urlhost "$1")" "$2"; }
+# has_ipv6: the kernel has IPv6 (not disabled with ipv6.disable=1)
+has_ipv6() { [ -e /proc/net/if_inet6 ]; }
+# any_addr: the address the services listen on: [::] answers IPv6 AND IPv4 (dual stack) when the kernel has IPv6, else 0.0.0.0
+any_addr() { if has_ipv6 && [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 0)" != 1 ]; then printf '[::]'; else printf '0.0.0.0'; fi; }
+# local_ips6: the global IPv6 addresses of the machine (not link-local), without the temporary privacy addresses
+local_ips6() {
+  { if have ip; then ip -6 -o addr show scope global 2>/dev/null | grep -v -E 'temporary|deprecated' | awk '{print $4}' | cut -d/ -f1
+    fi; } | grep -E '^[0-9a-fA-F:]+$' | grep -F ':' | sort -u || true
+}
+# local_ips: IPv6 first, then IPv4
+local_ips() { { local_ips6; local_ips4; } | awk 'NF && !s[$0]++' || true; }
+local_ips4() {
   { if have ip; then ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
     elif have hostname && hostname -I >/dev/null 2>&1; then hostname -I | tr ' ' '\n'
     else awk '/32 host/ { print f } {f=$2}' /proc/net/fib_trie 2>/dev/null; fi; } | grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -v '^127\.' | sort -u || true
@@ -3713,8 +4597,13 @@ detect_public_ip() {
   if [ -n "$PUBLIC_HOST" ]; then PUBLIC_IP="$PUBLIC_HOST"; return 0; fi
   [ "$STAGING" = 1 ] && return 0
   local u ip
+  # IPv6 first (curl -6), then IPv4 (curl -4)
+  for u in https://api64.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+    ip="$(curl -6 -fsS --max-time 4 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^[0-9a-fA-F:]+$ && "$ip" == *:* ]]; then PUBLIC_IP="$ip"; return 0; fi
+  done
   for u in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
-    ip="$(curl -fsS --max-time 4 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
+    ip="$(curl -4 -fsS --max-time 4 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
     if [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then PUBLIC_IP="$ip"; return 0; fi
   done
   return 0
@@ -3857,6 +4746,75 @@ enable_firewall_module() {
   return 0
 }
 
+# ------------------------------------------------------------------------------------------------ optional ToutWAF Backup client
+# ed25519_check PEM MESSAGE SIGNATURE_B64_FILE: true when the signature (base64 of the raw 64 bytes) is valid for the message under that Ed25519 key.
+# openssl when it can verify Ed25519 (>= 3.0), else the embedded pure-Python verifier of the release check; neither: false (fail closed).
+ed25519_check() {
+  local pem="$1" msg="$2" sigb64="$3" py ok=1
+  tr -d '[:space:]' <"$sigb64" | base64 -d >"$TMP/bk-sig.bin" 2>/dev/null || return 1
+  if openssl_ed25519_ok; then
+    openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in "$msg" -sigfile "$TMP/bk-sig.bin" >>"$LOG" 2>&1 && ok=0
+    return "$ok"
+  fi
+  py="$(python3_bin)"
+  [ -n "$py" ] || return 1
+  ed25519_py "$TMP/bk-ed25519.py"
+  "$py" "$TMP/bk-ed25519.py" "$(pubkey_raw "$pem")" "$TMP/bk-sig.bin" "$msg" >>"$LOG" 2>&1 && ok=0
+  return "$ok"
+}
+# backup_client_pem: prints the path of the PEM public key to check the ToutWAF Backup release with, nothing when there is none
+backup_client_pem() {
+  local k="$BACKUP_CLIENT_PUBKEY" raw pem="$TMP/backup-release-pub.pem"
+  if [ -z "$k" ] && [ -r "$(p "$CONF_DIR/backup-release.pub")" ]; then k="$(p "$CONF_DIR/backup-release.pub")"; fi
+  [ -n "$k" ] || return 0
+  if [ -f "$k" ]; then raw="$(cat "$k")"; else raw="$k"; fi
+  case "$raw" in
+    *"BEGIN PUBLIC KEY"*) printf '%s\n' "$raw" >"$pem";;
+    *) printf '%s' "$raw" | tr -d '[:space:]' | grep -Eq '^[A-Za-z0-9+/]{43}=$' || return 0
+       { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$raw" | tr -d '[:space:]' | base64 -d; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$pem";;
+  esac
+  [ "$(pubkey_raw "$pem" | base64 -d 2>/dev/null | wc -c)" = 32 ] || return 0
+  printf '%s' "$pem"
+}
+# install_backup_client: never blocking (a warning, and the client can be installed later), never installs anything that did not verify.
+install_backup_client() {
+  [ "$BACKUP_CLIENT" = 1 ] || return 0
+  want_cp || return 0
+  [ "$DRY_RUN" = 0 ] || return 0
+  local base="${BACKUP_CLIENT_BASE%/}" pem want rel asset got ver cur yanked tag x
+  case "$base" in https://*|file://*|http://127.0.0.1*|http://localhost*) ;; *) BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "--backup-client-base-url must be https://")"; return 0;; esac
+  case "$ARCH" in amd64|arm64) ;; *) BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "no ToutWAF Backup client for $ARCH")"; return 0;; esac
+  pem="$(backup_client_pem)"
+  if [ -z "$pem" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_nokey)"; return 0; fi
+  mkdir -p "$TMP/bkc" || return 0
+  fetch "$base/channel.json" "$TMP/bkc/channel.json" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download $base/channel.json")"; return 0; }
+  ver="$BACKUP_CLIENT_VERSION"
+  [ -n "$ver" ] || ver="$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]*)".*/\1/p' "$TMP/bkc/channel.json" | head -n1)"
+  if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "no valid version in the channel")"; return 0; fi
+  yanked="$(sed -nE 's/^[[:space:]]*"yanked":[[:space:]]*\[(.*)\].*/\1/p' "$TMP/bkc/channel.json" | head -n1)"
+  if printf '%s' "$yanked" | grep -q "\"$ver\"" && [ "$FORCE" = 0 ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "version $ver was withdrawn")"; return 0; fi
+  rel="$base/releases/$ver"; asset="toutwaf-backup-linux-$ARCH.tar.gz"
+  fetch "$rel/SHA256SUMS" "$TMP/bkc/SHA256SUMS" && fetch "$rel/SHA256SUMS.sig" "$TMP/bkc/SHA256SUMS.sig" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download the signed list of $ver")"; return 0; }
+  if ! ed25519_check "$pem" "$TMP/bkc/SHA256SUMS" "$TMP/bkc/SHA256SUMS.sig"; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_badsig)"; return 0; fi
+  want="$(awk -v a="$asset" '$2==a || $2=="*"a {print $1; exit}' "$TMP/bkc/SHA256SUMS" | tr 'A-F' 'a-f')"
+  if ! printf '%s' "$want" | grep -Eq '^[0-9a-f]{64}$'; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "$asset is not in the signed list")"; return 0; fi
+  fetch "$rel/$asset" "$TMP/bkc/$asset" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download $asset")"; return 0; }
+  got="$(sha256sum "$TMP/bkc/$asset" | awk '{print $1}')"
+  if [ "$got" != "$want" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "SHA-256 of $asset does not match the signed list")"; return 0; fi
+  mkdir -p "$TMP/bkc/x" && tar -xzf "$TMP/bkc/$asset" -C "$TMP/bkc/x" --no-same-owner 2>>"$LOG" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "the archive cannot be read")"; return 0; }
+  x="$TMP/bkc/x/toutwaf-backup-linux-$ARCH/toutwaf-backup"
+  if [ ! -f "$x" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "the archive holds no toutwaf-backup")"; return 0; fi
+  chmod 0755 "$x"
+  tag="$("$x" engine describe 2>/dev/null | sed -nE 's/.*"contract":[[:space:]]*"([^"]*)".*/\1/p' | head -n1)"
+  if [ "$tag" != "toutwaf-backup-engine/1" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "the client speaks '${tag:-nothing}', this ToutWAF drives toutwaf-backup-engine/1")"; return 0; fi
+  mkdir -p "$(p "$BIN_DIR")"
+  cur="$(p "$BIN_DIR/toutwaf-backup")"
+  if [ -f "$cur" ]; then cp -p "$cur" "$cur.prev" 2>/dev/null || true; fi
+  install -m 0755 "$x" "$cur.new.$$" && mv -f "$cur.new.$$" "$cur" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot write $cur")"; return 0; }
+  BACKUP_CLIENT_RESULT=on; info "ToutWAF Backup client $ver installed in $cur (signature and SHA-256 verified)"
+  return 0
+}
+
 # ------------------------------------------------------------------------------------------------ summary
 SUMMARY_PORTS=""
 build_ports() {   # lines: port|proto|purpose   (deduplicated by port/proto)
@@ -3882,10 +4840,10 @@ panel_urls() {   # one "label|url" per line: the control plane's links[] when kn
       seen+="$u "
     done <<<"$BS_LINKS"
   else
-    while IFS= read -r h; do if [ -n "$h" ]; then printf '%s|https://%s:%s/%s\n' "$(t sum_local)" "$h" "$CP_PORT" "$path"; fi; done < <(local_ips)
+    while IFS= read -r h; do if [ -n "$h" ]; then printf '%s|https://%s/%s\n' "$(t sum_local)" "$(hostport "$h" "$CP_PORT")" "$path"; fi; done < <(local_ips)
   fi
   if [ -n "$PUBLIC_IP" ]; then
-    u="https://$PUBLIC_IP:$CP_PORT/$path"
+    u="https://$(hostport "$PUBLIC_IP" "$CP_PORT")/$path"
     case "$seen" in *" $u "*) ;; *) printf '%s|%s\n' "$(t sum_public)" "$u";; esac
   fi
   return 0
@@ -3896,9 +4854,9 @@ setup_urls() {   # one "label|url" per line: the one-time setup link on every lo
   if [ -z "$sp" ]; then sp="/${BS_PATH:+$BS_PATH/}setup"; fi
   case "$sp" in /*) ;; *) sp="/$sp";; esac
   if [[ "$sp" != *"$BS_SETUP_TOKEN"* ]]; then case "$sp" in *\?*) sp="$sp&token=$BS_SETUP_TOKEN";; *) sp="$sp?token=$BS_SETUP_TOKEN";; esac; fi
-  while IFS= read -r h; do [ -n "$h" ] && printf '%s|https://%s:%s%s\n' "$(t sum_local)" "$h" "$CP_PORT" "$sp"; done < <(local_ips)
-  if [ -n "$PUBLIC_IP" ]; then printf '%s|https://%s:%s%s\n' "$(t sum_public)" "$PUBLIC_IP" "$CP_PORT" "$sp"
-  elif [ -z "$(local_ips)" ]; then printf '%s|https://%s:%s%s\n' "$(t sum_local)" "$(fqdn)" "$CP_PORT" "$sp"; fi
+  while IFS= read -r h; do [ -n "$h" ] && printf '%s|https://%s%s\n' "$(t sum_local)" "$(hostport "$h" "$CP_PORT")" "$sp"; done < <(local_ips)
+  if [ -n "$PUBLIC_IP" ]; then printf '%s|https://%s%s\n' "$(t sum_public)" "$(hostport "$PUBLIC_IP" "$CP_PORT")" "$sp"
+  elif [ -z "$(local_ips)" ]; then printf '%s|https://%s%s\n' "$(t sum_local)" "$(hostport "$(fqdn)" "$CP_PORT")" "$sp"; fi
   return 0
 }
 setup_url() { setup_urls | head -n1 | cut -d'|' -f2; }
@@ -3977,6 +4935,10 @@ cmd_status() {
   [ "$INST_DP" = 1 ] && box_line "toutwaf-dp $(installed_label "$(p "$BIN_DIR/toutwaf-dp")")"
   [ "$INST_CP" = 1 ] && box_line "toutwaf-cp $(installed_label "$(p "$BIN_DIR/toutwaf-cp")")"
   box_line "$(t st_channel "$CHANNEL") ($(channel_branch))"
+  if [ "$INST_CP" = 1 ]; then
+    if ls "$(p "$DATA_DIR")"/agent-dist/toutwaf-agent-windows-*.exe >/dev/null 2>&1 || ls "$(p "$DATA_DIR")"/av-dist/toutwaf-av-* >/dev/null 2>&1; then box_line "$(t st_extras_ok)"
+    else box_line "$(paint "$YLW" "$WRM $(t st_extras_none "sudo bash install.sh --extras-only")")"; fi
+  fi
   if [ "$DRY_RUN" = 0 ]; then
     local frc=0; fetch_channel 2>/dev/null || frc=$?
     if [ "$frc" = 0 ]; then
@@ -4038,18 +5000,20 @@ cmd_uninstall() {
     ask_yn a "$(t q_purge)" 0; [ "$a" = 1 ] || die "$(t aborted)"
   fi
   detect_installed; load_existing_ports
+  # the activation of the common licence (key TP-...) is freed at the licence site while the console still runs; best effort, never blocks
+  if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ -x "$BIN_DIR/toutwafctl" ]; then timeout 30 "$BIN_DIR/toutwafctl" license deactivate --quiet >>"$LOG" 2>&1 || true; fi
   # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
-  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-dp.service toutwaf-cp.service; do
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
     if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
     run rm -f "$(p /etc/systemd/system/$s)"
   done
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl stop toutwaf-upgrade-rollback.timer toutwaf-upgrade-rollback.service >>"$LOG" 2>&1 || true; fi   # transient units of an update in progress
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl daemon-reload; fi
-  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
+  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-cloudlink; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
   run rm -f "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"
-  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs; do
     for d in /usr/local/bin "$(secure_link_dir)"; do
       [ -n "$d" ] || continue
       l="$(p "$d/$b")"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
@@ -4148,8 +5112,8 @@ fetch() { curl -fsSL --retry 3 --connect-timeout 15 -o "$2" "$1"; }
 # Release signature trust anchor. It lives HERE (in the installer you run), never in channel.json: the copy of the public key that
 # channel.json advertises is informational and must not be trusted. Overridden by TOUTWAF_RELEASE_PUBKEY, then by $CONF_DIR/release.pub.
 # RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
-RELEASE_PUBKEY_DEFAULT='V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA='
-RELEASE_PUBKEY_ID='ebd2a20ce5a5650f'
+RELEASE_PUBKEY_DEFAULT='gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0='
+RELEASE_PUBKEY_ID='3fc61b30f128ff14'
 SIG_REQUIRED_FROM='0.2.0-dev.7'   # releases before this one were published unsigned
 
 # release_pubkey: prints the path of a PEM public key (Ed25519): TOUTWAF_RELEASE_PUBKEY, else $CONF_DIR/release.pub, else the built-in key
@@ -4314,6 +5278,7 @@ verify_signature() {   # $1 = base URL of the release directory, $2 = its cache-
     die "internal error: the built-in release public key has id ${kid:-?}, expected $RELEASE_PUBKEY_ID"
   fi
   info "$(t s_sigok "${kid:-?}")"
+  SIG_OK_FOR="$RESOLVED_VERSION|$(release_build)"
 }
 
 SRC_DIR=""; RESOLVED_VERSION=""
@@ -4393,6 +5358,186 @@ read_archive_identity() {
   return 0
 }
 
+# ------------------------------------------------------------------------------------------------ extras
+# The second asset of a release: toutwaf-extras.tar.gz, or toutwaf-extras-<n>of<m>.tar.gz when it is cut (every part under 90 MiB). It holds
+# toutwaf-extras-<version>/{agent-dist/toutwaf-agent-windows-*.exe, av-dist/toutwaf-av-*, LICENSE, VERSION, BUILD}. It is listed in the signed SHA256SUMS
+# like the archive, so the one signature check covers it; its SHA-256 is compared with SHA256SUMS (and with channel.json when that is the channel's version).
+# An installation without the extras works: it does not offer Windows nor the antivirus, and says what to do. A problem with the extras is NEVER fatal
+# here (only a bad signature, which verify_signature handles for the whole release).
+extras_names() {   # the extras files SHA256SUMS lists, parts in order; prints nothing when the release carries none
+  [ -f "$TMP/SHA256SUMS" ] || return 0
+  awk '$2 ~ /^toutwaf-extras(-[0-9]+of[0-9]+)?\.tar\.gz$/ {print $2}' "$TMP/SHA256SUMS" | sort -t- -k3,3n
+}
+extras_fail() {   # KEY ARGS...: remember that the extras are not installed, say why and what to do
+  EXTRAS_RESULT=failed; EXTRAS_DIR=""
+  warn "$(t "$@")"
+  return 0
+}
+# extras_wanted PATH: a regular file (not a link) whose place and name are the ones of the contract: agent-dist/toutwaf-agent-windows-{amd64,arm64}.exe, av-dist/toutwaf-av-<system>-<arch>
+extras_wanted() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  case "$(basename "$(dirname "$1")")/$(basename "$1")" in
+    agent-dist/toutwaf-agent-windows-amd64.exe|agent-dist/toutwaf-agent-windows-arm64.exe) return 0;;
+    av-dist/toutwaf-av-linux-amd64|av-dist/toutwaf-av-linux-arm64|av-dist/toutwaf-av-darwin-amd64|av-dist/toutwaf-av-darwin-arm64|av-dist/toutwaf-av-windows-amd64.exe|av-dist/toutwaf-av-windows-arm64.exe) return 0;;
+  esac
+  return 1
+}
+# extras_unpack FILE...: unpack the parts into $TMP/extras/out and check that they are the release's; sets EXTRAS_DIR; prints nothing
+extras_unpack() {
+  local f out="$TMP/extras/out" d top nfiles=0 v b
+  rm -rf "$out"; mkdir -p "$out"
+  for f in "$@"; do
+    if ! tar -xzf "$f" -C "$out" 2>>"$LOG"; then extras_fail w_extras_bad "$(basename "$f")"; return 0; fi
+  done
+  d=""
+  for top in "$out"/toutwaf-extras-*; do [ -d "$top" ] && { d="$top"; break; }; done
+  [ -n "$d" ] || { extras_fail w_extras_bad "$(basename "$1")"; return 0; }
+  v="$(head -n1 "$d/VERSION" 2>/dev/null | tr -d ' \t\r\n')"; b="$(clean_build "$(head -n1 "$d/BUILD" 2>/dev/null)")"
+  # they must belong to the release that was installed (or is being installed): a Windows agent of another version would not match the console
+  if [ -n "$ARCHIVE_VERSION" ] && [ -n "$v" ] && [ "$v" != "$ARCHIVE_VERSION" ]; then extras_fail w_extras_ver "$v" "$ARCHIVE_VERSION"; return 0; fi
+  if [ -n "$ARCHIVE_BUILD" ] && [ -n "$b" ] && [ "$b" != "$ARCHIVE_BUILD" ]; then extras_fail w_extras_ver "$v ($b)" "$ARCHIVE_VERSION ($ARCHIVE_BUILD)"; return 0; fi
+  for f in "$d"/agent-dist/* "$d"/av-dist/*; do extras_wanted "$f" && nfiles=$((nfiles + 1)); done
+  if [ "$nfiles" = 0 ]; then extras_fail w_extras_bad "$(basename "$1")"; return 0; fi
+  EXTRAS_DIR="$d"; EXTRAS_COUNT="$nfiles"; EXTRAS_VERSION="${v:-$ARCHIVE_VERSION}"; EXTRAS_BUILD="${b:-$ARCHIVE_BUILD}"
+  return 0
+}
+# obtain_extras: sets EXTRAS_DIR (unpacked) or EXTRAS_RESULT (none | failed | skipped); never stops the installation
+obtain_extras() {
+  EXTRAS_DIR=""; EXTRAS_RESULT=""
+  if [ "$NO_EXTRAS" = 1 ]; then EXTRAS_RESULT=skipped; return 0; fi
+  want_cp || { EXTRAS_RESULT=skipped; return 0; }
+  mkdir -p "$TMP/extras"
+  local files=() f want got n ch rel q names parts i total=0 attempt
+  # ---- local files (offline)
+  if [ -n "$EXTRAS_LOCAL" ] || { [ -n "$TARBALL" ] && ls "$(dirname "$TARBALL")"/toutwaf-extras*.tar.gz >/dev/null 2>&1; }; then
+    local oldifs="$IFS" list="$EXTRAS_LOCAL"; IFS=:
+    for f in $list; do [ -z "$f" ] || files+=("$f"); done
+    IFS="$oldifs"
+    if [ ${#files[@]} -eq 0 ]; then for f in "$(dirname "$TARBALL")"/toutwaf-extras*.tar.gz; do files+=("$f"); done; fi   # next to the archive: they belong together
+    for f in "${files[@]}"; do [ -f "$f" ] || { extras_fail w_extras_nofile "$f"; return 0; }; done
+    # a SHA256SUMS next to a file is used to check it; without one the file is trusted as the archive given with --tarball is
+    for f in "${files[@]}"; do
+      n="$(basename "$f")"
+      if [ -f "$(dirname "$f")/SHA256SUMS" ]; then
+        want="$(grep " $n\$" "$(dirname "$f")/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"
+        got="$(sha256sum "$f" | awk '{print $1}')"
+        if [ -z "$want" ] || [ "$want" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+      else info "$(t s_extras_unchecked "$n")"; fi
+    done
+    extras_unpack "${files[@]}"
+    return 0
+  fi
+  [ -z "$TARBALL" ] || { EXTRAS_RESULT=none; return 0; }   # an archive given by hand, no extras given with it
+  # ---- download: the signed SHA256SUMS of the release says which files are the extras
+  rel="$(repo_base)/releases/$RESOLVED_VERSION"; q="$(release_q "$(release_build)")"
+  if [ ! -f "$TMP/SHA256SUMS" ] || [ "$SIG_OK_FOR" != "$RESOLVED_VERSION|$(release_build)" ]; then
+    if ! fetch "$rel/SHA256SUMS$q" "$TMP/SHA256SUMS" 2>>"$LOG"; then extras_fail w_extras_dl "SHA256SUMS"; return 0; fi
+    verify_signature "$rel" "$q"      # a bad signature aborts, as for the archive
+  fi
+  names="$(extras_names)"
+  if [ -z "$names" ]; then EXTRAS_RESULT=none; return 0; fi    # a release from before the extras: nothing to install
+  parts=0; for f in $names; do parts=$((parts + 1)); done
+  case "$names" in *of[0-9]*) i="$(printf '%s\n' "$names" | head -n1 | sed -n 's/.*-[0-9]*of\([0-9]*\)\.tar\.gz/\1/p')"; if [ "$i" != "$parts" ]; then extras_fail w_extras_inc "$parts" "$i"; return 0; fi;; esac
+  files=()
+  for n in $names; do
+    f="$TMP/extras/$n"
+    for attempt in 1 2; do
+      if fetch "$rel/$n$q" "$f" 2>>"$LOG"; then break; fi
+      rm -f "$f"
+    done
+    [ -f "$f" ] || { extras_fail w_extras_dl "$n"; return 0; }
+    want="$(grep " $n\$" "$TMP/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"
+    got="$(sha256sum "$f" | awk '{print $1}')"
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+    if [ -n "$CH_JSON" ] && [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then
+      ch="$(ch_asset_sha "$n")"; if [ -n "$ch" ] && [ "$ch" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+    fi
+    total=$((total + $(wc -c <"$f")))
+    files+=("$f")
+  done
+  info "$(t s_extras_sha "$parts" "$((total / 1048576))")"
+  extras_unpack "${files[@]}"
+  return 0
+}
+# install_extras: put the unpacked extras next to the data of the control plane and record which release they are of
+install_extras() {
+  [ -n "$EXTRAS_DIR" ] || return 0
+  local f dst own grp n=0 recorded="" sub
+  own="$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")"; grp="$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")"
+  for sub in agent-dist av-dist; do
+    run install -d -m 0750 -o "$own" -g "$grp" "$(p "$DATA_DIR/$sub")" || return 0
+  done
+  for f in "$EXTRAS_DIR"/agent-dist/* "$EXTRAS_DIR"/av-dist/*; do
+    extras_wanted "$f" || continue
+    dst="$(p "$DATA_DIR/$(basename "$(dirname "$f")")/$(basename "$f")")"
+    # a copy next to the final name, moved over it: a program being downloaded by a machine is never half replaced
+    if run install -m 0640 -o "$own" -g "$grp" "$f" "$dst.new" && run mv -f "$dst.new" "$dst"; then n=$((n + 1)); recorded="$recorded\"$(basename "$f")\","; else warn "could not install $(basename "$f")"; run rm -f "$dst.new"; fi
+  done
+  if [ "$n" -gt 0 ] && [ "$DRY_RUN" = 0 ]; then
+    local ej; ej="$(p "$DATA_DIR/extras.json")"
+    printf '{"version":"%s","build":"%s","installed_at":"%s","files":[%s]}\n' "$EXTRAS_VERSION" "${EXTRAS_BUILD:-}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${recorded%,}" >"$ej.new" || true
+    chown "$own:$grp" "$ej.new" 2>/dev/null || true; chmod 0644 "$ej.new" 2>/dev/null || true
+    mv -f "$ej.new" "$ej" || warn "could not record the extras in $ej"
+  fi
+  EXTRAS_RESULT=ok; EXTRAS_COUNT="$n"
+  info "$(t s_extras_ok "$n" "$DATA_DIR")"
+  return 0
+}
+# the extras are installed for THIS release: extras.json says the version and the build, and every program it listed is still there
+extras_current() {
+  local j v b
+  j="$(p "$DATA_DIR/extras.json")"
+  [ -f "$j" ] || return 1
+  v="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$j" | head -n1)"; b="$(sed -n 's/.*"build":"\([^"]*\)".*/\1/p' "$j" | head -n1)"
+  [ -n "$v" ] && [ "$v" = "${1:-}" ] || return 1
+  [ -z "${2:-}" ] || [ "$b" = "$2" ] || return 1
+  # every program extras.json lists is still there
+  local f d
+  for f in $(grep -o '"toutwaf-[^"]*"' "$j" | tr -d '"'); do
+    case "$f" in toutwaf-agent-*) d=agent-dist;; *) d=av-dist;; esac
+    [ -s "$(p "$DATA_DIR/$d/$f")" ] || return 1
+  done
+  return 0
+}
+extras_step() { obtain_extras; install_extras; return 0; }
+# an update that finds nothing new for the programs still brings the extras when they are missing or of another build (a first install made without network, an older installer)
+extras_maintain() {
+  want_cp && [ "$NO_EXTRAS" = 0 ] || return 0
+  [ "$DRY_RUN" = 0 ] || return 0
+  if extras_current "$1" "${2:-}"; then return 0; fi
+  ARCHIVE_VERSION="$1"; ARCHIVE_BUILD="$(clean_build "${2:-}")"
+  step "$(t s_extras)" extras_step
+  extras_report
+  return 0
+}
+# the summary line for the extras (the warning with the cause is already there)
+extras_report() {
+  case "$EXTRAS_RESULT" in
+    ok) say "  $BUL $(t s_extras_ok "$EXTRAS_COUNT" "$DATA_DIR")";;
+    none) say "  $BUL $(t w_extras_none)";;
+    failed) say "  $BUL $(t w_extras_todo "sudo bash install.sh --extras-only")";;
+  esac
+  return 0
+}
+# --extras-only: the extras of the installed release, nothing else is touched
+cmd_extras() {
+  banner; detect_installed
+  [ "$INST_CP" = 1 ] || { say "  $(t extras_needs_cp)"; return 1; }
+  component_from_installed; load_existing_ports
+  local cbin curv curb; cbin="$(p "$BIN_DIR/toutwaf-cp")"; curv="$(installed_version "$cbin")"; curb="$(inst_build "$cbin" "$curv")"
+  SRC_DIR=""; ARCHIVE_VERSION="$curv"; ARCHIVE_BUILD="$(clean_build "$curb")"
+  if [ -z "$EXTRAS_LOCAL" ]; then
+    resolve_release
+    if [ "$RESOLVED_VERSION" != "$curv" ] || { [ -n "$CH_BUILD" ] && [ -n "$ARCHIVE_BUILD" ] && [ "$CH_BUILD" != "$ARCHIVE_BUILD" ]; }; then
+      say "  $(paint "$YLW" "$WRM $(t extras_other_release "$(ver_short "$RESOLVED_VERSION" "$CH_BUILD")" "$(ver_short "$curv" "$curb")")")"; return 1
+    fi
+  else RESOLVED_VERSION=local; fi
+  NO_EXTRAS=0
+  step "$(t s_extras)" extras_step
+  extras_report
+  [ "$EXTRAS_RESULT" = ok ]
+}
+
 # ------------------------------------------------------------------------------------------------ system setup
 create_user() {
   [ "$STAGING" = 1 ] && return 0
@@ -4454,7 +5599,7 @@ link_cli() {
   if [ -n "$sd" ] && [ "$sd" != "$BIN_DIR" ] && [ "$sd" != /usr/local/bin ]; then dirs="$dirs $sd"; fi
   for d in $dirs; do
     run install -d -m 0755 "$(p "$d")"
-    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw; do
+    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs; do
       [ -e "$(p "$BIN_DIR/$b")" ] || continue
       l="$(p "$d/$b")"
       if [ -L "$l" ] || [ ! -e "$l" ]; then run ln -sfn "$BIN_DIR/$b" "$l"; fi
@@ -4491,8 +5636,8 @@ group: ${NODE_GROUP:-default}
 data_dir: $DATA_DIR
 certs_dir: $DATA_DIR/certs
 listen:
-  http: ["0.0.0.0:$HTTP_PORT"]
-  https: ["0.0.0.0:$HTTPS_PORT"]
+  http: ["$(any_addr):$HTTP_PORT"]       # [::] = IPv6 and IPv4 on the same socket (0.0.0.0 on a kernel without IPv6)
+  https: ["$(any_addr):$HTTPS_PORT"]
   # proxy_protocol: optional      # when behind a TCP load balancer sending PROXY protocol
 admin:
   listen: 127.0.0.1:9101          # /healthz /metrics /status /debug/inspect (loopback only)
@@ -4546,11 +5691,16 @@ EOF
 
 cp_config() {
   [ "$DRY_RUN" = 1 ] && return 0
-  local pubhost="${PUBLIC_HOST:-$(fqdn)}"
-  cat <<EOF | write_if_absent "$(p "$CONF_DIR/toutwaf-cp.yaml")" 0640 "root:$SVC_USER"
+  local pubhost="${PUBLIC_HOST:-$(fqdn)}" cpf lic; cpf="$(p "$CONF_DIR/toutwaf-cp.yaml")"; lic="$(licence_yaml)"
+  if [ -n "$lic" ] && [ -e "$cpf" ]; then   # a configuration that exists is kept: the section is added only when it has none
+    if grep -q '^license:' "$cpf"; then warn "$cpf already has a license: section: the licence options are not applied (use: toutwafctl license pin / api-url)"
+    else printf '\n# common licence (added by the installer options --licence-api-url / --licence-pin)\n%s\n' "$lic" >>"$cpf"; info "licence site settings added to $cpf"; fi
+    lic=""
+  fi
+  cat <<EOF | write_if_absent "$cpf" 0640 "root:$SVC_USER"
 # ToutWAF control plane
 data_dir: $DATA_DIR
-public_url: https://$pubhost:$CP_PORT
+public_url: https://$(hostport "$pubhost" "$CP_PORT")
 listen:
   console: ":$CP_PORT"
   dp: ":9444"
@@ -4559,14 +5709,21 @@ listen:
 # tls:
 #   cert: $CONF_DIR/certs/console.crt
 #   key: $CONF_DIR/certs/console.key
-database:
-  driver: sqlite
+$(db_yaml)
 dataplane:
   inspect_url: http://127.0.0.1:9101/debug/inspect
   # public ports of the data plane on this machine: what the Docteur ToutWAF and the configuration assistant check
   http_port: $HTTP_PORT
   https_port: $HTTPS_PORT
+# Telemetry to the publisher space (app.toutwaf.com): the attacks ToutWAF blocked and aggregate figures, never the content of requests nor
+# legitimate visitors. ON by default; "enabled: false" starts with zero telemetry. Once an administrator saved the choice in the console
+# (Settings > Privacy and telemetry), the console wins over this file. Details: docs/confidentialite-telemetrie.md
+telemetry:
+  enabled: $([ "$NO_TELEMETRY" = 1 ] && echo false || echo true)
+${lic:+# common licence of ToutPanel and ToutWAF (installer options --licence-api-url / --licence-pin)
+$lic}
 EOF
+  [ -z "$lic" ] || [ -z "$LICENCE_PINNED" ] || info "licence site key(s) pinned, fingerprint: $(printf '%s' "$LICENCE_PINNED" | cut -d' ' -f1 | paste -sd, -)"
   cat <<EOF | write_if_absent "$(p "$CONF_DIR/cp.env")" 0640 "root:$SVC_USER"
 # Extra command-line arguments and environment for toutwaf-cp (see https://github.com/$REPO)
 TOUTWAF_CP_ARGS=--config $CONF_DIR/toutwaf-cp.yaml
@@ -4688,6 +5845,9 @@ LockPersonality=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @mount @swap @reboot @raw-io @obsolete @debug @cpu-emulation @clock
+# A call the filter refuses fails with EPERM instead of killing the process (the default is SIGSYS): the terminal of the console starts a shell, which inherits this filter, and
+# ncurses, chown, cp -a... make calls from the groups above; killed by SIGSYS the shell ended at once and the terminal "opened no session".
+SystemCallErrorNumber=EPERM
 UMask=0027
 ReadWritePaths=$DATA_DIR $LOG_DIR
 ReadOnlyPaths=$CONF_DIR
@@ -4727,6 +5887,7 @@ EOF
 #   toutwaf-blocklist put the large blocklists into the kernel (nftables, one table of its own)  (console: Lists > Kernel blocking)
 #   toutwaf-vpn       put the files of the VPN module on the machine, start / stop the tunnels, read their state (console: VPN)
 #   toutwaf-fw        load the nftables rules of the Firewall module with a root rollback timer, read them back (console: Firewall)
+#   toutwaf-jobs      run the privileged jobs of the scheduled tasks: a FIXED list (log rotation, journal vacuum; the power menu and self-repair verbs), no command from the request (console: Scheduled tasks, power menu)
 # The scripts carry a "toutwaf-<name>-proto: N" marker that the control plane checks before offering the button.
 emit_helper() {   # NAME  (template on stdin)
   local dst tmp; dst="$(p "$BIN_DIR/$1")"; tmp="$dst.new"
@@ -4758,7 +5919,15 @@ write_helpers() {
 # bounded steps, a heartbeat, the sources of install.sh (GitLab first, GitHub next, the direct address of upgrade.conf last) and a
 # status that can never be left at "running".
 set -uo pipefail
+# `set -u` makes an unbound variable fatal, and a helper that dies of it, silently, leaves the console waiting for an update that never
+# runs (the incident that led to this block). So: every variable this script reads is given a value right here, before anything else; the
+# exit trap (on_exit) turns ANY exit that comes without an outcome into a "failed" status with the reason, and jlog writes one line to the
+# journal for every failure. deploy/tests/upgrade-helper-test.sh runs the fallback with a fake environment and with a variable made unbound.
+exec 3>&2   # the journal: the standard error the service was started with, kept apart from the one captured below
 DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; BIN_DIR='@BIN_DIR@'; REPO='@REPO@'; SVC_USER='@SVC_USER@'
+comp=""; chan=""; ver=""; xonly=""; dg=0; job=""; trc=0; rc=0; got=0; base=""; direct=""; br=main; tmp=""; v=""; url=""; l=""; msg=""
+urls=(); args=(); to=()
+errf=""; TOOK=0; LAST_ERR=""
 STATE_DIR="${DATA_DIR}-upgrade"
 REQ="$DATA_DIR/upgrade-request"; STATUS="$DATA_DIR/upgrade-status"; LOGF="$DATA_DIR/upgrade.log"; INSTLOG="$DATA_DIR/upgrade-installer.log"
 CTL="$BIN_DIR/toutwafctl"
@@ -4814,13 +5983,18 @@ put_file() {
 }
 # <<< hostio <<<
 
-valid_version() { [[ "$1" == latest ]] || [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]{0,40})?$ ]]; }
-valid_channel() { [[ "$1" == stable || "$1" == dev ]]; }
-valid_comp()    { [[ "$1" == all || "$1" == cp || "$1" == dp ]]; }
-valid_job()     { [[ -z "$1" || "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
-req_get() { sed -n "s/^$1=//p" "$priv" 2>/dev/null | tail -n1 | tr -d '\r'; }
-conf_get() { sed -n "s/^$1=//p" "$CONF_DIR/installer.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
-uconf_get() { sed -n "s/^$1=//p" "$CONF_DIR/upgrade.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
+valid_version() { [[ "${1:-}" == latest ]] || [[ "${1:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]{0,40})?$ ]]; }
+valid_channel() { [[ "${1:-}" == stable || "${1:-}" == dev ]]; }
+valid_comp()    { [[ "${1:-}" == all || "${1:-}" == cp || "${1:-}" == dp ]]; }
+valid_job()     { [[ -z "${1:-}" || "${1:-}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
+req_get() { sed -n "s/^${1:-}=//p" "${priv:-/dev/null}" 2>/dev/null | tail -n1 | tr -d '\r'; }
+conf_get() { sed -n "s/^${1:-}=//p" "$CONF_DIR/installer.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
+uconf_get() { sed -n "s/^${1:-}=//p" "$CONF_DIR/upgrade.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
+# jlog MESSAGE: one line in the journal for every failure (the service's standard error goes there; a run by hand gets syslog)
+jlog() {
+  printf 'toutwaf-upgrade: %s\n' "$*" >&3 2>/dev/null || printf 'toutwaf-upgrade: %s\n' "$*"
+  if [ -z "${JOURNAL_STREAM:-}" ] && command -v logger >/dev/null 2>&1; then logger -t toutwaf-upgrade -p daemon.err -- "$*" 2>/dev/null || true; fi
+}
 # the resilient implementation is there when the installed toutwafctl answers its self-test
 have_host() { [ -x "$CTL" ] && "$CTL" upgrade-host selftest 2>/dev/null | grep -qx 'toutwaf-upgrade-host 1'; }
 
@@ -4847,17 +6021,24 @@ cur_build() {
   printf '%s' "${b:-unknown}"
 }
 fail() {   # message
-  S_STATE=failed; S_PHASE=Failed; S_MSG="$1"; S_FINISHED="$(date +%s)"; FINAL=1; write_status; plog "ERROR $1"; exit 1
+  S_STATE=failed; S_PHASE=Failed; S_MSG="${1:-the update failed}"; S_FINISHED="$(date +%s)"; FINAL=1; write_status; plog "ERROR $S_MSG"; jlog "ERROR $S_MSG"; exit 1
 }
-# whatever happens, the status never stays at "running": a helper that is killed or crashes says so on its way out (a SIGKILL is covered by the
-# heartbeat: the console treats a status that stops beating as dead after a few minutes)
+# whatever happens, the update never ends without an outcome: once the request is taken, ANY exit that comes before the final status (a signal, an
+# unbound variable, a command that failed in a way nobody foresaw) writes "failed" with the reason, in the status the console reads and in the
+# journal. A SIGKILL is covered by the heartbeat: the console treats a status that stops beating as dead after a few minutes.
 on_exit() {
   local rc=$?
-  [ -z "$BEAT_PID" ] || kill "$BEAT_PID" 2>/dev/null
-  if [ "$FINAL" = 0 ] && [ "$S_STATE" = running ]; then
+  trap - EXIT
+  [ -z "${BEAT_PID:-}" ] || kill "$BEAT_PID" 2>/dev/null
+  if [ "$FINAL" = 0 ] && [ "$TOOK" = 1 ]; then
+    if [ -n "$errf" ] && [ -s "$errf" ]; then LAST_ERR="$(tail -n 1 "$errf" 2>/dev/null | tr -d '\000-\037' | cut -c1-200)"; fi
     S_STATE=failed; S_PHASE=Failed; S_FINISHED="$(date +%s)"
-    S_MSG="${S_MSG:-the update helper stopped unexpectedly (exit $rc): see 'journalctl -u toutwaf-upgrade'}"
-    write_status; plog "ERROR $S_MSG"
+    [ -n "$S_MSG" ] || S_MSG="the update helper stopped unexpectedly (exit $rc${LAST_ERR:+: $LAST_ERR}): see 'journalctl -u toutwaf-upgrade'"
+    write_status; plog "ERROR $S_MSG"; jlog "ERROR $S_MSG"
+  fi
+  if [ -n "$errf" ]; then   # what the script itself printed to its standard error goes to the journal now
+    if [ -s "$errf" ]; then cat "$errf" >&3 2>/dev/null; fi
+    rm -f "$errf"
   fi
   [ -z "$inst" ] || rm -f "$inst"
   [ -z "$out" ] || rm -f "$out"
@@ -4865,33 +6046,38 @@ on_exit() {
   [ -z "$plogf" ] || rm -f "$plogf"
   [ -z "$pinst" ] || rm -f "$pinst"
 }
+trap on_exit EXIT
 
 case "${1:-request}" in
   request)
     v="${TW_DESIRED_ENGINE_VERSION:-latest}"; [ -n "$v" ] || v=latest
-    valid_version "$v" || { echo "toutwaf-upgrade: invalid version '$v'" >&2; exit 1; }
-    tmp="$(mktemp "$REQ.XXXXXX")"
+    valid_version "$v" || { jlog "ERROR request refused: invalid version '$v'"; echo "toutwaf-upgrade: invalid version '$v'" >&2; exit 1; }
+    tmp="$(mktemp "$REQ.XXXXXX")" || { jlog "ERROR request not recorded: cannot create a file next to $REQ"; exit 1; }
     printf 'PROTO=2\nCOMPONENT=dp\nCHANNEL=%s\nVERSION=%s\nALLOW_DOWNGRADE=0\nJOB=\n' "$(conf_get CHANNEL | grep -x -e stable -e dev || echo stable)" "$v" >"$tmp"
-    mv -f "$tmp" "$REQ"
+    mv -f "$tmp" "$REQ" || { jlog "ERROR request not recorded: cannot move $tmp to $REQ"; rm -f "$tmp"; exit 1; }
     echo "toutwaf-upgrade: upgrade to $v requested (applied by toutwaf-upgrade.service)";;
   recover)
-    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-upgrade recover must run as root" >&2; exit 1; }
+    [ "$(id -u)" -eq 0 ] || { jlog "ERROR recover refused: must run as root"; echo "toutwaf-upgrade recover must run as root" >&2; exit 1; }
     have_host || exit 0
     exec "$CTL" upgrade-host recover --data-dir "$DATA_DIR" --conf-dir "$CONF_DIR" --bin-dir "$BIN_DIR" --state-dir "$STATE_DIR" --svc-user "$SVC_USER";;
   apply)
-    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-upgrade apply must run as root" >&2; exit 1; }
+    [ "$(id -u)" -eq 0 ] || { jlog "ERROR apply refused: must run as root"; echo "toutwaf-upgrade apply must run as root" >&2; exit 1; }
     [ -e "$REQ" ] || [ -L "$REQ" ] || exit 0
     # the resilient path: the request file is read (and consumed) by the Go program, from its staged copy
     if have_host; then
       exec "$CTL" upgrade-host apply --data-dir "$DATA_DIR" --conf-dir "$CONF_DIR" --bin-dir "$BIN_DIR" --state-dir "$STATE_DIR" --svc-user "$SVC_USER"
     fi
     # ---- the fallback: this installation's toutwafctl does not know `upgrade-host` yet
-    trap on_exit EXIT
+    errf="$(mktemp)" && exec 2>>"$errf"   # from here the shell's own complaints (an unbound variable...) are kept and reach the journal and the status
     priv="$(mktemp)"; plogf="$(mktemp)"; pinst="$(mktemp)"
+    if [ -z "$priv" ] || [ -z "$plogf" ] || [ -z "$pinst" ]; then jlog "ERROR cannot create temporary files (disk full?)"; exit 1; fi
     # the request is copied by copy_safe (a regular file of the account, one name, nobody else can write it, at most 4 KiB, no link, no FIFO) and removed
     take_request "$REQ" "$priv" 4096; trc=$?
     [ "$trc" -ne 1 ] || exit 0
-    if [ "$trc" -ne 0 ]; then S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"; fail "invalid update request"; fi
+    # from here on the console is waiting for an outcome: whatever stops this script, on_exit writes it
+    TOOK=1; S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"
+    if [ "$trc" -eq 0 ]; then S_JOB="$(req_get JOB)"; valid_job "$S_JOB" || S_JOB=""; fi
+    if [ "$trc" -ne 0 ]; then S_JOB=""; fail "invalid update request"; fi
     # legacy request (protocol 1): one line holding the version
     if grep -q '=' "$priv"; then
       comp="$(req_get COMPONENT)"; chan="$(req_get CHANNEL)"; ver="$(req_get VERSION)"; dg="$(req_get ALLOW_DOWNGRADE)"; job="$(req_get JOB)"
@@ -4900,7 +6086,7 @@ case "${1:-request}" in
     fi
     : >"$plogf"; : >"$pinst"; put_file "$LOGF" </dev/null; put_file "$INSTLOG" </dev/null
     S_JOB="$job"; S_CHANNEL="$chan"; S_TO="$ver"; S_FROM="$(cur_version)"; S_FROM_BUILD="$(cur_build)"; S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"
-    valid_comp "$comp" && valid_channel "$chan" && valid_version "$ver" && valid_job "$job" || { S_JOB=""; fail "invalid update request"; }
+    if ! { valid_comp "$comp" && valid_channel "$chan" && valid_version "$ver" && valid_job "$job"; }; then S_JOB=""; fail "invalid update request"; fi
     [ "$dg" = 1 ] || dg=0
     write_status
     # a heartbeat for as long as this helper lives, whatever the installer is doing
@@ -4919,13 +6105,17 @@ case "${1:-request}" in
     inst="$(mktemp)"
     S_PHASE="Downloading the installer"; write_status
     got=0
-    for url in "${urls[@]}"; do
+    for url in "${urls[@]+"${urls[@]}"}"; do
       plog "$S_PHASE ($url)"
       if curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$inst" "$url" 2>>"$plogf" && head -c2 "$inst" | grep -q '^#!'; then got=1; break; fi
       plog "this source does not answer; trying the next one"
     done
-    [ "$got" = 1 ] || fail "cannot download the installer from any source (${urls[*]}). Nothing was changed; check the network of this server or set DIRECT_URL in $CONF_DIR/upgrade.conf"
-    args=(--update --component "$comp" --channel "$chan" --yes --no-color --quiet)
+    [ "$got" = 1 ] || fail "cannot download the installer from any source (${urls[*]+${urls[*]}}). Nothing was changed; check the network of this server or set DIRECT_URL in $CONF_DIR/upgrade.conf"
+    # EXTRAS_ONLY=1: only the extras of the installed release (the Windows agents, the antivirus programs) are installed, nothing is replaced or restarted;
+    # the installer downloads them, checks them against the signed SHA256SUMS like the archive, and installs them (install.sh --extras-only)
+    xonly="$(req_get EXTRAS_ONLY)"
+    if [ "$xonly" = 1 ]; then args=(--extras-only --component "$comp" --channel "$chan" --yes --no-color --quiet)
+    else args=(--update --component "$comp" --channel "$chan" --yes --no-color --quiet); fi
     [ "$ver" = latest ] || args+=(--version "$ver")
     [ -z "$base" ] || args+=(--base-url "$base")
     [ "$dg" = 1 ] && args+=(--force)
@@ -4947,11 +6137,11 @@ case "${1:-request}" in
       [ "$rc" -ne 124 ] || msg="the installer did not finish within 20 minutes"
       S_MSG="${msg:-installer exited with status $rc}"
       if grep -qi 'rolled back to the previous version' "$out" "$plogf" 2>/dev/null; then S_STATE=rolled_back; else S_STATE=failed; fi
-      S_PHASE="Failed"; plog "ERROR update failed (rc=$rc): $S_MSG"
+      S_PHASE="Failed"; plog "ERROR update failed (rc=$rc): $S_MSG"; jlog "ERROR update failed (rc=$rc): $S_MSG"
     fi
     write_status
     exit "$rc";;
-  *) echo "usage: toutwaf-upgrade [request|apply|recover]" >&2; exit 2;;
+  *) jlog "ERROR unknown command '${1:-}'"; echo "usage: toutwaf-upgrade [request|apply|recover]" >&2; exit 2;;
 esac
 TW_UPGRADE_TPL
   emit_helper toutwaf-firewall <<'TW_FIREWALL_TPL'
@@ -5596,6 +6786,30 @@ case "${1:-}" in
   *) echo "usage: toutwaf-fw apply|rollback TRIAL|boot" >&2; exit 2;;
 esac
 TW_FW_TPL
+  emit_helper toutwaf-jobs <<'TW_JOBS_TPL'
+#!/usr/bin/env bash
+# toutwaf-jobs-proto: 1
+#
+# toutwaf-jobs apply            (root; toutwaf-jobs.service) run the pending @DATA_DIR@/jobs-request
+#
+# The scheduled tasks of the console can ask for a privileged job. The control plane runs without any privilege, so it leaves a small
+# request file (JOB, VERB, DAYS) and this helper runs it. The request is written by the unprivileged service account, so for root it
+# is untrusted input. All the work is done by `toutwafctl jobs-host`, which checks it again:
+#   * the verb must be one of a FIXED list written in the program (logrotate, journal_vacuum, and the power_* verbs of the console's power menu
+#     and of the self-repair: restart the data plane, restart ToutWAF, stop the control plane, restart the machine); the command line of each
+#     verb is written there too: a request cannot name a program, a path, an option, a unit or a shell;
+#   * the only numbers (days of the journal to keep; seconds to wait before a power verb, at most 120) are checked against their bounds;
+#   * the answer (exit code, clipped output) goes back in @DATA_DIR@/jobs/<job>.res.json.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; BIN_DIR='@BIN_DIR@'
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-jobs must run as root" >&2; exit 1; }
+CTL="$BIN_DIR/toutwafctl"
+[ -x "$CTL" ] || { echo "toutwaf-jobs: $CTL is missing" >&2; exit 1; }
+case "${1:-}" in
+  apply) exec "$CTL" jobs-host apply --data-dir "$DATA_DIR";;
+  *) echo "usage: toutwaf-jobs apply" >&2; exit 2;;
+esac
+TW_JOBS_TPL
   cat >"$sd/toutwaf-upgrade.path" <<EOF
 [Unit]
 Description=ToutWAF upgrade requests (data plane update_engine, console Updates page)
@@ -5767,6 +6981,31 @@ TimeoutStartSec=1min
 [Install]
 WantedBy=multi-user.target
 EOF
+    cat >"$sd/toutwaf-jobs.path" <<EOF
+[Unit]
+Description=ToutWAF privileged job requests (console Scheduled tasks)
+
+[Path]
+PathExists=$DATA_DIR/jobs-request
+Unit=toutwaf-jobs.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-jobs.service" <<EOF
+[Unit]
+Description=ToutWAF privileged jobs helper (requested by the control plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-jobs apply
+TimeoutStartSec=6min
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+EOF
   fi
   return 0
 }
@@ -5868,11 +7107,19 @@ wait_healthy() {
   for _ in $(seq 1 30); do curl -fsS -o /dev/null --max-time 2 "$url" 2>/dev/null && return 0; sleep 1; done
   return 1
 }
+# The control plane opens its listeners first and prepares its database behind them (indexes, merge of the write-ahead log, counts of the
+# attack map: GET /readyz lists the phases). The installer waits until the service ANSWERS (/readyz 200: the database is open and the
+# console, the data-plane channel and the licence page work), never for the background phases. An older control plane has no /readyz (404
+# or the console's own answer): /healthz decides then.
 wait_cp_healthy() {
   local code _
-  for _ in $(seq 1 30); do
-    code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 2 "https://127.0.0.1:$CP_PORT/healthz" 2>/dev/null || true)"
+  for _ in $(seq 1 60); do
+    code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 2 "https://127.0.0.1:$CP_PORT/readyz" 2>/dev/null || true)"
     if [ "$code" = 200 ]; then return 0; fi
+    if [ "$code" != 503 ] && [ "$code" != 000 ]; then
+      code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 2 "https://127.0.0.1:$CP_PORT/healthz" 2>/dev/null || true)"
+      if [ "$code" = 200 ]; then return 0; fi
+    fi
     sleep 1
   done
   return 1
@@ -5904,6 +7151,46 @@ rollback_cp() {
   die "toutwaf-cp did not become healthy ($(t w_rollback))"
 }
 
+# BEGIN update-db-backup (extracted by tests/update-db-backup-test.sh: keep the markers)
+# SQLite, run by hand (no update program around): what the copy really costs. The write-ahead log is merged into the database first (by the
+# installed control plane, as the service account); if the new control plane has no migration to apply, the previous version reads the same
+# file after a rollback and no copy is made; otherwise the disk is checked BEFORE the service is stopped, the copy is checked, and a copy
+# that cannot be made stops the update (it used to go on without one).
+db_size_bytes() { local f s t=0; for f in "$@"; do [ -f "$f" ] || continue; s="$(stat -c %s "$f" 2>/dev/null || echo 0)"; t=$((t + s)); done; printf '%s' "$t"; }
+backup_sqlite_before_update() {
+  local dir="$1" db="$DATA_DIR/toutwaf.db" newcp="${SRC_DIR:-}/toutwaf-cp" st applied known need free fmb sz wal
+  [ -f "$db" ] || return 0
+  if [ -x "$(cp_exe)" ] && command -v runuser >/dev/null 2>&1; then
+    runuser -u "$SVC_USER" -- "$(cp_exe)" db-snapshot --db "$db" --checkpoint-only >>"$LOG" 2>&1 || log "the write-ahead log could not be merged first (the installed control plane predates it)"
+  fi
+  if [ -x "$newcp" ]; then
+    st="$("$newcp" schema-status --db "$db" 2>>"$LOG" | tail -n1 || true)"
+    applied="$(printf '%s' "$st" | sed -n 's/.*"applied":\([0-9][0-9]*\).*/\1/p')"; known="$(printf '%s' "$st" | sed -n 's/.*"known":\([0-9][0-9]*\).*/\1/p')"
+    if [ -n "$applied" ] && [ -n "$known" ] && [ "$applied" -ge "$known" ]; then
+      info "no database migration is pending (schema $applied): the previous version reads the same database after a rollback, so no copy of it is made"
+      return 0
+    fi
+  fi
+  sz="$(db_size_bytes "$db")"; wal="$(db_size_bytes "$db-wal")"
+  # MB: the database, what of the log can still hold pages the file does not have (the service's clean stop merges the rest; at most a tenth
+  # of the database), and a tenth more for the way the copy lands
+  local sz_mb=$((sz / 1024 / 1024)) wal_mb=$((wal / 1024 / 1024)) allow
+  allow=$((sz_mb / 10 + 64)); [ "$wal_mb" -ge "$allow" ] || allow="$wal_mb"
+  need=$(( (sz_mb + allow) * 11 / 10 + 64 ))
+  fmb="$(df -Pm "$DATA_DIR/backup" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  case "$fmb" in ""|*[!0-9]*) fmb="";; esac
+  if [ -n "$fmb" ] && [ "$fmb" -lt "$need" ]; then
+    die "not enough free disk space on the disk of $DATA_DIR/backup: $fmb MB free, about $need MB needed for the copy of the database before the migration (toutwaf.db $sz_mb MB, toutwaf.db-wal $wal_mb MB). Nothing was changed. Free that space, move the data directory to a larger disk, reduce the retention of events, or delete the older copies in $DATA_DIR/backup/pre-update-*/db, then try again"
+  fi
+  if svc_active toutwaf-cp; then systemctl stop toutwaf-cp; fi      # consistent copy of the SQLite files (restarted below)
+  if ! cp -a "$DATA_DIR"/toutwaf.db* "$DATA_DIR"/master.key "$dir/db/" 2>>"$LOG"; then
+    rm -rf "$dir/db"
+    if [ "$HAS_SYSTEMD" = 1 ]; then systemctl start toutwaf-cp 2>/dev/null || true; fi
+    die "the copy of the database before the update could not be completed (is the disk full? see $LOG). Nothing was replaced and the service was started again"
+  fi
+  DB_BACKUP_DIR="$dir/db"
+}
+
 # update: snapshot configuration, unit files and (for the control plane) the database before replacing anything
 backup_before_update() {
   [ "$STAGING" = 1 ] && return 0
@@ -5911,23 +7198,525 @@ backup_before_update() {
   mkdir -p "$dir"; chmod 0700 "$dir"
   tar -czf "$dir/etc-toutwaf.tar.gz" -C / "${CONF_DIR#/}" etc/systemd/system 2>/dev/null || true
   if [ "$INST_CP" = 1 ] && want_cp; then
-    if svc_active toutwaf-cp; then systemctl stop toutwaf-cp; fi      # consistent copy of the SQLite files (restarted below)
     mkdir -p "$dir/db"
-    cp -a "$DATA_DIR"/toutwaf.db* "$DATA_DIR"/master.key "$dir/db/" 2>/dev/null || true
-    DB_BACKUP_DIR="$dir/db"
+    if [ "$(db_existing_engine)" = postgres ]; then
+      # a database server: a verified pg_dump before the migrations of the new version run (the service keeps running, MVCC gives a consistent dump)
+      cp -a "$DATA_DIR"/master.key "$dir/db/" 2>/dev/null || true
+      if runuser -u "$SVC_USER" -- "$(cp_exe)" db backup --config "$CONF_DIR/toutwaf-cp.yaml" --dir "$dir/db" --keep 1 >>"$LOG" 2>&1; then DB_BACKUP_DIR="$dir/db"; else warn "the database could not be dumped before the update (see the log): the migrations of the new version will run without this safety copy"; fi
+    elif [ "${TOUTWAF_UPDATE_DB_HANDLED:-0}" = 1 ]; then
+      # started by toutwafctl upgrade-host: it has saved the database itself (a consistent copy in its private directory) or found that
+      # nothing is to be migrated; a second copy of a database of many gigabytes here would only fill the disk
+      info "the database is looked after by the update program: no second copy here"
+    else
+      backup_sqlite_before_update "$dir"
+    fi
   fi
   chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR/backup" 2>/dev/null || true
-  # keep the five most recent pre-update snapshots
+  # keep the five most recent pre-update snapshots (configuration), and the copy of the database in the two newest only
   ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -5 | while IFS= read -r old; do rm -rf "$old"; done || true
+  ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -2 | while IFS= read -r old; do [ ! -d "$old/db" ] || rm -rf "$old/db"; done || true
   info "backup written to $dir"
   return 0
 }
+# END update-db-backup
+
+# ------------------------------------------------------------------------------------------------ database
+# BEGIN db-setup
+# The control plane stores its data in a database: PostgreSQL (recommended; the only engine for several control planes) or SQLite (one file,
+# small installations on one server). This block does EVERYTHING itself, with no SQL to type:
+#   local     installs the PostgreSQL server package of the distribution if missing, initialises the cluster, starts and enables the service,
+#             creates the database and a dedicated user (no superuser, random password, scram-sha-256), listens on the loopback only, sizes
+#             the server for this machine, schedules a daily verified pg_dump, then applies the schema and checks it
+#   existing  with an administrator connection (given once, kept in memory) creates the user and the database; with only the application
+#             connection creates or upgrades the schema; when the rights are not enough, prints the exact GRANT statements
+# Every step can be run again; a failed run undoes what it created. Passwords are never printed, never put on a command line, never logged:
+# they travel through files of mode 0600 and standard input.
+db_log() { log "db: $*"; }
+db_die() { db_undo; die "$@"; }
+db_secret_file() { printf '%s' "$(p "$CONF_DIR/db.dsn")"; }
+# the engine of an existing installation, read from its configuration (empty when it has none)
+db_existing_engine() {
+  local f; f="$(p "$CONF_DIR/toutwaf-cp.yaml")"
+  [ -r "$f" ] || return 0
+  sed -n 's/^[[:space:]]*driver:[[:space:]]*\([a-z]*\).*/\1/p' "$f" | head -n1
+}
+
+# the machine's memory in MB (from /proc/meminfo, or TOUTWAF_TEST_MEM_MB in tests)
+db_mem_mb() {
+  if [ -n "${TOUTWAF_TEST_MEM_MB:-}" ]; then printf '%s' "$TOUTWAF_TEST_MEM_MB"; return 0; fi
+  awk '/^MemTotal:/ {printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null || printf '2048'
+}
+
+# conservative server settings for this machine: the control plane may share it with the data plane
+db_tuning() {
+  local mem sb ec wm mw; mem="$(db_mem_mb)"; [ -n "$mem" ] || mem=2048
+  sb=$((mem * 15 / 100)); [ "$sb" -ge 128 ] || sb=128; [ "$sb" -le 1024 ] || sb=1024
+  ec=$((mem * 40 / 100)); [ "$ec" -ge 256 ] || ec=256
+  wm=4; [ "$mem" -lt 3072 ] || wm=8; [ "$mem" -lt 16384 ] || wm=16
+  mw=64; [ "$mem" -lt 3072 ] || mw=128; [ "$mem" -lt 16384 ] || mw=256
+  cat <<EOT
+# written by the ToutWAF installer; edit freely, it is not overwritten (delete the file to have it generated again)
+listen_addresses = '127.0.0.1'
+password_encryption = 'scram-sha-256'
+max_connections = 100
+shared_buffers = ${sb}MB
+effective_cache_size = ${ec}MB
+work_mem = ${wm}MB
+maintenance_work_mem = ${mw}MB
+log_min_duration_statement = 1000
+log_lock_waits = on
+idle_in_transaction_session_timeout = '10min'
+EOT
+}
+
+# packages of the server and of the client tools (pg_dump) per distribution family
+db_packages() {   # db_packages server|client -> package names
+  case "${FAMILY:-${FAMILY_GUESS:-}}:$1" in
+    debian:server) echo "postgresql";;
+    debian:client) echo "postgresql-client";;
+    rhel:server) echo "postgresql-server postgresql";;
+    rhel:client) echo "postgresql";;
+    amazon:server) echo "postgresql15-server postgresql15";;
+    amazon:client) echo "postgresql15";;
+    suse:server) echo "postgresql-server postgresql";;
+    suse:client) echo "postgresql";;
+    arch:*) echo "postgresql";;
+    *) return 1;;
+  esac
+}
+
+db_pkg_manager() {
+  case "$(pf_fam "${FAMILY:-${FAMILY_GUESS:-}}" 3)" in
+    dnf) if have dnf; then echo dnf; elif have yum; then echo yum; fi;;
+    apt) have apt-get && echo apt;;
+    zypper) have zypper && echo zypper;;
+    pacman) have pacman && echo pacman;;
+  esac
+}
+
+# run a command as the PostgreSQL system user
+db_as_pg() { if [ "$(id -u)" = 0 ]; then runuser -u postgres -- "$@"; else "$@"; fi; }
+# shellcheck disable=SC2120  # forwards the optional arguments of psql; the callers send the SQL on the standard input
+db_psql() { db_as_pg psql -X -q -v ON_ERROR_STOP=1 -At -d postgres "$@"; }   # SQL on the standard input, never on the command line
+
+DB_PG_GLOBS="${TOUTWAF_TEST_PG_GLOBS:-/usr/lib/postgresql/*/bin/postgres /usr/pgsql-*/bin/postgres}"   # (the variable is a test hook)
+db_server_installed() { local g; have postgres && return 0; for g in $DB_PG_GLOBS; do [ -x "$g" ] && return 0; done; return 1; }
+
+db_pg_major() {   # major version of the installed server
+  local v; v="$( { postgres --version || ls -d /usr/lib/postgresql/*/ /usr/pgsql-*/ 2>/dev/null | tail -n1; } 2>/dev/null | grep -o '[0-9][0-9]*' | head -n1)"
+  case "$v" in ""|*[!0-9]*) v="";; esac
+  printf '%s' "$v"
+}
+
+db_install_server() {
+  if db_server_installed && have psql; then db_log "PostgreSQL is already installed"; return 0; fi
+  local fam="${FAMILY:-${FAMILY_GUESS:-}}" pm pk
+  pk="$(db_packages server)" || db_die "$(t db_no_pkg)"
+  pm="$(db_pkg_manager)"; [ -n "$pm" ] || db_die "$(t db_no_pkg)"
+  # Red Hat 8: the default stream is too old
+  if [ "$pm" = dnf ] && [ "$fam" = rhel ] && [ "${OS_VER%%.*}" = 8 ]; then run dnf -y module enable postgresql:15 || true; fi
+  db_log "installing $pk with $pm"
+  # shellcheck disable=SC2086
+  pkg_install "$pm" $pk || db_die "$(t db_install_failed)"
+  # shellcheck disable=SC2034  # set when this run installed the database server package; no step reads it yet
+  DB_UNDO_PKG=1
+  return 0
+}
+
+# find the files of the running server (works on every distribution because the server tells where they are)
+db_cluster_init() {
+  local fam="${FAMILY:-${FAMILY_GUESS:-}}"
+  local rh="${TOUTWAF_TEST_PGDATA:-/var/lib/pgsql/data}" ar="${TOUTWAF_TEST_PGDATA:-/var/lib/postgres/data}"   # (the variable is a test hook)
+  case "$fam" in
+    rhel|amazon)
+      if [ ! -f "$rh/PG_VERSION" ]; then
+        db_log "initialising the cluster"
+        if have postgresql-setup; then postgresql-setup --initdb >>"$LOG" 2>&1 || db_die "$(t db_init_failed)"; else db_as_pg initdb -D "$rh" -A scram-sha-256 >>"$LOG" 2>&1 || db_die "$(t db_init_failed)"; fi
+      fi;;
+    arch)
+      if [ ! -f "$ar/PG_VERSION" ]; then
+        db_log "initialising the cluster"
+        db_as_pg initdb -D "$ar" --locale=C.UTF-8 -E UTF8 >>"$LOG" 2>&1 || db_die "$(t db_init_failed)"
+      fi;;
+    debian)
+      if have pg_lsclusters && [ -z "$(pg_lsclusters -h 2>/dev/null)" ] && have pg_createcluster; then
+        local v; v="$(ls /usr/lib/postgresql 2>/dev/null | sort -V | tail -n1)"
+        db_log "creating the cluster $v/main"
+        pg_createcluster "$v" main >>"$LOG" 2>&1 || db_die "$(t db_init_failed)"
+      fi;;
+  esac
+  return 0
+}
+
+db_service() { printf 'postgresql'; }
+
+db_start_server() {
+  if [ "$HAS_SYSTEMD" = 1 ]; then
+    systemctl enable "$(db_service)" >>"$LOG" 2>&1 || true
+    systemctl start "$(db_service)" >>"$LOG" 2>&1 || db_die "$(t db_start_failed)"
+  fi
+  local i=0
+  while [ "$i" -lt 30 ]; do
+    if db_as_pg pg_isready -q 2>/dev/null; then return 0; fi
+    sleep 1; i=$((i + 1))
+  done
+  db_die "$(t db_start_failed)"
+}
+
+DB_SOCKDIR=""; DB_CONF=""; DB_HBA=""
+db_discover() {
+  DB_SOCKDIR="$(printf 'SHOW unix_socket_directories;\n' | db_psql | cut -d, -f1 | tr -d ' ')"
+  DB_CONF="$(printf 'SHOW config_file;\n' | db_psql)"
+  DB_HBA="$(printf 'SHOW hba_file;\n' | db_psql)"
+  [ -n "$DB_SOCKDIR" ] && [ -n "$DB_CONF" ] && [ -n "$DB_HBA" ] || db_die "$(t db_start_failed)"
+}
+
+# a self-signed certificate for the loopback listener (TLS on, so that the day a replica or a tool connects it is encrypted)
+db_tls_files() {
+  have openssl || return 1
+  local d; d="$(p "$CONF_DIR/pg")"
+  if [ ! -s "$d/server.crt" ]; then
+    install -d -m 0750 -o postgres -g postgres "$d" 2>/dev/null || install -d -m 0750 "$d"
+    openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+      -keyout "$d/server.key" -out "$d/server.crt" >>"$LOG" 2>&1 || return 1
+    chown postgres:postgres "$d/server.key" "$d/server.crt" 2>/dev/null || true
+    chmod 0600 "$d/server.key"; chmod 0644 "$d/server.crt"
+  fi
+  printf '%s' "$d"
+}
+
+db_configure_server() {
+  local cdir conf d inc
+  cdir="$(dirname "$DB_CONF")"
+  if [ -d "$cdir/conf.d" ]; then conf="$cdir/conf.d/toutwaf.conf"; inc=""; else conf="$cdir/toutwaf.conf"; inc="include_if_exists = 'toutwaf.conf'"; fi
+  if [ ! -s "$conf" ]; then
+    db_tuning >"$conf"
+    if d="$(db_tls_files)"; then printf "ssl = on\nssl_cert_file = '%s/server.crt'\nssl_key_file = '%s/server.key'\n" "$d" "$d" >>"$conf"; fi
+    chown postgres "$conf" 2>/dev/null || true; chmod 0644 "$conf"
+    DB_NEEDS_RESTART=1
+  fi
+  if [ -n "$inc" ] && ! grep -qF "$inc" "$DB_CONF" 2>/dev/null; then printf '\n# ToutWAF\n%s\n' "$inc" >>"$DB_CONF"; DB_NEEDS_RESTART=1; fi
+  # pg_hba.conf: the user of the control plane authenticates with scram-sha-256 on the socket and on the loopback, ahead of any other rule
+  if ! grep -q '^# BEGIN toutwaf' "$DB_HBA" 2>/dev/null; then
+    local tmp; tmp="$(mktemp)"
+    {
+      printf '# BEGIN toutwaf (managed by the ToutWAF installer)\n'
+      printf 'local   %s   %s   scram-sha-256\n' "$DB_NAME" "$DB_USER"
+      printf 'host    %s   %s   127.0.0.1/32   scram-sha-256\n' "$DB_NAME" "$DB_USER"
+      printf 'host    %s   %s   ::1/128        scram-sha-256\n' "$DB_NAME" "$DB_USER"
+      printf '# END toutwaf\n'
+      cat "$DB_HBA"
+    } >"$tmp"
+    cat "$tmp" >"$DB_HBA"; rm -f "$tmp"
+    DB_NEEDS_RELOAD=1
+  fi
+  if [ "${DB_NEEDS_RESTART:-0}" = 1 ] && [ "$HAS_SYSTEMD" = 1 ]; then
+    systemctl restart "$(db_service)" >>"$LOG" 2>&1 || db_die "$(t db_start_failed)"
+    local i=0; while [ "$i" -lt 30 ]; do db_as_pg pg_isready -q 2>/dev/null && break; sleep 1; i=$((i + 1)); done
+  elif [ "${DB_NEEDS_RELOAD:-0}" = 1 ]; then
+    printf 'SELECT pg_reload_conf();\n' | db_psql >/dev/null
+  fi
+  return 0
+}
+
+db_random_password() {
+  local pw; pw="$(LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' </dev/urandom 2>/dev/null | head -c 32 || true)"
+  [ "${#pw}" -ge 24 ] || pw="$(openssl rand -hex 24)"
+  printf '%s' "$pw"
+}
+
+# DSN of the application user for a unix socket / host
+db_make_dsn() {   # host port user password database tls ca
+  local host="$1" port="$2" user="$3" pw="$4" name="$5" tls="$6" ca="$7" enc q=""
+  enc="$(printf '%s' "$pw" | od -An -tx1 | tr -d ' \n' | sed 's/\(..\)/%\1/g')"
+  [ -z "$tls" ] || q="sslmode=$tls"
+  [ -z "$ca" ] || q="${q:+$q&}sslrootcert=$ca"
+  case "$host" in
+    /*) printf 'postgres://%s:%s@/%s?host=%s%s%s' "$user" "$enc" "$name" "$host" "${port:+&port=$port}" "${q:+&$q}";;
+    *) printf 'postgres://%s:%s@%s%s/%s%s' "$user" "$enc" "$host" "${port:+:$port}" "$name" "${q:+?$q}";;
+  esac
+}
+
+# write the DSN secret file: mode 0600, owned by the service user, atomically
+db_write_secret() {
+  local f; f="$(db_secret_file)"
+  ( umask 077; printf '%s\n' "$1" >"$f.new" ) || db_die "cannot write $f"
+  chmod 0600 "$f.new"
+  if [ "$STAGING" = 0 ]; then chown "$SVC_USER:$SVC_USER" "$f.new" 2>/dev/null || true; fi
+  mv -f "$f.new" "$f"
+  DB_SECRET_WRITTEN=1
+}
+
+# local installation: package, cluster, service, configuration, user and database (psql as the postgres user), secret file
+db_setup_local() {
+  local f pw exists_role exists_db
+  f="$(db_secret_file)"
+  db_install_server
+  db_cluster_init
+  db_start_server
+  local major; major="$(db_pg_major)"
+  if [ -n "$major" ] && [ "$major" -lt 13 ]; then db_die "$(t db_too_old "$major")"; fi
+  db_discover
+  db_configure_server
+  exists_role="$(printf "SELECT 1 FROM pg_roles WHERE rolname='%s';\n" "$DB_USER" | db_psql)"
+  exists_db="$(printf "SELECT 1 FROM pg_database WHERE datname='%s';\n" "$DB_NAME" | db_psql)"
+  if [ -s "$f" ] && [ -n "$exists_role" ] && [ -n "$exists_db" ]; then
+    db_log "the user and the database already exist and the secret file is in place: nothing to create"
+    DB_RESULT="kept"; DB_SERVER_LOCAL=1
+    return 0
+  fi
+  if [ -n "$exists_role" ] || [ -n "$exists_db" ]; then
+    # something of the same name that we do not own (no secret file): never take it over, never reset a password we did not set
+    db_die "$(t db_exists "$DB_USER" "$DB_NAME")"
+  fi
+  pw="$(db_random_password)"
+  # the password goes to psql on the standard input only
+  if ! printf "CREATE ROLE \"%s\" LOGIN PASSWORD '%s' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;\n" "$DB_USER" "$pw" | db_psql >/dev/null; then db_die "$(t db_create_failed)"; fi
+  DB_UNDO_ROLE=1
+  if ! printf 'CREATE DATABASE "%s" OWNER "%s" ENCODING '"'UTF8'"' TEMPLATE template0;\nREVOKE ALL ON DATABASE "%s" FROM PUBLIC;\nGRANT CONNECT, TEMPORARY ON DATABASE "%s" TO "%s";\nGRANT pg_monitor TO "%s";\n' \
+        "$DB_NAME" "$DB_USER" "$DB_NAME" "$DB_NAME" "$DB_USER" "$DB_USER" | db_psql >/dev/null; then db_die "$(t db_create_failed)"; fi
+  DB_UNDO_DB=1
+  db_write_secret "$(db_make_dsn "$DB_SOCKDIR" "" "$DB_USER" "$pw" "$DB_NAME" "" "")"
+  pw=""
+  DB_RESULT="created"
+  DB_SERVER_LOCAL=1
+  return 0
+}
+
+# an existing server: an administrator connection creates the user and the database; the application connection alone creates the schema
+db_setup_existing() {
+  local cp; cp="$(cp_exe)"; local f; f="$(db_secret_file)"
+  if [ -n "$DB_DSN_FILE" ]; then
+    ( umask 077; cp "$DB_DSN_FILE" "$f.new" ) 2>/dev/null || db_die "cannot read $DB_DSN_FILE"; [ -s "$f.new" ] || db_die "empty DSN file"
+    chmod 0600 "$f.new"; [ "$STAGING" = 1 ] || chown "$SVC_USER:$SVC_USER" "$f.new" 2>/dev/null || true; mv -f "$f.new" "$f"; DB_SECRET_WRITTEN=1
+  elif [ -n "$DB_DSN" ]; then
+    db_write_secret "$DB_DSN"
+  fi
+  if [ -s "$f" ] && [ -z "$DB_DSN$DB_DSN_FILE" ] && [ "$DB_SECRET_WRITTEN" = 0 ]; then
+    # a previous run left the connection of the application user: the user and the database exist, nothing to create and no administrator
+    # connection needed; the schema is brought up to date below
+    db_log "the connection file is already in place: nothing to create"
+    DB_RESULT="kept"; return 0
+  fi
+  if [ -n "$DB_ADMIN_DSN_FILE" ] || [ -n "${TOUTWAF_DB_ADMIN_DSN:-}" ]; then
+    local pwargs=()
+    [ -z "$DB_PASSWORD_FILE" ] || pwargs=(--app-password-file "$DB_PASSWORD_FILE")
+    local args=(db provision --database "$DB_NAME" --user "$DB_USER" --dsn-out -)
+    [ -z "$DB_HOST" ] || args+=(--app-host "$DB_HOST"); [ -z "$DB_PORT" ] || args+=(--app-port "$DB_PORT")
+    [ -z "$DB_TLS_MODE" ] || args+=(--tls-mode "$DB_TLS_MODE"); [ -z "$DB_CA" ] || args+=(--ca-file "$DB_CA")
+    local out rc
+    if [ -n "$DB_ADMIN_DSN_FILE" ]; then
+      out="$("$cp" "${args[@]}" "${pwargs[@]}" --admin-dsn-file "$DB_ADMIN_DSN_FILE" 2>>"$LOG")" && rc=0 || rc=$?
+    else
+      out="$(printf '%s\n' "$TOUTWAF_DB_ADMIN_DSN" | "$cp" "${args[@]}" "${pwargs[@]}" --admin-dsn-stdin 2>>"$LOG")" && rc=0 || rc=$?
+    fi
+    unset TOUTWAF_DB_ADMIN_DSN
+    if [ "$rc" = 3 ]; then db_print_grants; db_die "$(t db_rights)"; fi
+    [ "$rc" = 0 ] || db_die "$(t db_create_failed)"
+    if [ -n "$out" ]; then db_write_secret "$out"; DB_RESULT="created"; else DB_RESULT="kept"; fi
+  else
+    # only the application connection: the database and the user must exist
+    if [ -z "$DB_DSN$DB_DSN_FILE" ]; then
+      if [ -n "$DB_HOST" ] && [ -n "$DB_PASSWORD_FILE" ]; then
+        db_write_secret "$(db_make_dsn "$DB_HOST" "${DB_PORT:-5432}" "$DB_USER" "$(tr -d '\r\n' <"$DB_PASSWORD_FILE")" "$DB_NAME" "${DB_TLS_MODE:-prefer}" "$DB_CA")"
+      elif [ ! -s "$f" ]; then db_die "$(t db_need_conn)"; fi
+    fi
+    DB_RESULT="schema"
+  fi
+  return 0
+}
+
+db_say() { [ "$QUIET" = 1 ] || printf '%s\n' "$*" >&3 2>/dev/null || true; }   # to the terminal even from inside a step (whose output goes to the log)
+db_print_grants() {
+  db_say ""
+  "$(cp_exe)" db grants --database "$DB_NAME" --user "$DB_USER" 2>/dev/null | while IFS= read -r l; do db_say "    $l"; done
+  db_say ""
+}
+
+# the schema, the check and the summary
+db_apply_schema() {
+  local cp rc out; cp="$(cp_exe)"
+  [ -x "$cp" ] || { warn "toutwaf-cp is not installed yet: the schema is applied at the first start"; return 0; }
+  # run as the service user: this is exactly how the service will connect
+  if [ "$STAGING" = 0 ] && [ "$(id -u)" = 0 ]; then
+    out="$(runuser -u "$SVC_USER" -- "$cp" db init --dsn-file "$(db_secret_file)" ${DB_TLS_MODE:+--tls-mode "$DB_TLS_MODE"} ${DB_CA:+--ca-file "$DB_CA"} 2>&1)" && rc=0 || rc=$?
+  else
+    out="$("$cp" db init --dsn-file "$(db_secret_file)" ${DB_TLS_MODE:+--tls-mode "$DB_TLS_MODE"} ${DB_CA:+--ca-file "$DB_CA"} 2>&1)" && rc=0 || rc=$?
+  fi
+  printf '%s\n' "$out" >>"$LOG"
+  if [ "$rc" = 3 ]; then printf '%s\n' "$out" | sed 's/^/    /' >&3 2>/dev/null || true; db_die "$(t db_rights)"; fi
+  [ "$rc" = 0 ] || db_die "$(t db_schema_failed)"
+  DB_SCHEMA_LINE="$(printf '%s\n' "$out" | tail -n1)"
+  return 0
+}
+
+# the daily dump: a systemd timer that runs `toutwaf-cp db backup` as the service user (verified, rotated, status for the console)
+db_backup_units() {
+  [ "$DB_BACKUP_TIMER" = 1 ] && [ "$HAS_SYSTEMD" = 1 ] || return 0
+  local sd; sd="$(p /etc/systemd/system)"; mkdir -p "$sd"
+  local pk; pk="$(db_packages client 2>/dev/null || true)"
+  if ! have pg_dump && ! ls /usr/lib/postgresql/*/bin/pg_dump >/dev/null 2>&1 && [ -n "$pk" ]; then
+    local pm; pm="$(db_pkg_manager)"; # shellcheck disable=SC2086
+    [ -z "$pm" ] || pkg_install "$pm" $pk >>"$LOG" 2>&1 || warn "$(t db_no_pgdump)"
+  fi
+  cat >"$sd/toutwaf-db-backup.service" <<EOT
+[Unit]
+Description=ToutWAF database backup (pg_dump, verified, rotated)
+After=postgresql.service network-online.target
+
+[Service]
+Type=oneshot
+User=$SVC_USER
+Group=$SVC_USER
+EnvironmentFile=-$CONF_DIR/cp.env
+ExecStart=$BIN_DIR/toutwaf-cp db backup --config $CONF_DIR/toutwaf-cp.yaml --dir $DATA_DIR/db-backups --keep 7
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=$DATA_DIR
+ReadOnlyPaths=$CONF_DIR
+UMask=0077
+EOT
+  cat >"$sd/toutwaf-db-backup.timer" <<EOT
+[Unit]
+Description=Daily ToutWAF database backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOT
+  if [ "$DRY_RUN" = 0 ]; then
+    systemctl daemon-reload >>"$LOG" 2>&1 || true
+    systemctl enable --now toutwaf-db-backup.timer >>"$LOG" 2>&1 || warn "the backup timer could not be enabled"
+  fi
+  DB_BACKUP_SCHEDULED=1
+}
+
+# the control plane starts after a local PostgreSQL (a drop-in: the unit file itself is left alone)
+db_unit_dropin() {
+  [ "$HAS_SYSTEMD" = 1 ] || return 0
+  [ "$DB_SERVER_LOCAL" = 1 ] || return 0
+  local d; d="$(p /etc/systemd/system/toutwaf-cp.service.d)"; mkdir -p "$d"
+  printf '[Unit]\nAfter=postgresql.service\nWants=postgresql.service\n' >"$d/database.conf"
+}
+
+# undo what this run created, when a later step fails
+db_undo() {
+  [ "${DB_UNDO_DB:-0}" = 1 ] && printf 'DROP DATABASE IF EXISTS "%s";\n' "$DB_NAME" | db_psql >/dev/null 2>&1
+  [ "${DB_UNDO_ROLE:-0}" = 1 ] && printf 'DROP ROLE IF EXISTS "%s";\n' "$DB_USER" | db_psql >/dev/null 2>&1
+  if [ "${DB_SECRET_WRITTEN:-0}" = 1 ]; then rm -f "$(db_secret_file)"; fi
+  return 0
+}
+
+# the whole database phase of an installation
+phase_database() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  local existing; existing="$(db_existing_engine)"
+  if [ -n "$existing" ]; then
+    # an installation that already has a configuration keeps its database exactly as it is
+    DB_ENGINE="$existing"; DB_RESULT="unchanged"
+    if [ "$existing" = postgres ] && [ -s "$(db_secret_file)" ]; then DB_SERVER_LOCAL="$(db_unit_dropin_present && echo 1 || echo 0)"; fi
+    return 0
+  fi
+  if [ -z "$DB_ENGINE" ]; then DB_ENGINE=sqlite; DB_RESULT="default"; return 0; fi
+  if [ "$DB_ENGINE" = sqlite ]; then DB_RESULT="sqlite"; return 0; fi
+  if [ "$DB_LOCAL" = 1 ]; then db_setup_local; else db_setup_existing; fi
+  db_apply_schema
+  db_backup_units
+  db_unit_dropin
+  db_log "done: $DB_RESULT"
+  return 0
+}
+db_unit_dropin_present() { [ -f "$(p /etc/systemd/system/toutwaf-cp.service.d/database.conf)" ]; }
+
+# the database section of toutwaf-cp.yaml
+db_yaml() {
+  if [ "$DB_ENGINE" = postgres ]; then
+    printf 'database:\n  driver: postgres\n  dsn_file: %s\n' "$CONF_DIR/db.dsn"
+    [ -z "$DB_TLS_MODE" ] || printf '  tls_mode: %s\n' "$DB_TLS_MODE"
+    [ -z "$DB_CA" ] || printf '  ca_file: %s\n' "$DB_CA"
+  else
+    printf 'database:\n  driver: sqlite\n'
+  fi
+}
+
+# the plain summary, shown at the end of the database step (no secret in it)
+db_summary() {
+  case "$DB_ENGINE:$DB_RESULT" in
+    *:unchanged|*:"") ;;
+    sqlite:default) say "  $BUL $(t db_hint)";;
+    postgres:*)
+      say "  $BUL $(t db_sum_engine "PostgreSQL")"
+      if [ "$DB_SERVER_LOCAL" = 1 ]; then say "  $BUL $(t db_sum_local "$DB_NAME" "$DB_USER")"; else say "  $BUL $(t db_sum_remote "$DB_NAME" "$DB_USER")"; fi
+      [ -z "${DB_SCHEMA_LINE:-}" ] || say "  $BUL $(t db_sum_schema "$DB_SCHEMA_LINE")"
+      say "  $BUL $(t db_sum_secret "$CONF_DIR/db.dsn")"
+      if [ "${DB_BACKUP_SCHEDULED:-0}" = 1 ]; then say "  $BUL $(t db_sum_backup)"; else say "  $BUL $(t db_sum_nobackup)"; fi;;
+    sqlite:*) say "  $BUL $(t db_sum_sqlite)";;
+  esac
+}
+
+# the questions of the interactive mode
+db_ask() {
+  local c sub ok an ap enc
+  # shellcheck disable=SC2034  # set when the person was asked; no step reads it yet
+  DB_ASKED=1
+  say ""; say "  $(paint "$B" "$(t db_choose)")"
+  say "    1) $(t db_opt_pg)"
+  say "    2) $(t db_opt_sqlite)"
+  ask c "$(t choice)" 1
+  if [ "$c" = 2 ]; then DB_ENGINE=sqlite; say "  $D$(t db_sqlite_note)$R"; return 0; fi
+  DB_ENGINE=postgres
+  say "    1) $(t db_opt_pg_local)"
+  say "    2) $(t db_opt_pg_remote)"
+  ask sub "$(t choice)" 1
+  if [ "$sub" != 2 ]; then DB_LOCAL=1; return 0; fi
+  ask DB_HOST "$(t db_q_host)" "${DB_HOST:-127.0.0.1}"
+  ask DB_PORT "$(t db_q_port)" "${DB_PORT:-5432}"
+  ask DB_NAME "$(t db_q_name)" "$DB_NAME"
+  ask DB_USER "$(t db_q_user)" "$DB_USER"
+  ask DB_TLS_MODE "$(t db_q_tls)" "${DB_TLS_MODE:-prefer}"
+  case "$DB_TLS_MODE" in verify-ca|verify-full) ask DB_CA "$(t db_q_ca)" "$DB_CA";; esac
+  ask an "$(t db_q_admin)" ""
+  if [ -n "$an" ]; then
+    ask ap "$(t db_q_adminpw)" "" secret
+    enc="$(printf '%s' "$ap" | od -An -tx1 | tr -d ' \n' | sed 's/\(..\)/%\1/g')"
+    DB_ADMIN_DSN_FILE="$TMP/db-admin.dsn"
+    ( umask 077; printf 'postgres://%s:%s@%s:%s/postgres?sslmode=%s%s\n' "$an" "$enc" "$DB_HOST" "$DB_PORT" "$DB_TLS_MODE" "${DB_CA:+&sslrootcert=$DB_CA}" >"$DB_ADMIN_DSN_FILE" )
+    ap=""; enc=""
+  fi
+  ask ap "$(t db_q_pw)" "" secret
+  if [ -n "$ap" ]; then DB_PASSWORD_FILE="$TMP/db-app.pw"; ( umask 077; printf '%s' "$ap" >"$DB_PASSWORD_FILE" ); fi
+  ap=""
+  return 0
+}
+
+# `toutwaf-install --db-prepare --db-install-local`: prepare a PostgreSQL server for an installation that already runs on SQLite (the console assistant
+# "Switch to PostgreSQL" asks for it through the root helper). Installs the package if missing, initialises and secures the server (loopback only), creates the
+# role and the database with a random password, writes the connection file and applies the schema. It does NOT touch the configuration of the control plane
+# and moves no data: the assistant of the console does that, with a backup, a verification and a roll-back.
+cmd_db_prepare() {
+  DB_LOCAL=1
+  detect_installed
+  [ "$INST_CP" = 1 ] || die "$(t not_installed)"
+  compat_gate
+  db_setup_local
+  db_apply_schema
+  db_backup_units
+  db_unit_dropin
+  printf 'TW_DB_PREPARE=ok\nDSN_FILE=%s\nRESULT=%s\n' "$(db_secret_file)" "$DB_RESULT"
+}
+# END db-setup
 
 # ------------------------------------------------------------------------------------------------ install / update flow
 CHANGED=0; OLD_DP=""; UPDATE_NOOP=0; PANEL_RAN=0
 phase_account() { create_user; make_dirs; }
-# The control plane serves the host agent builds to the servers of the cluster: they ship in every archive (agent-dist/)
-# and are kept next to the control plane data, replaced at every update.
+# The control plane serves the host agent builds to the servers of the cluster: the Linux ones ship in every archive (agent-dist/) and are kept next to the control
+# plane data, replaced at every update. The ones for Windows, and the antivirus programs, come with the extras of the release (install_extras).
 install_agent_dist() {
   local d="" src f own grp
   for src in "$(dirname "$SRC_DIR")/agent-dist" "$SRC_DIR/agent-dist"; do
@@ -5942,40 +7731,151 @@ install_agent_dist() {
   done
   info "host agent builds installed in $DATA_DIR/agent-dist"
 }
-# The console hands the ToutWAF Antivirus programs (Linux, Windows and macOS, both architectures) to the machines its installer
-# generator sets up: they ship in every archive (av-dist/) and are kept in the av-dist folder of the data directory, replaced
-# at every update. Without them the installer generator of the console answers 409 with the cause.
-install_av_dist() {
-  local d="" src f own grp
-  for src in "$(dirname "$SRC_DIR")/av-dist" "$SRC_DIR/av-dist"; do
-    if [ -d "$src" ]; then d="$src"; break; fi
-  done
-  [ -n "$d" ] || { info "this release carries no ToutWAF Antivirus programs (the installer generator of the antivirus cannot set up machines until you update)"; return 0; }
-  own="$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")"; grp="$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")"
-  run install -d -m 0750 -o "$own" -g "$grp" "$(p "$DATA_DIR/av-dist")" || return 0
-  for f in "$d"/toutwaf-av-*; do
-    [ -f "$f" ] || continue
-    run install -m 0640 -o "$own" -g "$grp" "$f" "$(p "$DATA_DIR/av-dist/$(basename "$f")")" || warn "could not install $(basename "$f")"
-  done
-  info "ToutWAF Antivirus programs installed in $DATA_DIR/av-dist"
+# ---- ToutWAF Cloud (--cloud-url): the node connects OUTBOUND to the hosted control plane through toutwaf-cloudlink --------------------------
+# The link enrols the node (its key pair is made here, only the public key leaves), keeps one HTTPS connection to the account, and gives the data plane a
+# control-plane address on the loopback interface (http://127.0.0.1:$CLOUDLINK_PORT). The data plane keeps filtering with its last policy if the cloud is
+# unreachable. Nothing listens for the platform.
+cloud_prepare() {
+  case "$CLOUD_URL" in https://*) ;; *) die "$(t cloud_https)";; esac
+  CLOUD_URL="${CLOUD_URL%/}"
+  if [ "$COMPONENT" = all ]; then COMPONENT=dp; fi
+  [ "$COMPONENT" = dp ] || die "$(t cloud_dp_only)"
+  if [ -z "$ENROLL_TOKEN" ] && [ ! -f "$(p "$DATA_DIR/cloudlink/link.json")" ]; then
+    if interactive; then ask ENROLL_TOKEN "$(t q_token)" "" secret; fi
+    [ -n "$ENROLL_TOKEN" ] || die "$(t cloud_need_token)"
+  fi
+  if [ -n "$CLOUD_CA" ]; then
+    case "$CLOUD_CA" in http://*|https://*) die "$(t cloud_ca_local)";; *) [ -f "$CLOUD_CA" ] || die "--cloud-ca: file not found: $CLOUD_CA";; esac
+  fi
+  # the data plane talks to the link, not to the internet: the enrolment token is consumed by the link, never written in the data plane's file
+  CP_URL="http://127.0.0.1:$CLOUDLINK_PORT"
+  CLOUD_ENROL_TOKEN="$ENROLL_TOKEN"; ENROLL_TOKEN=""
+}
+cloud_link_args() {
+  local IFS=$' \t\n'; local a="" pin
+  for pin in $CLOUD_PINS; do a="$a --pin $pin"; done
+  [ -z "$CLOUD_CA" ] || a="$a --ca $CONF_DIR/certs/cloud-ca.pem"
+  printf '%s' "$a"
+}
+# enrol the node with the account (once; a link that is already enrolled is left alone) and hand its local secret to the data plane
+cloud_link_enrol() {
+  local IFS=$' \t\n'   # the pins are split on blanks whatever the IFS of the caller
+  [ -n "$CLOUD_URL" ] || return 0
+  [ "$DRY_RUN" = 1 ] && return 0
+  local dir; dir="$(p "$DATA_DIR/cloudlink")"
+  run install -d -m 0700 "$dir"
+  if [ -n "$CLOUD_CA" ]; then
+    run install -d -m 0755 "$(p "$CONF_DIR/certs")"
+    run cp "$CLOUD_CA" "$(p "$CONF_DIR/certs/cloud-ca.pem")"; run chmod 0644 "$(p "$CONF_DIR/certs/cloud-ca.pem")"
+  fi
+  if [ -f "$dir/link.json" ] && [ -f "$dir/node.key" ]; then info "the node is already enrolled with this account"
+  else
+    [ -n "$CLOUD_ENROL_TOKEN" ] || die "$(t cloud_need_token)"
+    log "Enrolling this node with $CLOUD_URL"
+    local -a eargs=(); local pin
+    for pin in $CLOUD_PINS; do eargs+=(--pin "$pin"); done
+    [ -z "$CLOUD_CA" ] || eargs+=(--ca "$(p "$CONF_DIR/certs/cloud-ca.pem")")
+    if ! TOUTWAF_ENROL_TOKEN="$CLOUD_ENROL_TOKEN" "$(p "$BIN_DIR/toutwaf-cloudlink")" enrol --dir "$dir" --cloud-url "$CLOUD_URL" ${eargs[@]+"${eargs[@]}"} --name "$(hostname 2>/dev/null || echo node)" >>"$LOG" 2>&1; then
+      tail -n 5 "$LOG" >&2
+      die "$(t cloud_enrol_failed)"
+    fi
+  fi
+  if [ "$STAGING" = 0 ]; then chown -R "$SVC_USER:$SVC_USER" "$dir"; fi
+  NODE_TOKEN="$(cat "$dir/local.token" 2>/dev/null || true)"
+  [ -n "$NODE_TOKEN" ] || die "$(t cloud_enrol_failed)"
+  CLOUD_ENROL_TOKEN=""
+}
+cloud_link_unit() {
+  [ -n "$CLOUD_URL" ] || [ -f "$(p "$DATA_DIR/cloudlink/link.json")" ] || return 0
+  [ "$DRY_RUN" = 1 ] && return 0
+  local sd envf; sd="$(p /etc/systemd/system)"; mkdir -p "$sd"
+  envf="$(p "$CONF_DIR/cloudlink.env")"
+  # the proxy of the machine is the one of the link: the values present at installation are kept in a file the administrator can edit
+  if [ ! -e "$envf" ]; then
+    { echo "# environment of toutwaf-cloudlink (systemctl restart toutwaf-cloudlink after a change)"
+      echo "# HTTPS_PROXY=http://proxy.example.com:3128"
+      echo "# NO_PROXY=localhost,127.0.0.1"
+      [ -z "${HTTPS_PROXY:-}" ] || echo "HTTPS_PROXY=$HTTPS_PROXY"
+      [ -z "${https_proxy:-}" ] || echo "https_proxy=$https_proxy"
+      [ -z "${NO_PROXY:-}" ] || echo "NO_PROXY=$NO_PROXY"
+    } >"$envf"; chmod 0640 "$envf"; if [ "$STAGING" = 0 ]; then chown "root:$SVC_USER" "$envf"; fi
+  fi
+  cat >"$sd/toutwaf-cloudlink.service" <<EOF
+[Unit]
+Description=ToutWAF Cloud link (outbound connection of this node to its hosted account)
+Documentation=https://github.com/$REPO
+After=network-online.target
+Wants=network-online.target
+Before=toutwaf-dp.service
+
+[Service]
+Type=simple
+User=$SVC_USER
+Group=$SVC_USER
+EnvironmentFile=-$CONF_DIR/cloudlink.env
+ExecStart=$BIN_DIR/toutwaf-cloudlink run --dir $DATA_DIR/cloudlink --listen 127.0.0.1:$CLOUDLINK_PORT$(cloud_link_args)
+Restart=always
+RestartSec=2s
+LimitNOFILE=65536
+# --- sandboxing: it needs the network (outbound only) and its own directory, nothing else -----------------------------------
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @swap @reboot @raw-io @obsolete @debug @cpu-emulation @clock
+UMask=0077
+ReadWritePaths=$DATA_DIR/cloudlink
+ReadOnlyPaths=$CONF_DIR
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  # the data plane starts after the link (it asks it for its policy)
+  if [ -e "$sd/toutwaf-dp.service" ] && ! grep -q 'toutwaf-cloudlink' "$sd/toutwaf-dp.service"; then
+    sed -i 's/^After=network-online.target/After=network-online.target toutwaf-cloudlink.service/' "$sd/toutwaf-dp.service"
+  fi
 }
 phase_binaries() {
   if want_dp; then
     OLD_DP="$(installed_label "$(p "$BIN_DIR/toutwaf-dp")")"; [ "$OLD_DP" != "?" ] || OLD_DP=""
     if install_binary toutwaf-dp; then CHANGED=1; fi
+    if [ -n "$CLOUD_URL" ] || [ -x "$(p "$BIN_DIR/toutwaf-cloudlink")" ]; then
+      if [ ! -e "$SRC_DIR/toutwaf-cloudlink" ] && [ "$DRY_RUN" = 0 ]; then die "$(t cloud_nolink)"; fi
+      if install_binary toutwaf-cloudlink; then CHANGED=1; fi
+    fi
   fi
   if want_cp; then
     if install_binary toutwaf-cp; then CHANGED=1; fi
     if install_binary toutwafctl; then CHANGED=1; fi
+    keep_installer_copy
     install_agent_dist
-    # the antivirus programs are withdrawn from the product: installed only on explicit request (TOUTWAF_WITH_ANTIVIRUS=1)
-    if [ "${TOUTWAF_WITH_ANTIVIRUS:-0}" = 1 ]; then install_av_dist; fi
+    install_extras         # the Windows agents and the antivirus programs (obtain_extras unpacked them; nothing when there are none)
   fi
   link_cli
   return 0
 }
-phase_config() { if want_dp; then dp_config; fi; if want_cp; then cp_config; fi; return 0; }
-phase_units() { write_units; tune_sysctl; set_caps; return 0; }
+# The installer stays on the machine (toutwaf-install): the console's "Switch to PostgreSQL" assistant asks the root helper (toutwaf-jobs, verb
+# pg_install_local) to run `toutwaf-install --db-prepare --db-install-local`, the same code that installs PostgreSQL during an installation.
+keep_installer_copy() {
+  [ "$DRY_RUN" = 0 ] || return 0
+  [ -f "$0" ] && head -c 2 "$0" 2>/dev/null | grep -q '#!' || return 0
+  run install -m 0755 "$0" "$(p "$BIN_DIR/toutwaf-install")" || warn "could not keep a copy of the installer"
+}
+phase_config() { if want_dp; then cloud_link_enrol; dp_config; fi; if want_cp; then cp_config; fi; return 0; }
+phase_units() { write_units; cloud_link_unit; tune_sysctl; set_caps; return 0; }
 prepare_panel() { prepare_panel_run; }
 
 start_services() {
@@ -5987,6 +7887,7 @@ start_services() {
   if want_cp; then systemctl enable --now toutwaf-blocklist.path >/dev/null 2>&1 || warn "could not enable toutwaf-blocklist.path"; fi
   if want_cp; then systemctl enable --now toutwaf-vpn.path >/dev/null 2>&1 || warn "could not enable toutwaf-vpn.path"; fi
   if want_cp; then systemctl enable --now toutwaf-fw.path >/dev/null 2>&1 || warn "could not enable toutwaf-fw.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-jobs.path >/dev/null 2>&1 || warn "could not enable toutwaf-jobs.path"; fi
   if want_cp; then
     systemctl enable toutwaf-cp >/dev/null 2>&1 || true
     if svc_active toutwaf-cp && [ "$CHANGED" = 0 ]; then :; else
@@ -5997,6 +7898,10 @@ start_services() {
         warn "toutwaf-cp does not answer on :$CP_PORT yet (journalctl -u toutwaf-cp)"
       fi
     fi
+  fi
+  if want_dp && [ -e "$(p /etc/systemd/system/toutwaf-cloudlink.service)" ]; then
+    systemctl enable toutwaf-cloudlink >/dev/null 2>&1 || true
+    if svc_active toutwaf-cloudlink && [ "$CHANGED" = 0 ]; then :; else log "(Re)starting toutwaf-cloudlink"; systemctl restart toutwaf-cloudlink >>"$LOG" 2>&1 || warn "toutwaf-cloudlink did not start (journalctl -u toutwaf-cloudlink)"; fi
   fi
   if want_dp; then
     systemctl enable toutwaf-dp >/dev/null 2>&1 || true
@@ -6046,12 +7951,13 @@ do_install_flow() {
     # build cannot tell: the archive is downloaded and its files are compared, as before.)
     local ust; ust="$(update_verdict "$RESOLVED_VERSION" "$NEW_BUILD")"
     case "$ust" in
-      same) if [ -n "$NEW_BUILD" ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; return 0; fi;;
+      same) if [ -n "$NEW_BUILD" ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; extras_maintain "$RESOLVED_VERSION" "$NEW_BUILD"; return 0; fi;;
       rebuilt) say "  $BUL $(t up_rebuilt "$(installed_identity_label)" "$(ver_label "$RESOLVED_VERSION" "$NEW_BUILD")")";;
     esac
   fi
   step "$(t s_fetch "${RESOLVED_VERSION:-?}" "$ARCH")" obtain_binaries
   [ -z "$ARCHIVE_BUILD" ] || NEW_BUILD="$ARCHIVE_BUILD"
+  if want_cp && [ "$NO_EXTRAS" = 0 ]; then step "$(t s_extras)" obtain_extras; fi   # downloaded and checked now, installed with the programs (never fatal)
   if [ "$ACTION" = update ]; then
     local cur="" curb="" same=1 b
     if want_dp && [ "$INST_DP" = 1 ]; then cur="$(installed_version "$(p "$BIN_DIR/toutwaf-dp")")"; curb="$(inst_build "$(p "$BIN_DIR/toutwaf-dp")" "$cur")"; fi
@@ -6065,6 +7971,7 @@ do_install_flow() {
       say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}")")"; UPDATE_NOOP=1
       # the files are the archive's: whatever the binaries cannot say of themselves, the archive does
       record_installed "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}"
+      if [ -n "$EXTRAS_DIR" ]; then install_extras; extras_report; else extras_maintain "${ARCHIVE_VERSION:-$RESOLVED_VERSION}" "${ARCHIVE_BUILD:-$NEW_BUILD}"; fi   # same programs: the extras alone may be missing
       return 0
     fi
     step "$(t s_backup)" backup_before_update
@@ -6072,6 +7979,7 @@ do_install_flow() {
   step "$(t s_user)" phase_account
   write_installer_conf
   step "$(t s_bin)" phase_binaries
+  if want_cp && [ "$ACTION" = install ]; then step "$(t s_db)" phase_database; db_summary; fi
   step "$(t s_cfg)" phase_config
   load_existing_ports
   step "$(t s_units)" phase_units
@@ -6080,6 +7988,7 @@ do_install_flow() {
   if want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_boot)" prepare_panel; fi
   if want_dp && want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_link)" link_local_dp; fi
   if want_cp && [ "$FW_MODULE" = 1 ]; then step "$(t s_fwmod)" enable_firewall_module; fi
+  if want_cp && [ "$BACKUP_CLIENT" = 1 ]; then step "$(t s_bkclient)" install_backup_client; fi
   if [ "$HAS_SYSTEMD" = 1 ] && [ "$DRY_RUN" = 0 ]; then
     run systemctl daemon-reload
     if [ "$NO_START" = 0 ]; then
@@ -6088,7 +7997,7 @@ do_install_flow() {
       say "  $BUL services installed but not started (--no-start)"
     fi
     if [ "$NO_ENABLE" = 1 ]; then
-      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
+      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
     fi
   fi
   record_installed_now
@@ -6115,6 +8024,7 @@ configure_interactively() {
   if [ -n "$CP_URL" ] && [[ "$CP_URL" =~ ^https:// ]] && [ -z "$CP_CA" ]; then ask CP_CA "$(t q_cp_ca)" ""; fi
   if want_cp; then ask CP_PORT "$(t q_cp_port)" "$CP_PORT"; ask PUBLIC_HOST "$(t q_public_host)" "$PUBLIC_HOST"; fi
   if want_dp; then ask HTTP_PORT "$(t q_http_port)" "$HTTP_PORT"; ask HTTPS_PORT "$(t q_https_port)" "$HTTPS_PORT"; fi
+  if want_cp && [ "$ACTION" = install ] && [ -z "$DB_ENGINE" ] && [ -z "$(db_existing_engine)" ]; then db_ask; fi
   ask_yn fw "$(t q_firewall)" 1; if [ "$fw" = 1 ]; then OPEN_FW=1; OPEN_CP_PORT=1; else OPEN_FW=0; fi
   if want_cp && [ "$OPEN_FW" = 1 ]; then
     say "  $D$(t fw_console_note "$CP_PORT")$R"
@@ -6172,6 +8082,13 @@ menu() {
   done
 }
 
+# One clear paragraph about telemetry: what is shared by default, what never is, and how to switch it off. Printed once, at the start of an installation.
+telemetry_notice() {
+  [ "$QUIET" = 0 ] || return 0
+  if [ "$NO_TELEMETRY" = 1 ]; then say "  $BUL $(t tele_off)"; else say "  $BUL $(t tele_on)"; fi
+  return 0
+}
+
 # ------------------------------------------------------------------------------------------------ main
 decide_channel
 if [ -z "$ACTION" ]; then
@@ -6183,7 +8100,9 @@ case "$ACTION" in
   checkprereq) rc=0; prereq_run_check || rc=$?; exit "$rc";;
   status) persist_log; rc=0; cmd_status || rc=$?; exit "$rc";;      # (a plain call would fire the ERR trap on a non-zero status)
   links) persist_log; rc=0; cmd_links || rc=$?; exit "$rc";;
+  extras) persist_log; rc=0; cmd_extras || rc=$?; exit "$rc";;
   uninstall) persist_log; cmd_uninstall; exit 0;;
+  dbprepare) persist_log; rc=0; cmd_db_prepare || rc=$?; exit "$rc";;
 esac
 compat_gate          # unsupported system: stops here (exit 3) before anything is changed
 persist_log
@@ -6199,6 +8118,7 @@ else
   banner
   if interactive && [ "$STAGING" = 0 ]; then configure_interactively; fi
 fi
+if [ -n "$CLOUD_URL" ]; then cloud_prepare; fi
 if [ -n "$ENROLL_TOKEN$NODE_TOKEN" ] && [ -z "$CP_URL" ]; then die "$(t need_cp)"; fi
 banner
 say "  ${D}os=$OS_ID $OS_VER family=${FAMILY:-${FAMILY_GUESS:-?}} arch=$ARCH component=$COMPONENT channel=$CHANNEL${DESTDIR:+ staging=$DESTDIR}$R"
@@ -6207,6 +8127,7 @@ if [ "$COMPAT_OK" = 1 ]; then
   say "  $(paint "$GRN" "$OKM") $COMPAT_LINE"
   for _n in ${CP_NOTES[@]+"${CP_NOTES[@]}"}; do warn "$_n"; done
 fi
+if want_cp && [ "$ACTION" = install ]; then telemetry_notice; fi   # what is shared with the publisher space, said before anything is installed
 if [ "$ACTION" = install ]; then env_gate; fi   # what is in the way is said now, before anything is changed (exit 4)
 prereq_gate          # disk space, DNS and clock, with the fix of each problem (only a full disk refuses, exit 4)
 sysupdate_run        # then the system packages (an installation only; TOUTWAF_SKIP_SYSUPDATE=1 skips it; a failure is a warning)
@@ -6221,7 +8142,9 @@ say "  $(paint "$GRN" "$OKM") $(t "done")${new_dp:+  toutwaf-dp $new_dp${OLD_DP:
 if [ "${#WARNINGS[@]}" -gt 0 ] && [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ]; then local_w=""; for local_w in "${WARNINGS[@]}"; do printf '  %s%s%s %s\n' "$YLW" "$WRM" "$R" "$local_w"; done; fi
 if want_cp && [ "$PANEL_RAN" = 0 ] && [ "$STAGING" = 0 ]; then cp_links; fi
 render_summary tty
+extras_report
 if [ "$FW_MODULE_RESULT" = on ]; then say "  $BUL $(t fwmod_done)"; fi
+if [ "$BACKUP_CLIENT_RESULT" = on ]; then say "  $BUL $(t bkc_done)"; fi
 if want_dp; then
   say "  ${D}data plane: systemctl status toutwaf-dp   config: $CONF_DIR/toutwaf-dp.yaml   health: curl http://127.0.0.1:9101/healthz$R"
   if [ -z "$CP_URL" ] && { [ "$COMPONENT" != all ] || [ "$DP_LINK" = failed ]; }; then say "  ${D}policy: edit $CONF_DIR/policy.yaml (hot reloaded) - apps start in detect mode$R"; fi
