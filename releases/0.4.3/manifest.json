@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "version": "0.4.3",
+  "build": "fd8c1a77f84b",
+  "channel": "stable",
+  "released_at": "2026-11-03T10:16:08Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 68044618,
+      "sha256": "9cb52dbea855e267d9aa74598dccbd097ad11691edce29995fed02d83c48abcf"
+    },
+    {
+      "name": "toutwaf-extras.tar.gz",
+      "os": "any",
+      "arch": "any",
+      "size": 50064836,
+      "sha256": "2b5ba6ff59d78dbd3322edeecc39129a1817565c86dd18975d5c818289512560",
+      "kind": "extras",
+      "part": 1,
+      "parts": 1
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-arm64",
+      "reason": "disabled in settings"
+    }
+  ],
+  "notes": "- Staging build for internal verification. It is not a release and has not been published."
+}
