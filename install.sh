@@ -53,6 +53,8 @@ CP_URL=""; NODE_TOKEN=""; ENROLL_TOKEN=""; NODE_GROUP=""; CP_CA=""
 CLOUD_URL=""; CLOUD_PINS=""; CLOUD_CA=""; CLOUD_ENROL_TOKEN=""   # ToutWAF Cloud: the node connects OUTBOUND to the hosted control plane (toutwaf-cloudlink)
 CLOUDLINK_PORT=9544
 CP_PORT=9443; HTTP_PORT=80; HTTPS_PORT=443; PUBLIC_HOST=""; CHANNEL="${TOUTWAF_CHANNEL:-}"
+HTTP3="${TOUTWAF_HTTP3:-}"                      # "" = keep what toutwaf-dp.yaml says (default OFF); 1 = --http3 (HTTP/3 over UDP, opens UDP on the HTTPS port); 0 = --no-http3
+case "$HTTP3" in 1|true|yes|on) HTTP3=1;; 0|false|no|off) HTTP3=0;; *) HTTP3="";; esac
 OPEN_FW=""                                      # "" = default: open what is needed when firewalld / ufw is active; 1 = same, explicit; 0 = never touch the firewall
 CONSOLE_FROM=""                                 # restrict the console port to this address / CIDR ("" = reachable from anywhere)
 # The firewall MODULE (ToutWAF manages this machine's nftables rules) is NOT the system-firewall option above (OPEN_FW opens the ports ToutWAF needs
@@ -1258,16 +1260,16 @@ nl|bkc_badsig|De ToutWAF Backup-client is NIET geïnstalleerd: de handtekening v
 ru|bkc_badsig|Клиент ToutWAF Backup НЕ установлен: подпись релиза НЕДЕЙСТВИТЕЛЬНА. Ничего не установлено.
 zh|bkc_badsig|ToutWAF Backup 客户端未安装：发布签名无效。未安装任何内容。
 ar|bkc_badsig|لم يتم تثبيت عميل ToutWAF Backup: توقيع الإصدار غير صالح. لم يُثبَّت شيء.
-en|tele_on|Telemetry: by default ToutWAF shares with the publisher space (app.toutwaf.com) the attacks it blocked (attacker address, country, type of attack, rule) and aggregate figures, and the host names of the protected sites. Never the content of requests, never legitimate visitors. Switch it off in one click in the console (Settings, Privacy and telemetry), or install with --no-telemetry (or TOUTWAF_TELEMETRY=0) for zero telemetry. Details: docs/confidentialite-telemetrie.md
-fr|tele_on|Télémétrie : par défaut, ToutWAF partage avec l'espace éditeur (app.toutwaf.com) les attaques qu'il a bloquées (adresse de l'attaquant, pays, type d'attaque, règle), des chiffres agrégés et les noms d'hôte des sites protégés. Jamais le contenu des requêtes ni les visiteurs légitimes. Désactivable en un clic dans la console (Paramètres, Confidentialité et télémétrie), ou installez avec --no-telemetry (ou TOUTWAF_TELEMETRY=0) pour une télémétrie zéro. Détails : docs/confidentialite-telemetrie.md
-es|tele_on|Telemetría: por defecto ToutWAF comparte con el espacio del editor (app.toutwaf.com) los ataques que bloqueó (dirección del atacante, país, tipo de ataque, regla), cifras agregadas y los nombres de host de los sitios protegidos. Nunca el contenido de las solicitudes ni a los visitantes legítimos. Se desactiva con un clic en la consola (Ajustes, Privacidad y telemetría), o instale con --no-telemetry (o TOUTWAF_TELEMETRY=0) para telemetría cero. Detalles: docs/confidentialite-telemetrie.md
-de|tele_on|Telemetrie: Standardmäßig teilt ToutWAF mit dem Herausgeberbereich (app.toutwaf.com) die blockierten Angriffe (Adresse des Angreifers, Land, Angriffsart, Regel), aggregierte Zahlen und die Hostnamen der geschützten Sites. Niemals den Inhalt von Anfragen und niemals legitime Besucher. Mit einem Klick in der Konsole abschaltbar (Einstellungen, Datenschutz und Telemetrie), oder installieren Sie mit --no-telemetry (oder TOUTWAF_TELEMETRY=0) für Null-Telemetrie. Details: docs/confidentialite-telemetrie.md
-it|tele_on|Telemetria: per impostazione predefinita ToutWAF condivide con lo spazio dell'editore (app.toutwaf.com) gli attacchi bloccati (indirizzo dell'attaccante, paese, tipo di attacco, regola), cifre aggregate e i nomi host dei siti protetti. Mai il contenuto delle richieste né i visitatori legittimi. Disattivabile con un clic nella console (Impostazioni, Privacy e telemetria), oppure installa con --no-telemetry (o TOUTWAF_TELEMETRY=0) per la telemetria zero. Dettagli: docs/confidentialite-telemetrie.md
-pt|tele_on|Telemetria: por predefinição, o ToutWAF partilha com o espaço do editor (app.toutwaf.com) os ataques que bloqueou (endereço do atacante, país, tipo de ataque, regra), números agregados e os nomes de anfitrião dos sites protegidos. Nunca o conteúdo dos pedidos nem os visitantes legítimos. Desativável com um clique na consola (Definições, Privacidade e telemetria), ou instale com --no-telemetry (ou TOUTWAF_TELEMETRY=0) para telemetria zero. Detalhes: docs/confidentialite-telemetrie.md
-nl|tele_on|Telemetrie: standaard deelt ToutWAF met de ruimte van de uitgever (app.toutwaf.com) de geblokkeerde aanvallen (adres van de aanvaller, land, type aanval, regel), geaggregeerde cijfers en de hostnamen van de beschermde sites. Nooit de inhoud van verzoeken en nooit legitieme bezoekers. Met één klik uit te zetten in de console (Instellingen, Privacy en telemetrie), of installeer met --no-telemetry (of TOUTWAF_TELEMETRY=0) voor nultelemetrie. Details: docs/confidentialite-telemetrie.md
-ru|tele_on|Телеметрия: по умолчанию ToutWAF передаёт пространству издателя (app.toutwaf.com) заблокированные атаки (адрес атакующего, страна, тип атаки, правило), агрегированные цифры и имена хостов защищаемых сайтов. Никогда содержимое запросов и никогда законных посетителей. Отключается одним щелчком в консоли (Настройки, Конфиденциальность и телеметрия), либо установите с --no-telemetry (или TOUTWAF_TELEMETRY=0) для нулевой телеметрии. Подробности: docs/confidentialite-telemetrie.md
-zh|tele_on|遥测：默认情况下，ToutWAF 会与发布方空间（app.toutwaf.com）共享其拦截的攻击（攻击者地址、国家、攻击类型、规则）、汇总数据以及受保护站点的主机名。绝不包含请求内容，也绝不包含合法访客。可在控制台中一键关闭（设置 > 隐私与遥测），或使用 --no-telemetry（或 TOUTWAF_TELEMETRY=0）安装以获得零遥测。详情：docs/confidentialite-telemetrie.md
-ar|tele_on|القياس عن بُعد: يشارك ToutWAF افتراضيًا مع فضاء الناشر (app.toutwaf.com) الهجمات التي حجبها (عنوان المهاجم والبلد ونوع الهجوم والقاعدة) وأرقامًا مجمّعة وأسماء مضيفي المواقع المحمية. لا محتوى الطلبات أبدًا ولا الزوار الشرعيين. يمكن إيقافه بنقرة في الوحدة (الإعدادات، الخصوصية والقياس عن بُعد) أو ثبّت مع --no-telemetry (أو TOUTWAF_TELEMETRY=0) للحصول على قياس صفري. التفاصيل: docs/confidentialite-telemetrie.md
+en|tele_on|Telemetry and collective network: by default ToutWAF shares with the publisher space (app.toutwaf.com) the attacks it blocked (attacker address, country, type of attack, rule), attack patterns and aggregate figures, which also feed the live attack map. Never the content of requests, the names of your sites or legitimate visitors. An installation that is updated without ever having chosen is switched on by the update, with a notice in the console. Switch it off in one click in the console (Collective network, or Settings, Privacy and telemetry), or install with --no-telemetry (or TOUTWAF_TELEMETRY=0) for zero telemetry. Details: docs/confidentialite-telemetrie.md
+fr|tele_on|Télémétrie et réseau collectif : par défaut, ToutWAF partage avec l'espace éditeur (app.toutwaf.com) les attaques qu'il a bloquées (adresse de l'attaquant, pays, type d'attaque, règle), des motifs d'attaque et des chiffres agrégés, qui alimentent aussi la carte des attaques en direct. Jamais le contenu des requêtes, les noms de vos sites ni les visiteurs légitimes. Une installation mise à jour sans jamais avoir choisi est activée par la mise à jour, avec un avis dans la console. Désactivable en un clic dans la console (Réseau collectif, ou Paramètres, Confidentialité et télémétrie), ou installez avec --no-telemetry (ou TOUTWAF_TELEMETRY=0) pour une télémétrie zéro. Détails : docs/confidentialite-telemetrie.md
+es|tele_on|Telemetría y red colectiva: por defecto ToutWAF comparte con el espacio del editor (app.toutwaf.com) los ataques que bloqueó (dirección del atacante, país, tipo de ataque, regla), patrones de ataque y cifras agregadas, que también alimentan el mapa de ataques en directo. Nunca el contenido de las solicitudes, los nombres de sus sitios ni los visitantes legítimos. Una instalación actualizada sin haber elegido nunca se activa con la actualización, con un aviso en la consola. Se desactiva con un clic en la consola (Red colectiva, o Ajustes, Privacidad y telemetría), o instale con --no-telemetry (o TOUTWAF_TELEMETRY=0) para telemetría cero. Detalles: docs/confidentialite-telemetrie.md
+de|tele_on|Telemetrie und kollektives Netzwerk: Standardmäßig teilt ToutWAF mit dem Herausgeberbereich (app.toutwaf.com) die blockierten Angriffe (Adresse des Angreifers, Land, Angriffsart, Regel), Angriffsmuster und aggregierte Zahlen, die auch die Live-Angriffskarte speisen. Nie den Inhalt von Anfragen, die Namen Ihrer Sites oder legitime Besucher. Eine ohne Auswahl aktualisierte Installation wird durch das Update eingeschaltet, mit einem Hinweis in der Konsole. Mit einem Klick in der Konsole abschaltbar (Kollektives Netzwerk, oder Einstellungen, Datenschutz und Telemetrie), oder installieren Sie mit --no-telemetry (oder TOUTWAF_TELEMETRY=0) für Null-Telemetrie. Details: docs/confidentialite-telemetrie.md
+it|tele_on|Telemetria e rete collettiva: per impostazione predefinita ToutWAF condivide con lo spazio dell'editore (app.toutwaf.com) gli attacchi bloccati (indirizzo dell'attaccante, paese, tipo di attacco, regola), modelli di attacco e cifre aggregate, che alimentano anche la mappa degli attacchi in diretta. Mai il contenuto delle richieste, i nomi dei vostri siti o i visitatori legittimi. Un'installazione aggiornata senza aver mai scelto viene attivata dall'aggiornamento, con un avviso nella console. Disattivabile con un clic nella console (Rete collettiva, oppure Impostazioni, Privacy e telemetria), oppure installate con --no-telemetry (o TOUTWAF_TELEMETRY=0) per la telemetria zero. Dettagli: docs/confidentialite-telemetrie.md
+pt|tele_on|Telemetria e rede coletiva: por predefinição a ToutWAF partilha com o espaço do editor (app.toutwaf.com) os ataques que bloqueou (endereço do atacante, país, tipo de ataque, regra), padrões de ataque e números agregados, que também alimentam o mapa dos ataques em direto. Nunca o conteúdo dos pedidos, os nomes dos seus sites nem os visitantes legítimos. Uma instalação atualizada sem nunca ter escolhido é ativada pela atualização, com um aviso na consola. Desativável com um clique na consola (Rede coletiva, ou Definições, Privacidade e telemetria), ou instale com --no-telemetry (ou TOUTWAF_TELEMETRY=0) para telemetria zero. Detalhes: docs/confidentialite-telemetrie.md
+nl|tele_on|Telemetrie en collectief netwerk: standaard deelt ToutWAF met de uitgeversruimte (app.toutwaf.com) de geblokkeerde aanvallen (adres van de aanvaller, land, type aanval, regel), aanvalspatronen en geaggregeerde cijfers, die ook de live-aanvalskaart voeden. Nooit de inhoud van verzoeken, de namen van uw sites of legitieme bezoekers. Een installatie die zonder keuze wordt bijgewerkt, wordt door de update ingeschakeld, met een melding in de console. Met één klik uit te zetten in de console (Collectief netwerk, of Instellingen, Privacy en telemetrie), of installeer met --no-telemetry (of TOUTWAF_TELEMETRY=0) voor nul-telemetrie. Details: docs/confidentialite-telemetrie.md
+ru|tele_on|Телеметрия и коллективная сеть: по умолчанию ToutWAF передаёт пространству издателя (app.toutwaf.com) заблокированные атаки (адрес атакующего, страна, тип атаки, правило), шаблоны атак и сводные числа, которые также питают карту атак в реальном времени. Никогда содержимое запросов, названия ваших сайтов и законные посетители. Установка, обновлённая без выбора, включается обновлением, с уведомлением в консоли. Отключается одним щелчком в консоли (Коллективная сеть или Настройки, Конфиденциальность и телеметрия), либо установите с --no-telemetry (или TOUTWAF_TELEMETRY=0) для нулевой телеметрии. Подробности: docs/confidentialite-telemetrie.md
+zh|tele_on|遥测与集体网络：默认情况下，ToutWAF 会与发行方空间（app.toutwaf.com）共享其拦截的攻击（攻击者地址、国家、攻击类型、规则）、攻击模式和汇总数字，这些数据也用于实时攻击地图。绝不包含请求内容、您的站点名称或合法访客。从未做过选择而被更新的安装会在更新时开启，并在控制台中给出提示。可在控制台中一键关闭（集体网络，或 设置 > 隐私与遥测），或使用 --no-telemetry（或 TOUTWAF_TELEMETRY=0）安装以启用零遥测。详情：docs/confidentialite-telemetrie.md
+ar|tele_on|القياس عن بُعد والشبكة الجماعية: يشارك ToutWAF افتراضياً مع فضاء الناشر (app.toutwaf.com) الهجمات التي حجبها (عنوان المهاجم والبلد ونوع الهجوم والقاعدة) وأنماط الهجوم وأرقاماً مجمّعة، وهي تغذّي أيضاً خريطة الهجمات المباشرة. لا محتوى الطلبات ولا أسماء مواقعك ولا الزوار الشرعيين أبداً. يُفعَّل التثبيت المحدَّث الذي لم يختر قط بواسطة التحديث، مع إشعار في الوحدة. يمكن إيقافه بنقرة واحدة في الوحدة (الشبكة الجماعية، أو الإعدادات، الخصوصية والقياس عن بُعد)، أو ثبّت مع --no-telemetry (أو TOUTWAF_TELEMETRY=0) للحصول على قياس صفري. التفاصيل: docs/confidentialite-telemetrie.md
 en|tele_off|Telemetry: zero telemetry was requested (--no-telemetry / TOUTWAF_TELEMETRY=0). Nothing will be sent to the publisher space, nothing will be received from it, and the console starts with the "Zero telemetry" switch on. You can change this later in the console (Settings, Privacy and telemetry).
 fr|tele_off|Télémétrie : la télémétrie zéro a été demandée (--no-telemetry / TOUTWAF_TELEMETRY=0). Rien ne sera envoyé à l'espace éditeur, rien n'en sera reçu, et la console démarre avec l'interrupteur « Télémétrie zéro » activé. Vous pourrez changer cela plus tard dans la console (Paramètres, Confidentialité et télémétrie).
 es|tele_off|Telemetría: se pidió telemetría cero (--no-telemetry / TOUTWAF_TELEMETRY=0). No se enviará nada al espacio del editor, no se recibirá nada de él y la consola arrancará con el interruptor «Telemetría cero» activado. Podrá cambiarlo más tarde en la consola (Ajustes, Privacidad y telemetría).
@@ -4056,6 +4058,9 @@ Options:
                              console port. The data-plane API port (9444) is never opened by the installer.
   --console-from CIDR        only allow this address / network to reach the console port (e.g. 203.0.113.0/24); default: anywhere
   --no-firewall              never touch the firewall (nftables / iptables hosts are never modified either: the commands are printed)
+  --http3                    serve HTTP/3 (QUIC) too: sets listen.h3 in toutwaf-dp.yaml and opens UDP on the HTTPS port in firewalld / ufw (off by
+                             default, UDP stays closed unless this is on; also TOUTWAF_HTTP3=1). On an installed node it changes the setting.
+  --no-http3                 turn HTTP/3 off again: listen.h3 removed and the UDP rule this installer added closed (also TOUTWAF_HTTP3=0)
   --no-telemetry             install with ZERO telemetry: nothing is sent to the publisher space (also TOUTWAF_TELEMETRY=0). Without it,
                              the attacks ToutWAF blocks and aggregate figures are shared with app.toutwaf.com, never the content of
                              requests nor legitimate visitors; it can be switched off at any time in the console (Settings, Privacy and telemetry)
@@ -4246,6 +4251,8 @@ while [ $# -gt 0 ]; do
     --open-cp-port) OPEN_CP_PORT=1; shift;;
     --console-from) CONSOLE_FROM="$2"; shift 2;;
     --no-firewall) OPEN_FW=0; shift;;
+    --http3) HTTP3=1; shift;;
+    --no-http3) HTTP3=0; shift;;
     --no-telemetry) NO_TELEMETRY=1; shift;;
     --with-firewall|--with-firewall-module) FW_MODULE=1; shift;;
     --no-firewall-module) FW_MODULE=0; shift;;
@@ -4416,6 +4423,27 @@ load_existing_ports() {
     v="$(sed -n 's/^[[:space:]]*https:[[:space:]]*\[[[:space:]]*"[^"]*:\([0-9]\{1,5\}\)".*/\1/p' "$f" | head -n1)"; [ -n "$v" ] && HTTPS_PORT="$v"
   fi
   return 0
+}
+
+# HTTP/3 (QUIC): is it on for this node? The option wins; without it the node configuration says (`listen.h3: true`), a fresh install is off.
+http3_on() {
+  local f; f="$(p "$CONF_DIR/toutwaf-dp.yaml")"
+  if [ -n "$HTTP3" ]; then printf '%s' "$HTTP3"; return 0; fi
+  if [ -r "$f" ] && grep -Eq '^[[:space:]]*h3:[[:space:]]*(true|yes|on)([[:space:]]|$)' "$f"; then printf 1; else printf 0; fi
+}
+# apply_http3_config: an explicit --http3 / --no-http3 on an existing configuration edits ONLY the `h3:` line of the listen block
+apply_http3_config() {
+  local f tmp; f="$(p "$CONF_DIR/toutwaf-dp.yaml")"
+  [ -n "$HTTP3" ] && [ -f "$f" ] || return 0
+  tmp="$(mktemp)" || return 0
+  awk -v on="$HTTP3" '
+    /^[^[:space:]#][^:]*:/ { inlisten = ($0 ~ /^listen:/) }
+    inlisten && /^[[:space:]]+h3:/ { next }
+    { print }
+    inlisten && on == 1 && !done && /^[[:space:]]+https:/ { print "  h3: true               # HTTP/3 (QUIC) on UDP at the https address(es): keep that UDP port open in the firewall"; done = 1 }
+  ' "$f" >"$tmp" && cat "$tmp" >"$f"
+  rm -f "$tmp"
+  if [ "$HTTP3" = 1 ] && ! grep -Eq '^[[:space:]]+h3:[[:space:]]*true' "$f"; then warn "could not add listen.h3 to $f (no listen.https line?): add it by hand"; else info "HTTP/3: listen.h3 is now $([ "$HTTP3" = 1 ] && echo on || echo off) in $f"; fi
 }
 
 # ------------------------------------------------------------------------------------------------ release channel
@@ -4828,6 +4856,7 @@ build_ports() {   # lines: port|proto|purpose   (deduplicated by port/proto)
     printf '%s' "$SUMMARY_PORTS" | grep -q '^9444|' || SUMMARY_PORTS+="9444|tcp|$(t p_dpapi)"$'\n'
   fi
   if want_dp; then SUMMARY_PORTS+="$HTTP_PORT|tcp|$(t p_http)"$'\n'"$HTTPS_PORT|tcp|$(t p_https)"$'\n'; fi
+  if want_dp && [ "$(http3_on)" = 1 ]; then SUMMARY_PORTS+="$HTTPS_PORT|udp|HTTP/3 (QUIC)"$'\n'; fi
   SUMMARY_PORTS="$(printf '%s' "$SUMMARY_PORTS" | awk -F'|' 'NF>2 && !seen[$1 "/" $2]++')"$'\n'
   return 0
 }
@@ -5005,15 +5034,15 @@ cmd_uninstall() {
   # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
-  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-time.path toutwaf-time.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
     if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
     run rm -f "$(p /etc/systemd/system/$s)"
   done
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl stop toutwaf-upgrade-rollback.timer toutwaf-upgrade-rollback.service >>"$LOG" 2>&1 || true; fi   # transient units of an update in progress
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl daemon-reload; fi
-  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-cloudlink; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
+  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-cloudlink; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
   run rm -f "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"
-  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs; do
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time; do
     for d in /usr/local/bin "$(secure_link_dir)"; do
       [ -n "$d" ] || continue
       l="$(p "$d/$b")"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
@@ -5599,7 +5628,7 @@ link_cli() {
   if [ -n "$sd" ] && [ "$sd" != "$BIN_DIR" ] && [ "$sd" != /usr/local/bin ]; then dirs="$dirs $sd"; fi
   for d in $dirs; do
     run install -d -m 0755 "$(p "$d")"
-    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs; do
+    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time; do
       [ -e "$(p "$BIN_DIR/$b")" ] || continue
       l="$(p "$d/$b")"
       if [ -L "$l" ] || [ ! -e "$l" ]; then run ln -sfn "$BIN_DIR/$b" "$l"; fi
@@ -5638,6 +5667,10 @@ certs_dir: $DATA_DIR/certs
 listen:
   http: ["$(any_addr):$HTTP_PORT"]       # [::] = IPv6 and IPv4 on the same socket (0.0.0.0 on a kernel without IPv6)
   https: ["$(any_addr):$HTTPS_PORT"]
+EOF
+    # HTTP/3 (QUIC): only when asked for (--http3); UDP stays closed otherwise
+    if [ "$(http3_on)" = 1 ]; then echo "  h3: true               # HTTP/3 (QUIC) on UDP $HTTPS_PORT: the installer opens that UDP port in firewalld / ufw"; fi
+    cat <<EOF
   # proxy_protocol: optional      # when behind a TCP load balancer sending PROXY protocol
 admin:
   listen: 127.0.0.1:9101          # /healthz /metrics /status /debug/inspect (loopback only)
@@ -5663,6 +5696,7 @@ EOF
       echo "policy_file: $CONF_DIR/policy.yaml"
     fi
   } | write_if_absent "$dest" 0640 "root:$SVC_USER"
+  if [ "$fresh" = 0 ]; then apply_http3_config; fi
   if [ -n "$CP_CA" ] && [ -n "$CP_URL" ]; then
     case "$CP_CA" in http://*|https://*) fetch "$CP_CA" "$(p "$CONF_DIR/certs/cp-ca.pem")";; *) [ -f "$CP_CA" ] || die "--cp-ca: file not found: $CP_CA"; cp "$CP_CA" "$(p "$CONF_DIR/certs/cp-ca.pem")";; esac
     chmod 0640 "$(p "$CONF_DIR/certs/cp-ca.pem")"; if [ "$STAGING" = 0 ]; then chown "root:$SVC_USER" "$(p "$CONF_DIR/certs/cp-ca.pem")"; fi
@@ -5888,6 +5922,7 @@ EOF
 #   toutwaf-vpn       put the files of the VPN module on the machine, start / stop the tunnels, read their state (console: VPN)
 #   toutwaf-fw        load the nftables rules of the Firewall module with a root rollback timer, read them back (console: Firewall)
 #   toutwaf-jobs      run the privileged jobs of the scheduled tasks: a FIXED list (log rotation, journal vacuum; the power menu and self-repair verbs), no command from the request (console: Scheduled tasks, power menu)
+#   toutwaf-time      show and change the clock of the machine: time zone, NTP on/off, NTP servers, the date and time themselves; five fixed actions, every value checked again (console: Settings > Date, time and time zone)
 # The scripts carry a "toutwaf-<name>-proto: N" marker that the control plane checks before offering the button.
 emit_helper() {   # NAME  (template on stdin)
   local dst tmp; dst="$(p "$BIN_DIR/$1")"; tmp="$dst.new"
@@ -6149,15 +6184,17 @@ TW_UPGRADE_TPL
 # toutwaf-firewall-proto: 1
 #
 # toutwaf-firewall status                       scan the host firewall and write @DATA_DIR@/firewall-status
-# toutwaf-firewall open [--dp 80,443] [--console PORT [--console-from CIDR]] [--agent PORT --agent-from CIDR]
-#                                               open ports (installer, root)
+# toutwaf-firewall open [--dp 80,443] [--dp-udp 443|none] [--console PORT [--console-from CIDR]] [--agent PORT --agent-from CIDR]
+#                                               open ports (installer, root). --dp-udp is HTTP/3 (QUIC): the UDP port of the HTTPS listener, only
+#                                               when firewall.conf records it (DP_UDP_PORTS, written only when HTTP/3 is on); `none` closes the
+#                                               UDP rules this helper added
 # toutwaf-firewall apply                        (root; toutwaf-firewall.service) perform @DATA_DIR@/firewall-request
 # toutwaf-firewall close                        remove every rule this helper added (uninstall)
 # toutwaf-firewall print                        print the exact commands for this host
 #
 # Drives firewalld and ufw only. nftables-only and iptables-only hosts are never modified: the exact commands are printed and
 # reported (RESULT=unmanaged). Only ports recorded by the installer in @CONF_DIR@/firewall.conf (root-owned) can be opened,
-# only tcp, and only with a validated source network. The data-plane API port is never opened to everyone.
+# only tcp (and, for the data plane when HTTP/3 is on, the one udp port DP_UDP_PORTS), and only with a validated source network. The data-plane API port is never opened to everyone.
 # Rules added here are remembered in @CONF_DIR@/firewall.managed so that `close` removes exactly those and nothing else.
 set -uo pipefail
 DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; SVC_USER='@SVC_USER@'
@@ -6233,9 +6270,10 @@ put_file() {
 }
 # <<< hostio <<<
 
-CONF_DP=""; CONF_CONSOLE=""; CONF_AGENT=""
+CONF_DP=""; CONF_DP_UDP=""; CONF_CONSOLE=""; CONF_AGENT=""
 load_conf() {
   CONF_DP="$(conf_get DP_PORTS | tr ',' ' ')"; CONF_CONSOLE="$(conf_get CONSOLE_PORT)"; CONF_AGENT="$(conf_get AGENT_PORT)"
+  CONF_DP_UDP="$(conf_get DP_UDP_PORTS | tr ',' ' ')"   # HTTP/3 (QUIC): empty unless HTTP/3 is on for this node
 }
 
 # ---- backend detection ------------------------------------------------------------------------------------------------------
@@ -6255,6 +6293,7 @@ detect() {
 all_ports() { echo $CONF_DP $CONF_CONSOLE $CONF_AGENT; }
 OPEN=""
 add_open() { OPEN="${OPEN:+$OPEN,}tcp:$1${2:+@$2}"; }
+add_open_udp() { OPEN="${OPEN:+$OPEN,}udp:$1"; }
 scan_open() {
   OPEN=""
   local p src ports spec
@@ -6265,6 +6304,7 @@ scan_open() {
       svcs="$(firewall-cmd --list-services 2>/dev/null)"
       for s in $svcs; do lp="$lp $(firewall-cmd --permanent --service="$s" --get-ports 2>/dev/null | tr '\n' ' ') "; done
       for p in $(all_ports); do case "$lp" in *" $p/tcp "*) add_open "$p";; esac; done
+      for p in $CONF_DP_UDP; do case "$lp" in *" $p/udp "*) add_open_udp "$p";; esac; done
       firewall-cmd --list-rich-rules 2>/dev/null | while IFS= read -r l; do
         src="$(printf '%s' "$l" | sed -n 's/.*source address="\([^"]*\)".*/\1/p')"; p="$(printf '%s' "$l" | sed -n 's/.* port="\([0-9]*\)".*/\1/p')"
         case "$l" in *'protocol="tcp"'*accept*) ;; *) continue;; esac
@@ -6276,7 +6316,9 @@ scan_open() {
       while read -r spec src; do
         p="${spec%/tcp}"; valid_port "$p" || continue; in_list "$p" $(all_ports) || continue
         case "$src" in Anywhere) add_open "$p";; *) valid_src "$src" && add_open "$p" "$src";; esac
-      done <"$TMPOPEN";;
+      done <"$TMPOPEN"
+      ufw status 2>/dev/null | awk '$1 ~ /^[0-9]+\/udp$/ && $2 == "ALLOW" {print $1}' >"$TMPOPEN"
+      while read -r spec; do p="${spec%/udp}"; valid_port "$p" && in_list "$p" $CONF_DP_UDP && add_open_udp "$p"; done <"$TMPOPEN";;
   esac
 }
 
@@ -6287,12 +6329,19 @@ write_status() {   # RESULT MESSAGE
 }
 
 # ---- commands (printed for hosts we do not drive, and by `print`) -----------------------------------------------------------
+PRINT_UDP=""   # udp ports (HTTP/3) to print commands for
 print_commands() {   # backend  dp-ports  console  console-from  agent  agent-from
   local b="$1" dp="$2" con="$3" cfrom="$4" ag="$5" afrom="$6" p
   for p in $dp; do
     case "$b" in
       firewalld) echo "firewall-cmd --permanent --add-port=$p/tcp";; ufw) echo "ufw allow $p/tcp";;
       nftables) echo "nft add rule inet filter input tcp dport $p accept";; iptables) echo "iptables -I INPUT -p tcp --dport $p -j ACCEPT";;
+    esac
+  done
+  for p in $PRINT_UDP; do
+    case "$b" in
+      firewalld) echo "firewall-cmd --permanent --add-port=$p/udp";; ufw) echo "ufw allow $p/udp";;
+      nftables) echo "nft add rule inet filter input udp dport $p accept";; iptables) echo "iptables -I INPUT -p udp --dport $p -j ACCEPT";;
     esac
   done
   rule_cmd() {   # port from
@@ -6314,20 +6363,36 @@ print_commands() {   # backend  dp-ports  console  console-from  agent  agent-fr
 # ---- managed list ------------------------------------------------------------------------------------------------------------
 managed_has() { grep -qxF -- "$1" "$MANAGED" 2>/dev/null; }
 managed_add() { managed_has "$1" || printf '%s\n' "$1" >>"$MANAGED"; chmod 0644 "$MANAGED" 2>/dev/null || true; }
+managed_del() { [ -f "$MANAGED" ] || return 0; local t; t="$(mktemp)"; grep -vxF -- "$1" "$MANAGED" >"$t"; cat "$t" >"$MANAGED"; rm -f "$t"; }
 
 # ---- opening ----------------------------------------------------------------------------------------------------------------
 fwd_rich() { printf 'rule family="%s" source address="%s" port port="%s" protocol="tcp" accept' "$(fam "$2")" "$2" "$1"; }
-open_firewalld() {   # dp-ports console cfrom agent afrom
-  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" p rule
+open_firewalld() {   # dp-ports console cfrom agent afrom dp-udp-ports
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" dpu="${6:-}" p rule
   if [ -n "$dp" ]; then
-    local xml=/etc/firewalld/services/toutwaf-dp.xml tmpx
+    local xml=/etc/firewalld/services/toutwaf-dp.xml tmpx desc="ToutWAF reverse proxy: HTTP and HTTPS (UDP stays closed: HTTP/3 is off)"
+    [ -z "$dpu" ] || desc="ToutWAF reverse proxy: HTTP and HTTPS, plus UDP for HTTP/3 (QUIC)"
     tmpx="$(mktemp)"; {
-      printf '<?xml version="1.0" encoding="utf-8"?>\n<service>\n  <short>ToutWAF data plane</short>\n  <description>ToutWAF reverse proxy: HTTP and HTTPS (HTTP/3 / QUIC is not implemented, so UDP 443 stays closed)</description>\n'
-      for p in $dp; do printf '  <port protocol="tcp" port="%s"/>\n' "$p"; done; printf '</service>\n'; } >"$tmpx"
+      printf '<?xml version="1.0" encoding="utf-8"?>\n<service>\n  <short>ToutWAF data plane</short>\n  <description>%s</description>\n' "$desc"
+      for p in $dp; do printf '  <port protocol="tcp" port="%s"/>\n' "$p"; done
+      for p in $dpu; do printf '  <port protocol="udp" port="%s"/>\n' "$p"; done; printf '</service>\n'; } >"$tmpx"
     if [ "$(cat "$xml" 2>/dev/null)" != "$(cat "$tmpx")" ]; then install -m 0644 "$tmpx" "$xml"; firewall-cmd --reload >/dev/null 2>&1 || true; fi
     rm -f "$tmpx"
     if ! firewall-cmd --permanent --query-service=toutwaf-dp >/dev/null 2>&1; then firewall-cmd --permanent --add-service=toutwaf-dp >/dev/null || return 1; fi
     managed_add "firewalld service toutwaf-dp"
+  fi
+  # HTTP/3 without the data-plane service in the same request (an update that only changes it): the plain udp port, tracked on its own
+  if [ -z "$dp" ] && [ -n "$dpu" ]; then
+    for p in $dpu; do
+      firewall-cmd --permanent --query-port="$p/udp" >/dev/null 2>&1 || { firewall-cmd --permanent --add-port="$p/udp" >/dev/null || return 1; managed_add "firewalld port $p/udp"; }
+    done
+  fi
+  # and the plain udp ports this helper added that are no longer wanted
+  if [ -f "$MANAGED" ]; then
+    while IFS= read -r l; do
+      case "$l" in "firewalld port "*/udp) pt="${l#firewalld port }"; [[ "$pt" =~ ^[0-9]{1,5}/udp$ ]] || continue
+        in_list "${pt%/udp}" $dpu || { firewall-cmd --permanent --remove-port="$pt" >/dev/null 2>&1; managed_del "$l"; };; esac
+    done <"$MANAGED"
   fi
   if [ -n "$con" ]; then
     if [ -n "$cfrom" ]; then rule="$(fwd_rich "$con" "$cfrom")"
@@ -6345,13 +6410,21 @@ open_firewalld() {   # dp-ports console cfrom agent afrom
   firewall-cmd --reload >/dev/null || return 1
 }
 open_ufw() {
-  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" p out
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" dpu="${6:-}" p out l
   ufw_allow() {   # key  args...
     local key="$1"; shift
     out="$(ufw "$@" 2>&1)" || return 1
     case "$out" in *Skipping*) ;; *) managed_add "ufw $key";; esac
   }
   for p in $dp; do ufw_allow "allow $p/tcp" allow "$p/tcp" comment ToutWAF || return 1; done
+  for p in $dpu; do ufw_allow "allow $p/udp" allow "$p/udp" comment ToutWAF || return 1; done
+  # the udp rules this helper added that are no longer wanted (HTTP/3 turned off)
+  if [ -f "$MANAGED" ]; then
+    while IFS= read -r l; do
+      case "$l" in "ufw allow "*/udp) p="${l#ufw allow }"; p="${p%/udp}"; [[ "$p" =~ ^[0-9]{1,5}$ ]] || continue
+        in_list "$p" $dpu || { ufw --force delete allow "$p/udp" >/dev/null 2>&1; managed_del "$l"; };; esac
+    done <"$MANAGED"
+  fi
   if [ -n "$con" ]; then
     if [ -n "$cfrom" ]; then ufw_allow "allow proto tcp from $cfrom to any port $con" allow proto tcp from "$cfrom" to any port "$con" comment ToutWAF || return 1
     else ufw_allow "allow $con/tcp" allow "$con/tcp" comment ToutWAF || return 1; fi
@@ -6360,11 +6433,14 @@ open_ufw() {
   return 0
 }
 
-do_open() {   # dp-ports console cfrom agent afrom   (already syntactically valid)
-  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" p
+do_open() {   # dp-ports console cfrom agent afrom dp-udp-ports   (already syntactically valid; dp-udp-ports "none" = close the udp rules)
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" dpu="${6:-}" p
   load_conf
+  [ "$dpu" != none ] || dpu=""
   # only what the installer recorded for this host
   for p in $dp; do in_list "$p" $CONF_DP || { write_status error "port $p is not a data-plane port recorded in firewall.conf"; return 1; }; done
+  for p in $dpu; do in_list "$p" $CONF_DP_UDP || { write_status error "udp port $p is not recorded in firewall.conf (HTTP/3 is not on for this node)"; return 1; }; done
+  PRINT_UDP="$dpu"
   if [ -n "$con" ] && [ "$con" != "$CONF_CONSOLE" ]; then write_status error "port $con is not the console port recorded in firewall.conf"; return 1; fi
   if [ -n "$ag" ]; then
     [ "$ag" = "$CONF_AGENT" ] || { write_status error "port $ag is not the data-plane API port recorded in firewall.conf"; return 1; }
@@ -6372,8 +6448,8 @@ do_open() {   # dp-ports console cfrom agent afrom   (already syntactically vali
   fi
   detect
   case "$BACKEND" in
-    firewalld) open_firewalld "$dp" "$con" "$cfrom" "$ag" "$afrom" || { scan_open; write_status error "firewalld refused the rules (see: journalctl -u toutwaf-firewall)"; return 1; };;
-    ufw) open_ufw "$dp" "$con" "$cfrom" "$ag" "$afrom" || { scan_open; write_status error "ufw refused the rules (see: journalctl -u toutwaf-firewall)"; return 1; };;
+    firewalld) open_firewalld "$dp" "$con" "$cfrom" "$ag" "$afrom" "$dpu" || { scan_open; write_status error "firewalld refused the rules (see: journalctl -u toutwaf-firewall)"; return 1; };;
+    ufw) open_ufw "$dp" "$con" "$cfrom" "$ag" "$afrom" "$dpu" || { scan_open; write_status error "ufw refused the rules (see: journalctl -u toutwaf-firewall)"; return 1; };;
     nftables|iptables)
       scan_open
       echo "toutwaf-firewall: $BACKEND is not managed automatically. Run these commands yourself:" >&2
@@ -6390,11 +6466,12 @@ do_open() {   # dp-ports console cfrom agent afrom   (already syntactically vali
 
 do_status() { detect; scan_open; write_status ok "${1:-scan}"; }
 
-parse_open_args() {   # sets A_DP A_CON A_CFROM A_AG A_AFROM from "$@"; returns 1 on invalid input
-  A_DP=""; A_CON=""; A_CFROM=""; A_AG=""; A_AFROM=""
+parse_open_args() {   # sets A_DP A_DPU A_CON A_CFROM A_AG A_AFROM from "$@"; returns 1 on invalid input
+  A_DP=""; A_DPU=""; A_CON=""; A_CFROM=""; A_AG=""; A_AFROM=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dp) A_DP="$(printf '%s' "$2" | tr ',' ' ')"; shift 2;;
+      --dp-udp) A_DPU="$(printf '%s' "$2" | tr ',' ' ')"; shift 2;;
       --console) A_CON="$2"; shift 2;;
       --console-from) A_CFROM="$2"; shift 2;;
       --agent) A_AG="$2"; shift 2;;
@@ -6404,11 +6481,12 @@ parse_open_args() {   # sets A_DP A_CON A_CFROM A_AG A_AFROM from "$@"; returns 
   done
   local p n=0
   for p in $A_DP; do valid_port "$p" || return 1; n=$((n + 1)); done; [ "$n" -le 8 ] || return 1
+  if [ "$A_DPU" != none ]; then n=0; for p in $A_DPU; do valid_port "$p" || return 1; n=$((n + 1)); done; [ "$n" -le 2 ] || return 1; fi
   [ -z "$A_CON" ] || valid_port "$A_CON" || return 1
   [ -z "$A_AG" ] || valid_port "$A_AG" || return 1
   [ -z "$A_CFROM" ] || valid_src "$A_CFROM" || return 1
   [ -z "$A_AFROM" ] || valid_src "$A_AFROM" || return 1
-  [ -n "$A_DP$A_CON$A_AG" ] || return 1
+  [ -n "$A_DP$A_DPU$A_CON$A_AG" ] || return 1
   return 0
 }
 
@@ -6418,7 +6496,7 @@ case "${1:-}" in
   open)
     [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
     shift; parse_open_args "$@" || { echo "toutwaf-firewall: invalid arguments" >&2; exit 2; }
-    do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM"; exit $?;;
+    do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM" "$A_DPU"; exit $?;;
   apply)
     [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
     # a private copy first (the service account can rewrite the file while we read it, or put a link or a FIFO in its place)
@@ -6434,10 +6512,14 @@ case "${1:-}" in
       status) do_status "scan requested from the console"; exit 0;;
       open)
         dp="$(rq DP_PORTS | tr ',' ' ')"; con="$(rq CONSOLE_PORT)"; cf="$(rq CONSOLE_FROM)"; ag="$(rq AGENT_PORT)"; af="$(rq AGENT_FROM)"
-        args=(); [ -z "$dp" ] || args+=(--dp "$(printf '%s' "$dp" | tr ' ' ',')"); [ -z "$con" ] || args+=(--console "$con"); [ -z "$cf" ] || args+=(--console-from "$cf")
+        dpu="$(rq DP_UDP_PORTS | tr ',' ' ')"
+        args=(); [ -z "$dp" ] || args+=(--dp "$(printf '%s' "$dp" | tr ' ' ',')");
+        # a request for the data-plane ports that names no udp port means "HTTP/3 off": the udp rules this helper added are closed
+        if [ -n "$dpu" ]; then args+=(--dp-udp "$(printf '%s' "$dpu" | tr ' ' ',')"); elif [ -n "$dp" ]; then args+=(--dp-udp none); fi
+ [ -z "$con" ] || args+=(--console "$con"); [ -z "$cf" ] || args+=(--console-from "$cf")
         [ -z "$ag" ] || args+=(--agent "$ag"); [ -z "$af" ] || args+=(--agent-from "$af")
         if ! parse_open_args "${args[@]}"; then detect; scan_open; write_status error "invalid firewall request"; exit 1; fi
-        do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM"; rc=$?; [ "$rc" -eq 2 ] && rc=0; exit "$rc";;
+        do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM" "$A_DPU"; rc=$?; [ "$rc" -eq 2 ] && rc=0; exit "$rc";;
       *) detect; scan_open; write_status error "unknown action"; exit 1;;
     esac;;
   close)
@@ -6447,12 +6529,12 @@ case "${1:-}" in
       while IFS= read -r l; do
         case "$l" in
           "firewalld service toutwaf-dp") [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-service=toutwaf-dp >/dev/null 2>&1;;
-          "firewalld port "*) pt="${l#firewalld port }"; [[ "$pt" =~ ^[0-9]{1,5}/tcp$ ]] && [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-port="$pt" >/dev/null 2>&1;;
+          "firewalld port "*) pt="${l#firewalld port }"; [[ "$pt" =~ ^[0-9]{1,5}/(tcp|udp)$ ]] && [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-port="$pt" >/dev/null 2>&1;;
           "firewalld rich "*) r="${l#firewalld rich }"
             [[ "$r" =~ ^rule\ family=\"ipv[46]\"\ source\ address=\"[0-9a-fA-F:./]+\"\ port\ port=\"[0-9]{1,5}\"\ protocol=\"tcp\"\ accept$ ]] && [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-rich-rule="$r" >/dev/null 2>&1;;
           "ufw allow "*)
             r="${l#ufw }"
-            if [[ "$r" =~ ^allow\ [0-9]{1,5}/tcp$ ]]; then [ "$BACKEND" = ufw ] && ufw --force delete $r >/dev/null 2>&1
+            if [[ "$r" =~ ^allow\ [0-9]{1,5}/(tcp|udp)$ ]]; then [ "$BACKEND" = ufw ] && ufw --force delete $r >/dev/null 2>&1
             elif [[ "$r" =~ ^allow\ proto\ tcp\ from\ [0-9a-fA-F:./]+\ to\ any\ port\ [0-9]{1,5}$ ]]; then [ "$BACKEND" = ufw ] && ufw --force delete $r >/dev/null 2>&1; fi;;
         esac
       done <"$MANAGED"
@@ -6469,6 +6551,7 @@ case "${1:-}" in
   print)
     load_conf; detect
     b="$BACKEND"; [ "$b" != none ] || b=firewalld
+    PRINT_UDP="$CONF_DP_UDP"
     print_commands "$b" "$CONF_DP" "$CONF_CONSOLE" "" "$CONF_AGENT" ""; exit 0;;
   *) echo "usage: toutwaf-firewall status|open ...|apply|close|print" >&2; exit 2;;
 esac
@@ -6810,6 +6893,258 @@ case "${1:-}" in
   *) echo "usage: toutwaf-jobs apply" >&2; exit 2;;
 esac
 TW_JOBS_TPL
+  emit_helper toutwaf-time <<'TW_TIME_TPL'
+#!/usr/bin/env bash
+# toutwaf-time-proto: 1
+#
+# toutwaf-time apply                      (root; toutwaf-time.service) perform the pending @DATA_DIR@/time-request, answer in @DATA_DIR@/time-result.json
+# toutwaf-time status                     print the clock of the machine as KEY=VALUE lines (reads only)
+# toutwaf-time set-timezone ZONE          IANA name of the zoneinfo database (Europe/Paris)
+# toutwaf-time set-ntp on|off             switch the NTP client on or off (timedatectl set-ntp)
+# toutwaf-time set-ntp-servers [HOST...]  1 to 8 host names or addresses for the NTP client (chrony or systemd-timesyncd); none = the servers of the distribution
+# toutwaf-time set-time RFC3339           set the clock (refused while NTP is on, or outside 2026-01-01 .. 2100-01-01)
+#
+# The console of ToutWAF can show and change the clock of the machine (Settings > Date, time and time zone). The control plane runs without any
+# privilege, so it leaves a small request file and this helper does the work. The request is written by the unprivileged service account, so for
+# root it is untrusted input and is checked again here, value by value:
+#   * the ACTION is one of the five above; there is no other word and no command line in a request;
+#   * a zone must be an IANA name (letters, digits, "_", "+", "-", at most three components, none starting with "-" or ".") that is a TZif file of the
+#     zoneinfo directory; a server is a host name or an IPv4 / IPv6 address, never a path, an option or a space; a time is RFC 3339 and a plausible one;
+#   * nothing is passed through a shell or "eval": every value is a quoted argument of timedatectl / systemctl, the drop-in files are written by this
+#     script with a fixed shape in a directory that belongs to root (no link of the service account is ever followed);
+#   * the clock is set only when NTP is off, as timedatectl itself insists.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'
+ETC="${TOUTWAF_ETC:-/etc}"; ZONEINFO="${TOUTWAF_ZONEINFO:-/usr/share/zoneinfo}"
+REQ="$DATA_DIR/time-request"; RES="$DATA_DIR/time-result.json"
+MIN_EPOCH=1767225600; MAX_EPOCH=4102444800   # 2026-01-01 .. 2100-01-01 (UTC): the machine that runs this version is never before the first and not after the second
+MAX_SERVERS=8
+have() { command -v "$1" >/dev/null 2>&1; }
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
+
+# ---- validation (never trust a request) --------------------------------------------------------------------------------------
+valid_zone() {
+  local z="$1" real root
+  [ "${#z}" -ge 1 ] && [ "${#z}" -le 64 ] || return 1
+  [[ "$z" =~ ^[A-Za-z0-9][A-Za-z0-9_+-]*(/[A-Za-z0-9][A-Za-z0-9_+-]*){0,2}$ ]] || return 1
+  case "${z,,}" in local|posixrules|localtime|factory|posix/*|right/*) return 1;; esac   # files of the tree that are not zones of the database
+  [ -f "$ZONEINFO/$z" ] || return 1
+  real="$(readlink -f -- "$ZONEINFO/$z" 2>/dev/null)" && root="$(readlink -f -- "$ZONEINFO" 2>/dev/null)" || return 1
+  case "$real" in "$root"/*) ;; *) return 1;; esac   # a link that leaves the zoneinfo tree is refused
+  [ "$(head -c4 -- "$real" 2>/dev/null)" = TZif ]
+}
+valid_ipv4() { local IFS=. o; local -a a; read -ra a <<<"$1"; [ "${#a[@]}" = 4 ] || return 1; for o in "${a[@]}"; do [[ "$o" =~ ^[0-9]{1,3}$ ]] && [ "$((10#$o))" -le 255 ] || return 1; done; }
+valid_ipv6() { [[ "$1" =~ ^[0-9A-Fa-f:]{2,45}$ ]] && [[ "$1" == *:*:* ]] && [[ "$1" != *:::* ]] && [[ "$1" != *::*::* ]]; }
+valid_host() {
+  local h="$1"
+  [ "${#h}" -ge 1 ] && [ "${#h}" -le 253 ] || return 1
+  if [[ "$h" =~ ^[0-9.]+$ ]]; then valid_ipv4 "$h"; return; fi
+  if [[ "$h" == *:* ]]; then valid_ipv6 "$h"; return; fi
+  [[ "$h" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]
+}
+valid_time() {   # RFC 3339 with a zone; the result is the epoch in EPOCH
+  local t="$1"
+  [[ "$t" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$ ]] || return 1
+  EPOCH="$(date -u -d "$t" +%s 2>/dev/null)" || return 1
+  [[ "$EPOCH" =~ ^[0-9]+$ ]] && [ "$EPOCH" -ge "$MIN_EPOCH" ] && [ "$EPOCH" -le "$MAX_EPOCH" ]
+}
+EPOCH=0
+
+# ---- the NTP client --------------------------------------------------------------------------------------------------------
+NTP_BACKEND=none; NTP_UNIT=""
+unit_exists() { have systemctl && systemctl list-unit-files "$1" 2>/dev/null | grep -q "^$1"; }
+unit_active() { have systemctl && systemctl is-active --quiet "$1" 2>/dev/null; }
+detect_ntp() {
+  NTP_BACKEND=none; NTP_UNIT=""
+  local u
+  for u in chronyd.service chrony.service; do if unit_active "$u"; then NTP_BACKEND=chrony; NTP_UNIT="$u"; return 0; fi; done
+  if unit_active systemd-timesyncd.service; then NTP_BACKEND=timesyncd; NTP_UNIT=systemd-timesyncd.service; return 0; fi
+  for u in chronyd.service chrony.service; do if unit_exists "$u"; then NTP_BACKEND=chrony; NTP_UNIT="$u"; return 0; fi; done
+  if unit_exists systemd-timesyncd.service; then NTP_BACKEND=timesyncd; NTP_UNIT=systemd-timesyncd.service; return 0; fi
+  return 1
+}
+chrony_main() { local f; for f in "$ETC/chrony/chrony.conf" "$ETC/chrony.conf"; do [ -f "$f" ] && { printf '%s' "$f"; return 0; }; done; return 1; }
+# the directory chrony reads extra sources from, under $ETC only (a /run directory does not survive a reboot): a "sourcedir" first, else a "confdir"
+chrony_dropin() {   # prints "sources|FILE" or "conf|FILE"
+  local main dir
+  main="$(chrony_main)" || return 1
+  dir="$(sed -n 's/^[[:space:]]*sourcedir[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' "$main" | while IFS= read -r d; do case "$d" in "$ETC"/*) printf '%s' "$d"; break;; esac; done)"
+  if [ -n "$dir" ]; then printf 'sources|%s/toutwaf.sources' "$dir"; return 0; fi
+  dir="$(sed -n 's/^[[:space:]]*confdir[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' "$main" | while IFS= read -r d; do case "$d" in "$ETC"/*) printf '%s' "$d"; break;; esac; done)"
+  if [ -n "$dir" ]; then printf 'conf|%s/toutwaf-ntp.conf' "$dir"; return 0; fi
+  return 1
+}
+timesyncd_file() { printf '%s/systemd/timesyncd.conf.d/toutwaf.conf' "$ETC"; }
+current_servers() {   # the servers this helper wrote, one line
+  local f kind
+  detect_ntp || return 0
+  case "$NTP_BACKEND" in
+    chrony) f="$(chrony_dropin)" || return 0; kind="${f%%|*}"; f="${f#*|}"
+            [ -f "$f" ] && sed -n 's/^server[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' "$f" | paste -sd, -;;
+    timesyncd) f="$(timesyncd_file)"; [ -f "$f" ] && sed -n 's/^NTP=//p' "$f" | tr ' ' ',' | head -n1;;
+  esac
+  return 0
+}
+
+# ---- the five actions ------------------------------------------------------------------------------------------------------
+need_tool() { have timedatectl || { echo "timedatectl is not installed on this machine" >&2; return 1; }; }
+cmd_status() {
+  need_tool || return 1
+
+  v() { timedatectl show -p "$1" --value 2>/dev/null | head -n1 | tr -d '\000-\037'; }
+  printf 'timezone=%s\n' "$(v Timezone)"
+  printf 'ntp=%s\n' "$(v NTP)"
+  printf 'ntp_synchronized=%s\n' "$(v NTPSynchronized)"
+  printf 'can_ntp=%s\n' "$(v CanNTP)"
+  printf 'rtc_in_local_tz=%s\n' "$(v LocalRTC)"
+  printf 'utc_time=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  detect_ntp
+  printf 'ntp_backend=%s\n' "$NTP_BACKEND"
+  printf 'ntp_servers=%s\n' "$(current_servers)"
+}
+cmd_set_timezone() {
+  need_tool || return 1
+  valid_zone "${1:-}" || { echo "refused: not a time zone of the zoneinfo database" >&2; return 2; }
+  timedatectl set-timezone "$1"
+}
+cmd_set_ntp() {
+  need_tool || return 1
+  case "${1:-}" in
+    on) timedatectl set-ntp true;;
+    off) timedatectl set-ntp false;;
+    *) echo "refused: on or off" >&2; return 2;;
+  esac
+}
+cmd_set_ntp_servers() {
+  local s n=0 f kind body main
+  for s in "$@"; do
+    valid_host "$s" || { echo "refused: '$(printf '%s' "$s" | tr -cd 'A-Za-z0-9.:_-' | cut -c1-60)' is not a host name or an address" >&2; return 2; }
+    n=$((n+1))
+  done
+  [ "$n" -le "$MAX_SERVERS" ] || { echo "refused: at most $MAX_SERVERS servers" >&2; return 2; }
+  detect_ntp || { echo "no NTP client (chrony or systemd-timesyncd) on this machine" >&2; return 1; }
+  case "$NTP_BACKEND" in
+    chrony)
+      f="$(chrony_dropin)" || { echo "chrony does not read a drop-in directory (no sourcedir or confdir under $ETC in its configuration)" >&2; return 1; }
+      kind="${f%%|*}"; f="${f#*|}"
+      if [ "$n" = 0 ]; then rm -f -- "$f"
+      else
+        mkdir -p -- "$(dirname -- "$f")" || return 1
+        body="# written by toutwaf-time: the NTP servers chosen in the console (Settings > Date, time and time zone)"$'\n'
+        for s in "$@"; do body="$body"$'server '"$s"$' iburst\n'; done
+        printf '%s' "$body" | put_file "$f" || { echo "could not write $f" >&2; return 1; }
+        main="$(chrony_main)"
+        if have chronyd && ! chronyd -p -f "$main" >/dev/null 2>&1; then rm -f -- "$f"; echo "chrony refused the new configuration: put back" >&2; return 1; fi
+      fi;;
+    timesyncd)
+      f="$(timesyncd_file)"
+      if [ "$n" = 0 ]; then rm -f -- "$f"
+      else
+        mkdir -p -- "$(dirname -- "$f")" || return 1
+        printf '# written by toutwaf-time\n[Time]\nNTP=%s\n' "$*" | put_file "$f" || { echo "could not write $f" >&2; return 1; }
+      fi;;
+  esac
+  have systemctl || return 0
+  systemctl restart "$NTP_UNIT"
+}
+cmd_set_time() {
+  need_tool || return 1
+  valid_time "${1:-}" || { echo "refused: not an RFC 3339 time between 2026-01-01 and 2100-01-01" >&2; return 2; }
+  if [ "$(timedatectl show -p NTP --value 2>/dev/null)" = yes ]; then echo "refused: NTP is on: switch it off first" >&2; return 2; fi
+  local wall
+  wall="$(LC_ALL=C date -d "@$EPOCH" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" || return 1
+  timedatectl set-time "$wall"
+}
+
+# ---- apply: one request of the console ---------------------------------------------------------------------------------------
+jesc() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | cut -c1-1500; }
+answer() {   # ID ACTION CODE OUTPUT
+  local ok=false
+  [ "$3" = 0 ] && ok=true
+  printf '{"id":"%s","action":"%s","ok":%s,"code":%s,"output":"%s"}\n' "$(jesc "$1")" "$(jesc "$2")" "$ok" "$3" "$(jesc "$4")" | put_file "$RES"
+}
+do_apply() {
+  local tmp rc out code line R_PROTO="" R_ID="" R_ACTION="" R_TZ="" R_NTP="" R_SERVERS="" R_TIME=""
+  tmp="$(mktemp)" || return 1
+  take_request "$REQ" "$tmp" 4096; rc=$?
+  if [ "$rc" = 1 ]; then rm -f -- "$tmp"; return 0; fi
+  if [ "$rc" != 0 ]; then rm -f -- "$tmp"; answer "" "" 2 "refused: the request is not a plain file of the service account"; return 2; fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      PROTO=*) R_PROTO="${line#PROTO=}";; ID=*) R_ID="${line#ID=}";; ACTION=*) R_ACTION="${line#ACTION=}";;
+      TZ=*) R_TZ="${line#TZ=}";; NTP=*) R_NTP="${line#NTP=}";; SERVERS=*) R_SERVERS="${line#SERVERS=}";; TIME=*) R_TIME="${line#TIME=}";;
+    esac
+  done <"$tmp"
+  rm -f -- "$tmp"
+  if [ "$R_PROTO" != 1 ] || [[ ! "$R_ID" =~ ^[0-9a-f]{16}$ ]]; then answer "" "" 2 "refused: unknown request"; return 2; fi
+  case "$R_ACTION" in
+    set-timezone) out="$(cmd_set_timezone "$R_TZ" 2>&1)"; code=$?;;
+    set-ntp) out="$(cmd_set_ntp "$R_NTP" 2>&1)"; code=$?;;
+    set-ntp-servers) local -a srv; read -ra srv <<<"$R_SERVERS"; out="$(cmd_set_ntp_servers "${srv[@]+"${srv[@]}"}" 2>&1)"; code=$?;;
+    set-time) out="$(cmd_set_time "$R_TIME" 2>&1)"; code=$?;;
+    *) out="refused: unknown action"; code=2;;
+  esac
+  answer "$R_ID" "$R_ACTION" "$code" "$out"
+  return 0
+}
+
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-time must run as root" >&2; exit 1; }
+case "${1:-}" in
+  apply) do_apply;;
+  status) cmd_status;;
+  set-timezone) [ "$#" = 2 ] || { echo "usage: toutwaf-time set-timezone ZONE" >&2; exit 2; }; cmd_set_timezone "$2";;
+  set-ntp) [ "$#" = 2 ] || { echo "usage: toutwaf-time set-ntp on|off" >&2; exit 2; }; cmd_set_ntp "$2";;
+  set-ntp-servers) shift; cmd_set_ntp_servers "$@";;
+  set-time) [ "$#" = 2 ] || { echo "usage: toutwaf-time set-time RFC3339" >&2; exit 2; }; cmd_set_time "$2";;
+  *) echo "usage: toutwaf-time apply|status|set-timezone ZONE|set-ntp on|off|set-ntp-servers [HOST...]|set-time RFC3339" >&2; exit 2;;
+esac
+TW_TIME_TPL
   cat >"$sd/toutwaf-upgrade.path" <<EOF
 [Unit]
 Description=ToutWAF upgrade requests (data plane update_engine, console Updates page)
@@ -7006,6 +7341,31 @@ PrivateTmp=yes
 ProtectHome=yes
 NoNewPrivileges=yes
 EOF
+    cat >"$sd/toutwaf-time.path" <<EOF
+[Unit]
+Description=ToutWAF clock requests (console Settings > Date, time and time zone)
+
+[Path]
+PathExists=$DATA_DIR/time-request
+Unit=toutwaf-time.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-time.service" <<EOF
+[Unit]
+Description=ToutWAF clock helper (requested by the control plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-time apply
+TimeoutStartSec=2min
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+EOF
   fi
   return 0
 }
@@ -7088,6 +7448,8 @@ write_firewall_conf() {
   detect_installed
   { printf '# written by install.sh: the ports of this host that toutwaf-firewall (root helper) is allowed to open; edit with care\n'
     [ "$INST_DP" = 1 ] && printf 'DP_PORTS="%s %s"\n' "$HTTP_PORT" "$HTTPS_PORT"
+    # UDP (HTTP/3) is recorded only when HTTP/3 is on for this node: the helper can open nothing else than tcp otherwise
+    [ "$INST_DP" = 1 ] && [ "$(http3_on)" = 1 ] && printf 'DP_UDP_PORTS="%s"\n' "$HTTPS_PORT"
     [ "$INST_CP" = 1 ] && printf 'CONSOLE_PORT=%s\nAGENT_PORT=9444\n' "$CP_PORT"; } >"$(p "$CONF_DIR/firewall.conf")"
   chmod 0644 "$(p "$CONF_DIR/firewall.conf")"
   return 0
@@ -7095,18 +7457,23 @@ write_firewall_conf() {
 
 setup_firewall() {
   write_firewall_conf
-  if [ "$STAGING" = 1 ] || [ "$OPEN_FW" = 0 ] || [ "$ACTION" = update ]; then return 0; fi
+  if [ "$STAGING" = 1 ] || [ "$OPEN_FW" = 0 ]; then return 0; fi
+  # an update never re-opens what an administrator closed; an explicit --http3 / --no-http3 still reconciles the UDP rule (only it)
+  if [ "$ACTION" = update ] && [ -z "$HTTP3" ]; then return 0; fi
   local fwh="$BIN_DIR/toutwaf-firewall" args=() out rc=0 backend
   [ -x "$fwh" ] || { warn "toutwaf-firewall helper missing: firewall not configured"; return 0; }
   detect_installed
-  [ "$INST_DP" = 1 ] && args+=(--dp "$HTTP_PORT,$HTTPS_PORT")
-  if [ "$INST_CP" = 1 ] && [ "$OPEN_CP_PORT" = 1 ]; then args+=(--console "$CP_PORT"); [ -z "$CONSOLE_FROM" ] || args+=(--console-from "$CONSOLE_FROM"); fi
+  if [ "$ACTION" != update ]; then [ "$INST_DP" = 1 ] && args+=(--dp "$HTTP_PORT,$HTTPS_PORT"); fi
+  if [ "$INST_DP" = 1 ] && { [ "$ACTION" != update ] || [ -n "$HTTP3" ]; }; then
+    if [ "$(http3_on)" = 1 ]; then args+=(--dp-udp "$HTTPS_PORT"); else args+=(--dp-udp none); fi
+  fi
+  if [ "$ACTION" != update ] && [ "$INST_CP" = 1 ] && [ "$OPEN_CP_PORT" = 1 ]; then args+=(--console "$CP_PORT"); [ -z "$CONSOLE_FROM" ] || args+=(--console-from "$CONSOLE_FROM"); fi
   [ "${#args[@]}" -gt 0 ] || return 0
   out="$("$fwh" open "${args[@]}" 2>&1)" || rc=$?
   log "toutwaf-firewall open ${args[*]} -> rc=$rc: $out"
   backend="$("$fwh" status 2>/dev/null | sed -n 's/^BACKEND=//p' | head -n1 || true)"
   case "$rc:$backend" in
-    0:firewalld|0:ufw) info "firewall ($backend): ports opened";
+    0:firewalld|0:ufw) info "firewall ($backend): ports opened$([ "$(http3_on)" = 1 ] && echo " (UDP $HTTPS_PORT for HTTP/3 included)")";
       if [ "$INST_CP" = 1 ] && [ "$OPEN_CP_PORT" = 1 ]; then
         if [ -n "$CONSOLE_FROM" ]; then info "$(t fw_console_from "$CP_PORT" "$CONSOLE_FROM")"; else warn "$(t fw_console_open "$CP_PORT")"; fi
       fi;;
@@ -7941,6 +8308,7 @@ start_services() {
   if want_cp; then systemctl enable --now toutwaf-vpn.path >/dev/null 2>&1 || warn "could not enable toutwaf-vpn.path"; fi
   if want_cp; then systemctl enable --now toutwaf-fw.path >/dev/null 2>&1 || warn "could not enable toutwaf-fw.path"; fi
   if want_cp; then systemctl enable --now toutwaf-jobs.path >/dev/null 2>&1 || warn "could not enable toutwaf-jobs.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-time.path >/dev/null 2>&1 || warn "could not enable toutwaf-time.path"; fi
   if want_cp; then
     systemctl enable toutwaf-cp >/dev/null 2>&1 || true
     if svc_active toutwaf-cp && [ "$CHANGED" = 0 ]; then :; else
@@ -8050,7 +8418,7 @@ do_install_flow() {
       say "  $BUL services installed but not started (--no-start)"
     fi
     if [ "$NO_ENABLE" = 1 ]; then
-      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
+      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path toutwaf-time.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
     fi
   fi
   record_installed_now

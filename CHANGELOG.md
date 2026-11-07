@@ -2,6 +2,10 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.5.0 - 2026-11-07
+
+- Staging build for internal verification. It is not a release and has not been published.
+
 ## 0.4.4 - 2026-11-07
 
 - Staging build for internal verification. It is not a release and has not been published.

@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "version": "0.4.4",
-  "build": "16d717d7229f",
-  "released_at": "2026-11-07T02:11:39Z",
+  "version": "0.5.0",
+  "build": "56e2e7561432",
+  "released_at": "2026-11-07T23:29:58Z",
   "min_installer": "2",
   "notes_url": "CHANGELOG.md",
   "assets": [
@@ -10,15 +10,15 @@
       "name": "toutwaf-linux-amd64.tar.gz",
       "os": "linux",
       "arch": "amd64",
-      "size": 67913544,
-      "sha256": "470f6732b1748a93e7cd858cf3c88fd3cede21a26686196d45847b0b5c6d0040"
+      "size": 70650206,
+      "sha256": "1c2d10c8111f6eea83e82ea633aab28f64c900430d8613de22f5958537cc3f00"
     },
     {
       "name": "toutwaf-extras.tar.gz",
       "os": "any",
       "arch": "any",
-      "size": 49924060,
-      "sha256": "909e243f51cebe33765af10a8df01b6d51599615f8353a0dde981bdfc60ac6cf",
+      "size": 50096775,
+      "sha256": "0e550f079d1957cc1069966cc40a8eb43a9d3313b63de67e2db5dcb12e781172",
       "kind": "extras",
       "part": 1,
       "parts": 1
@@ -65,6 +65,11 @@
       "version": "0.4.4",
       "released_at": "2026-11-07T02:11:39Z",
       "path": "releases/0.4.4/"
+    },
+    {
+      "version": "0.5.0",
+      "released_at": "2026-11-07T23:29:58Z",
+      "path": "releases/0.5.0/"
     }
   ],
   "public_key": "gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0=",

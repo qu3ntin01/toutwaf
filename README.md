@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.4.4** · build `16d717d7229f` · canal **stable** · 2026-11-07
+**Version 0.5.0** · build `56e2e7561432` · canal **stable** · 2026-11-07
 
 </div>
 
@@ -212,7 +212,8 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 
 - **Plateformes** : installation validée de bout en bout sur AlmaLinux 10, Rocky Linux 9 et Debian 12 avec les binaires de cette version ; AlmaLinux 9 et Ubuntu 24.04 ont passé les essais précédents sur une version antérieure. Les autres distributions ne sont pas testées. **Windows** : l'agent d'hôte (cluster) est testé sur un vrai Windows Server 2025 (audit, mesures, scan Microsoft Defender, terminal) ; le script d'installation Windows lui-même n'est pas encore validé de bout en bout sur un vrai poste. **ARM64 (Raspberry Pi, Graviton, Ampere)** : la release contient un paquet linux-arm64, compilé en croisé et vérifié uniquement sous émulation (QEMU) : démarrage, sondes de santé, requête proxifiée, injection SQL bloquée. Il n'a **pas été testé sur du vrai matériel ARM** et aucun chiffre de performance n'est donné. Un Raspberry Pi demande un OS **64 bits** (Raspberry Pi OS 64 bits, Ubuntu ou Debian arm64) ; l'ARM 32 bits (armv7, Raspberry Pi OS 32 bits) n'est pas pris en charge et l'installeur s'arrête avec un message. **Windows sur ARM64** : la release contient un paquet windows-arm64 (compilé en croisé ; seul le type de machine PE 0xAA64 a été vérifié), il n'a jamais été exécuté sous Windows sur ARM.
 - **Mises à jour depuis la console** : elles s'installent sur le serveur qui héberge la console, sous Linux avec systemd uniquement (ailleurs, par exemple sous Windows, la page affiche la commande à lancer) ; les autres nœuds suivent par les campagnes de mise à jour ou l'installeur. **Automatisation du pare-feu** : firewalld et ufw (et les règles du Pare-feu Windows Defender créées par l'installeur) ; avec nftables ou iptables, vous obtenez les commandes à lancer.
-- **Pas encore disponible** : HTTP/3, base de données PostgreSQL (SQLite uniquement), inspection du contenu des messages gRPC.
+- **Désactivé par défaut** : HTTP/3 (QUIC, UDP ; `--http3` à l'installation ou `listen.h3`, avec le port UDP ouvert dans le pare-feu).
+- **Pas encore disponible** : base de données PostgreSQL (SQLite uniquement), inspection du contenu des messages gRPC.
 - **Peu éprouvé** : SSO SAML (OIDC testé), téléchargement automatique toutes les heures des versions d'OWASP CRS depuis GitHub sur plusieurs jours (le jeu CRS 4.31 complet est, lui, testé dans notre banc), certificats DNS-01 chez Cloudflare/OVH/Route 53, intégrations tierces (SIEM, tickets).
 - **Détection** : mesurée avec un outil indépendant (GoTestWAF : 673/673 attaques bloquées, 0/141 faux positifs) et sur un jeu de charges publiques jamais vu pendant le développement (89,9 % en brut ; 99,95 % une fois écartés les fragments de bruit qui ne sont pas des attaques, liste communiquée à nos relecteurs). Aucun WAF n'attrape tout : prévoyez d'ajuster des exceptions pour vos applications. Compromis connus : opérateurs de type MongoDB (`$ne`, `$where`) dans les champs JSON/formulaire et deux `../` ou plus dans une valeur sont bloqués.
 - **Performances** : mesurées sur une machine de test partagée (quelques milliers de requêtes par seconde par instance). Pour votre charge, mesurez sur votre matériel avant la mise en production.
@@ -226,19 +227,20 @@ Cibles non compilées pour cette version :
 
 ## Versions et téléchargements
 
-**Version 0.4.4**
+**Version 0.5.0**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 64.8 MiB | `470f6732b1748a93e7cd858cf3c88fd3cede21a26686196d45847b0b5c6d0040` |
-| `toutwaf-extras.tar.gz` | any | any | 47.6 MiB | `909e243f51cebe33765af10a8df01b6d51599615f8353a0dde981bdfc60ac6cf` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 67.4 MiB | `1c2d10c8111f6eea83e82ea633aab28f64c900430d8613de22f5958537cc3f00` |
+| `toutwaf-extras.tar.gz` | any | any | 47.8 MiB | `0e550f079d1957cc1069966cc40a8eb43a9d3313b63de67e2db5dcb12e781172` |
 
 Les fichiers `toutwaf-extras*.tar.gz` (système et architecture `any`) sont les extras de la version : l'agent hôte pour Windows et les programmes de l'antivirus, qu'une console remet aux autres machines. L'installateur les télécharge, les vérifie (SHA-256 et signature) et les installe avec l'archive de la plateforme ; une installation sans eux fonctionne et ne propose ni Windows ni l'antivirus.
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.4.4` | 2026-11-07T02:11:39Z | **actuelle** | `releases/0.4.4/` |
+| `0.5.0` | 2026-11-07T23:29:58Z | **actuelle** | `releases/0.5.0/` |
+| `0.4.4` | 2026-11-07T02:11:39Z | disponible | `releases/0.4.4/` |
 | `0.4.3` | 2026-11-03T10:16:08Z | disponible | `releases/0.4.3/` |
 | `0.3.1` | 2026-10-18T07:59:16Z | disponible | `releases/0.3.1/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | disponible | `releases/0.2.0-dev.7/` |
@@ -254,7 +256,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.4.4 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.5.0 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Vérifier une version
@@ -262,7 +264,7 @@ cd releases/0.4.4 && sha256sum -c SHA256SUMS --ignore-missing
 À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `f8fc98e4c6e364fa`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
 
 ```sh
-V=0.4.4; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+V=0.5.0; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin

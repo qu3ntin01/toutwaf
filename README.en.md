@@ -8,7 +8,7 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.4.4** · build `16d717d7229f` · channel **stable** · 2026-11-07
+**Version 0.5.0** · build `56e2e7561432` · channel **stable** · 2026-11-07
 
 </div>
 
@@ -213,7 +213,8 @@ Let's be transparent about what is not (yet) covered:
 
 - **Platforms**: installation validated end to end on AlmaLinux 10, Rocky Linux 9 and Debian 12 with the binaries of this release; AlmaLinux 9 and Ubuntu 24.04 passed earlier runs on a previous build. Other distributions are untested. **Windows**: the host agent (cluster) is tested on a real Windows Server 2025 (audit, telemetry, Microsoft Defender scan, terminal); the Windows installer script itself is not yet validated end to end on a real host. **ARM64 (Raspberry Pi, Graviton, Ampere)**: the release carries a linux-arm64 package, cross-compiled and checked only under emulation (QEMU): start, health checks, proxied request, blocked SQL injection. It has **not been tested on real ARM hardware** and no performance figure is given. A Raspberry Pi needs a **64-bit** OS (Raspberry Pi OS 64-bit, Ubuntu or Debian arm64); 32-bit ARM (armv7, 32-bit Raspberry Pi OS) is not supported and the installer stops with a message. **Windows on ARM64**: the release carries a windows-arm64 package (cross-compiled; only the PE machine type 0xAA64 was checked), it has never been run on Windows on ARM.
 - **Updates from the console** install on the server that runs the console, on Linux with systemd only (elsewhere, for example on Windows, the page shows the command to run); other nodes follow through update campaigns or the installer. **Firewall automation** covers firewalld and ufw (and Windows Defender Firewall rules created by the installer); with nftables or iptables you get the commands to run.
-- **Not available yet**: HTTP/3, PostgreSQL (SQLite only), inspection of gRPC message contents.
+- **Off by default**: HTTP/3 (QUIC, UDP; `--http3` at install time or `listen.h3`, with the UDP port open in the firewall).
+- **Not available yet**: PostgreSQL (SQLite only), inspection of gRPC message contents.
 - **Lightly tested**: SAML SSO (OIDC tested), the automatic hourly download of the OWASP CRS releases from GitHub over several days (the full CRS 4.31 ruleset itself is tested in our test rig), DNS-01 certificates with Cloudflare/OVH/Route 53, third-party integrations (SIEM, ticketing).
 - **Detection**: measured with an independent tool (GoTestWAF: 673/673 attacks blocked, 0/141 false positives) and on a public payload set never seen during development (89.9 % raw; 99.95 % once non-attack fuzz fragments are removed, with the list of excluded fragments disclosed to our reviewers). No WAF catches everything: expect to tune exceptions for your applications. Known trade-offs: MongoDB-style operators (`$ne`, `$where`) in JSON/form fields and two or more `../` in a value are blocked.
 - **Performance**: measured on a shared test machine (a few thousand requests per second per instance). Measure on your own hardware before going to production.
@@ -227,19 +228,20 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.4.4**
+**Version 0.5.0**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 64.8 MiB | `470f6732b1748a93e7cd858cf3c88fd3cede21a26686196d45847b0b5c6d0040` |
-| `toutwaf-extras.tar.gz` | any | any | 47.6 MiB | `909e243f51cebe33765af10a8df01b6d51599615f8353a0dde981bdfc60ac6cf` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 67.4 MiB | `1c2d10c8111f6eea83e82ea633aab28f64c900430d8613de22f5958537cc3f00` |
+| `toutwaf-extras.tar.gz` | any | any | 47.8 MiB | `0e550f079d1957cc1069966cc40a8eb43a9d3313b63de67e2db5dcb12e781172` |
 
 The `toutwaf-extras*.tar.gz` files (OS and architecture `any`) are the extras of the release: the host agent for Windows and the antivirus programs, which a console hands to other machines. The installer downloads, checks (SHA-256 and signature) and installs them with the archive of the platform; an installation without them works and does not offer Windows nor the antivirus.
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.4.4` | 2026-11-07T02:11:39Z | **current** | `releases/0.4.4/` |
+| `0.5.0` | 2026-11-07T23:29:58Z | **current** | `releases/0.5.0/` |
+| `0.4.4` | 2026-11-07T02:11:39Z | available | `releases/0.4.4/` |
 | `0.4.3` | 2026-11-03T10:16:08Z | available | `releases/0.4.3/` |
 | `0.3.1` | 2026-10-18T07:59:16Z | available | `releases/0.3.1/` |
 | `0.2.0-dev.7` | 2026-10-05T14:28:05Z | available | `releases/0.2.0-dev.7/` |
@@ -255,7 +257,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.4.4 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.5.0 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Verify a release
@@ -263,7 +265,7 @@ cd releases/0.4.4 && sha256sum -c SHA256SUMS --ignore-missing
 From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `f8fc98e4c6e364fa`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. To verify by hand (OpenSSL 3 or later):
 
 ```sh
-V=0.4.4; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+V=0.5.0; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
