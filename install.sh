@@ -7028,24 +7028,50 @@ EOF
   return 0
 }
 
+# SELinux is enforcing or permissive on this machine (a no-op everywhere else: no getenforce, "Disabled", or no restorecon)
+selinux_on() { have getenforce && have restorecon && [ "$(getenforce 2>/dev/null || echo Disabled)" != "Disabled" ]; }
+# Gives every file of the programs directory the type bin_t, so that systemd may execute it. A file written by cp/install/mv in a directory
+# that has no rule of its own gets the type of the directory (var_t under /var/toutwaf/bin) and systemd then fails with "Permission denied"
+# (status=203/EXEC): this runs after the programs are installed AND after a rollback put them back. A persistent rule when semanage exists
+# (restorecon then agrees with it), else chcon.
+selinux_label_bin() {
+  [ "${STAGING:-0}" = 0 ] && [ "${NO_SELINUX:-0}" = 0 ] && selinux_on || return 0
+  local pat="$BIN_DIR(/.*)?" persistent=0
+  case "$BIN_DIR" in /usr/*|/bin|/sbin) pat="$BIN_DIR/toutwaf.*";; esac   # a shared system directory: only our own files
+  if have semanage; then
+    { semanage fcontext -a -t bin_t "$pat" >/dev/null 2>&1 || semanage fcontext -m -t bin_t "$pat" >/dev/null 2>&1; } && persistent=1
+  fi
+  case "$BIN_DIR" in
+    /usr/*|/bin|/sbin) restorecon -F "$BIN_DIR"/toutwaf* >/dev/null 2>&1 || true;;
+    *) restorecon -RF "$BIN_DIR" >/dev/null 2>&1 || true;;
+  esac
+  if [ "$persistent" = 0 ]; then chcon -t bin_t "$BIN_DIR"/toutwaf* >/dev/null 2>&1 || true; fi
+  return 0
+}
+# restorecon on data after a restore from a copy: the labels are those of the policy, never a blanket type
+selinux_restore() {
+  [ "${STAGING:-0}" = 0 ] && [ "${NO_SELINUX:-0}" = 0 ] && selinux_on || return 0
+  restorecon -RF "$@" >/dev/null 2>&1 || true
+  return 0
+}
+
 setup_selinux() {
   if [ "$STAGING" = 1 ] || [ "$NO_SELINUX" = 1 ]; then return 0; fi
   # AppArmor (Debian / Ubuntu / SUSE): ToutWAF ships no profile, so nothing is confined by it; the systemd sandbox of the units applies
   if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true)" = Y ]; then info "AppArmor is active: ToutWAF ships no AppArmor profile, the services are confined by their systemd sandbox only"; fi
   have getenforce || return 0
   [ "$(getenforce 2>/dev/null)" = "Disabled" ] && return 0
+  selinux_label_bin
   have semanage || { warn "SELinux is enabled but semanage is missing; skipping file contexts. By hand, once the SELinux policy utilities are installed: semanage fcontext -a -t var_lib_t '$DATA_DIR(/.*)?' && semanage fcontext -a -t var_log_t '$LOG_DIR(/.*)?' && restorecon -RF '$DATA_DIR' '$LOG_DIR'"; return 0; }
   log "Configuring SELinux contexts ($(getenforce))"
   semanage fcontext -a -t etc_t "$CONF_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t etc_t "$CONF_DIR(/.*)?" || true
   semanage fcontext -a -t var_lib_t "$DATA_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t var_lib_t "$DATA_DIR(/.*)?" || true
   semanage fcontext -a -t var_log_t "$LOG_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t var_log_t "$LOG_DIR(/.*)?" || true
-  semanage fcontext -a -t bin_t "$BIN_DIR/toutwaf-(dp|cp|upgrade|firewall)" 2>/dev/null || semanage fcontext -m -t bin_t "$BIN_DIR/toutwaf-(dp|cp|upgrade|firewall)" || true
-  semanage fcontext -a -t bin_t "$BIN_DIR/toutwafctl" 2>/dev/null || true
   if [ "$LAYOUT" = home ]; then   # the HOME directory itself (bin/ conf/ data/ logs/ get their own types above)
     semanage fcontext -a -t usr_t "$HOME_DIR" 2>/dev/null || semanage fcontext -m -t usr_t "$HOME_DIR" || true
     restorecon -F "$HOME_DIR" 2>/dev/null || true
   fi
-  restorecon -RF "$CONF_DIR" "$DATA_DIR" "$LOG_DIR" "$BIN_DIR"/toutwaf* 2>/dev/null || true
+  restorecon -RF "$CONF_DIR" "$DATA_DIR" "$LOG_DIR" 2>/dev/null || true
   # the console/DP-facing ports are labelled http_port_t so that confined admin tooling can reach them
   if want_cp; then for port in "$CP_PORT" 9444; do semanage port -a -t http_port_t -p tcp "$port" 2>/dev/null || true; done; fi
   # allow the proxy to connect to arbitrary origin ports when running confined by an httpd-like domain
@@ -7111,24 +7137,50 @@ wait_healthy() {
 # attack map: GET /readyz lists the phases). The installer waits until the service ANSWERS (/readyz 200: the database is open and the
 # console, the data-plane channel and the licence page work), never for the background phases. An older control plane has no /readyz (404
 # or the console's own answer): /healthz decides then.
+# A control plane that is legitimately still preparing its database (a write-ahead log of many GB left by an earlier run takes minutes to
+# open) is not a failure: while the service is active and /readyz keeps answering 503 with a phase that moves (or the log file shrinks) the
+# wait goes on, up to TOUTWAF_CP_PREP_CAP seconds (default 90 min); it ends after TOUTWAF_CP_PREP_STALL seconds (default 10 min) without
+# progress, or when the process is gone. Progress is logged every minute. Without a preparing answer the wait is TOUTWAF_CP_WAIT s (60).
+cp_wal_bytes() { stat -c %s "$DATA_DIR/toutwaf.db-wal" 2>/dev/null || echo 0; }
+fmt_bytes() { awk -v b="${1:-0}" 'BEGIN{ if (b>=1073741824) printf "%.1f GB", b/1073741824; else if (b>=1048576) printf "%.1f MB", b/1048576; else printf "%d KB", b/1024 }'; }
+now_s() { date +%s; }
 wait_cp_healthy() {
-  local code _
-  for _ in $(seq 1 60); do
-    code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 2 "https://127.0.0.1:$CP_PORT/readyz" 2>/dev/null || true)"
+  local code body now start last logged=0 sig prev="" wal ph cap="${TOUTWAF_CP_PREP_CAP:-5400}" stall="${TOUTWAF_CP_PREP_STALL:-600}" base="${TOUTWAF_CP_WAIT:-60}" preparing=0 out
+  start="$(now_s)"; last="$start"
+  while :; do
+    out="$(curl -ksS -w '\n%{http_code}' --max-time 2 "https://127.0.0.1:$CP_PORT/readyz" 2>/dev/null || true)"
+    code="${out##*$'\n'}"; body="${out%$'\n'*}"
     if [ "$code" = 200 ]; then return 0; fi
     if [ "$code" != 503 ] && [ "$code" != 000 ]; then
       code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 2 "https://127.0.0.1:$CP_PORT/healthz" 2>/dev/null || true)"
       if [ "$code" = 200 ]; then return 0; fi
     fi
+    now="$(now_s)"
+    if [ "$code" = 503 ] && svc_active toutwaf-cp && printf '%s' "$body" | grep -q '"phase"\|database_preparing'; then
+      preparing=1
+      wal="$(cp_wal_bytes)"
+      ph="$(printf '%s' "$body" | sed -n 's/.*"phase":"\([a-z]*\)".*/\1/p' | head -n1)"
+      sig="$(printf '%s' "$body" | sed 's/"uptime_s":[0-9]*//' | tr -d ' \n')|$wal"
+      if [ "$sig" != "$prev" ]; then prev="$sig"; last="$now"; fi
+      if [ $((now - last)) -ge "$stall" ]; then log "database preparing: no progress for ${stall}s (phase ${ph:-database}, WAL $(fmt_bytes "$wal") left): giving up"; return 1; fi
+      if [ $((now - start)) -ge "$cap" ]; then log "database preparing: still not ready after ${cap}s: giving up"; return 1; fi
+      if [ $((now - logged)) -ge 60 ]; then logged="$now"; log "database preparing: phase ${ph:-database}, WAL $(fmt_bytes "$wal") left, $((now - start))s since the start"; fi
+    else
+      # not preparing: the service does not answer. After the plain wait, or once it was preparing and its process is gone / silent too long,
+      # it is a failure
+      if [ "$preparing" = 1 ]; then
+        if ! svc_active toutwaf-cp || [ $((now - last)) -ge "$stall" ] || [ $((now - start)) -ge "$cap" ]; then return 1; fi
+      elif [ $((now - start)) -ge "$base" ]; then return 1; fi
+    fi
     sleep 1
   done
-  return 1
 }
 
 rollback_dp() {
   warn "$(t w_rollback)"
   if [ -x "$BIN_DIR/toutwaf-dp.prev" ]; then
     mv -f "$BIN_DIR/toutwaf-dp.prev" "$BIN_DIR/toutwaf-dp"
+    selinux_label_bin   # before the start: a restored program without bin_t cannot be executed by systemd
     systemctl restart toutwaf-dp || true
     wait_healthy && warn "rolled back to the previous version" || warn "rollback copy also unhealthy: check 'journalctl -u toutwaf-dp'"
   else
@@ -7142,7 +7194,8 @@ rollback_cp() {
   systemctl stop toutwaf-cp 2>/dev/null || true
   if [ -x "$BIN_DIR/toutwaf-cp.prev" ]; then
     mv -f "$BIN_DIR/toutwaf-cp.prev" "$BIN_DIR/toutwaf-cp"
-    if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then cp -a "$DB_BACKUP_DIR"/. "$DATA_DIR"/ 2>/dev/null && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; fi
+    if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then cp -a "$DB_BACKUP_DIR"/. "$DATA_DIR"/ 2>/dev/null && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; selinux_restore "$DATA_DIR"; fi
+    selinux_label_bin   # before the start: a restored program without bin_t cannot be executed by systemd
     systemctl restart toutwaf-cp || true
     wait_cp_healthy && warn "rolled back to the previous version" || warn "rollback copy also unhealthy: check 'journalctl -u toutwaf-cp'"
   else
