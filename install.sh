@@ -4728,14 +4728,31 @@ link_local_dp() {
   [ -f "$(p "$CONF_DIR/toutwaf-cp.yaml")" ] && cfgargs=(--config "$(p "$CONF_DIR/toutwaf-cp.yaml")")
   errf="$(mktemp 2>/dev/null || true)"; [ -n "$errf" ] || errf=/dev/null
   [ "$STAGING" = 0 ] || cfgargs+=(--ca-file "$DATA_DIR/tls/console.crt")     # staged: the configuration keeps the logical (unprefixed) paths
-  out="$("$exe" enroll-local --dp-config "$(p "$CONF_DIR/toutwaf-dp.yaml")" --dp-bin "$(p "$BIN_DIR/toutwaf-dp")" --update-hook "$BIN_DIR/toutwaf-upgrade" \
-    --data "$(p "$DATA_DIR")" --dp-data-dir "$(p "$DATA_DIR")" ${cfgargs[@]+"${cfgargs[@]}"} --json 2>"$errf" </dev/null)" || rc=$?
+  # enroll-local opens the database (a write: it mints the enrolment token) while the running control plane may hold it: a log of gigabytes left
+  # by an earlier run is being merged, or an index is being built, and SQLite answers "database is locked (5) (SQLITE_BUSY)" after its 10 s of
+  # patience. That is a busy database, not a broken link: try again a few times (TOUTWAF_LINK_TRIES, TOUTWAF_LINK_PAUSE), only for that error;
+  # any other error, and the last busy one, are reported as before (never hidden).
+  local tries="${TOUTWAF_LINK_TRIES:-6}" pause="${TOUTWAF_LINK_PAUSE:-10}" attempt=1
+  while :; do
+    rc=0
+    out="$("$exe" enroll-local --dp-config "$(p "$CONF_DIR/toutwaf-dp.yaml")" --dp-bin "$(p "$BIN_DIR/toutwaf-dp")" --update-hook "$BIN_DIR/toutwaf-upgrade" \
+      --data "$(p "$DATA_DIR")" --dp-data-dir "$(p "$DATA_DIR")" ${cfgargs[@]+"${cfgargs[@]}"} --json 2>"$errf" </dev/null)" || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$attempt" -lt "$tries" ] && [ "$errf" != /dev/null ] && grep -qiE 'database is locked|SQLITE_BUSY' "$errf" 2>/dev/null; then
+      log "data plane link: the database is busy (attempt $attempt of $tries; the running control plane holds it), trying again in ${pause}s: $(tr '\n\t' '  ' <"$errf" | cut -c1-200)"
+      attempt=$((attempt + 1)); sleep "$pause"; continue
+    fi
+    break
+  done
+  [ "$attempt" -le 1 ] || log "data plane link: $attempt attempt(s), last status $rc"
   if [ "$STAGING" = 0 ]; then chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; fi   # the offline run may have created database files as root
   if [ "$STAGING" = 0 ] && have restorecon; then restorecon -RF "$CONF_DIR" >/dev/null 2>&1 || true; fi   # the new file gets the context of the directory (SELinux)
   if [ "$errf" != /dev/null ]; then cat "$errf" >>"$LOG" 2>/dev/null; fi
   if [ "$rc" -ne 0 ]; then
     msg="$(tr '\n\t' '  ' <"$errf" 2>/dev/null | cut -c1-500)"; [ "$errf" = /dev/null ] || rm -f "$errf"
     DP_LINK=failed; warn "$(t dp_link_fail "${msg:-toutwaf-cp enroll-local rc=$rc}")"; warn "$(t dp_link_fail_hint)"
+    if [ "$ACTION" = update ] && grep -q '^control_plane:' "$(p "$CONF_DIR/toutwaf-dp.yaml")" 2>/dev/null; then
+      info "the data plane was already linked to the console: its link is kept as it is, the update goes on"
+    fi
     return 0
   fi
   [ "$errf" = /dev/null ] || rm -f "$errf"
@@ -7500,48 +7517,113 @@ wait_healthy() {
   for _ in $(seq 1 30); do curl -fsS -o /dev/null --max-time 2 "$url" 2>/dev/null && return 0; sleep 1; done
   return 1
 }
+# BEGIN cp-wait (extracted by tests/cp-wait-test.sh: keep the markers)
 # The control plane opens its listeners first and prepares its database behind them (indexes, merge of the write-ahead log, counts of the
 # attack map: GET /readyz lists the phases). The installer waits until the service ANSWERS (/readyz 200: the database is open and the
 # console, the data-plane channel and the licence page work), never for the background phases. An older control plane has no /readyz (404
 # or the console's own answer): /healthz decides then.
 # A control plane that is legitimately still preparing its database (a write-ahead log of many GB left by an earlier run takes minutes to
-# open) is not a failure: while the service is active and /readyz keeps answering 503 with a phase that moves (or the log file shrinks) the
-# wait goes on, up to TOUTWAF_CP_PREP_CAP seconds (default 90 min); it ends after TOUTWAF_CP_PREP_STALL seconds (default 10 min) without
-# progress, or when the process is gone. Progress is logged every minute. Without a preparing answer the wait is TOUTWAF_CP_WAIT s (60).
+# open) is not a failure. "Preparing" means: the process is alive (the unit is active) and /readyz answers 503 with a phase, or does not
+# answer at all (timeout / refused) while a large -wal file is there (a process that reads 2 GB of log is slow to answer anything). While it
+# is preparing, EVERY observation counts, not only the 503 ones: the wait goes on up to TOUTWAF_CP_PREP_CAP seconds (default 90 min) and ends
+# after TOUTWAF_CP_PREP_STALL seconds (default 10 min) in which nothing moved (the phase, the size of the -wal file, and what the process
+# itself does: CPU time and bytes read / written in /proc/PID/io). Progress is logged every minute with the time elapsed.
+# A real crash is detected at once: a unit that is failed / inactive ends the wait; one that the supervisor restarts (activating, auto-restart
+# or more restarts than at the start) is tolerated TOUTWAF_CP_MAX_CRASH times (2: one start that dies on a lock held by another process is
+# retried by systemd after 2 s and is no reason to roll back), the next one ends the wait, and the end of the journal of the unit is logged.
+# Without a preparing answer the wait is TOUTWAF_CP_WAIT s (60).
+# Run by the update assistant (toutwaf-upgrade, TOUTWAF_CP_PREP_HANDOFF=1), whose own watch has its own stall / cap / rollback and whose
+# run of this installer is bounded (15 min), the installer does not wait for the end of the preparation: once the process has stayed up and
+# preparing for TOUTWAF_CP_HANDOFF_AFTER seconds (15: longer than the 10 s that a start waits for a lock) it hands over and succeeds.
 cp_wal_bytes() { stat -c %s "$DATA_DIR/toutwaf.db-wal" 2>/dev/null || echo 0; }
 fmt_bytes() { awk -v b="${1:-0}" 'BEGIN{ if (b>=1073741824) printf "%.1f GB", b/1073741824; else if (b>=1048576) printf "%.1f MB", b/1048576; else printf "%d KB", b/1024 }'; }
 now_s() { date +%s; }
+# cp_unit_info: "STATE SUB NRESTARTS MAINPID" of the unit; STATE "unknown" without systemd (staging) or when systemctl cannot say
+cp_unit_info() {
+  local out a="" s="" n="" pid=""
+  if [ "$HAS_SYSTEMD" = 1 ]; then
+    out="$(systemctl show toutwaf-cp -p ActiveState -p SubState -p NRestarts -p MainPID 2>/dev/null || true)"
+    a="$(printf '%s\n' "$out" | sed -n 's/^ActiveState=//p' | head -n1)"; s="$(printf '%s\n' "$out" | sed -n 's/^SubState=//p' | head -n1)"
+    n="$(printf '%s\n' "$out" | sed -n 's/^NRestarts=//p' | head -n1)"; pid="$(printf '%s\n' "$out" | sed -n 's/^MainPID=//p' | head -n1)"
+    if [ -z "$a" ]; then if svc_active toutwaf-cp; then a=active; else a=inactive; fi; fi
+  else a=unknown; fi
+  case "$n" in ''|*[!0-9]*) n=0;; esac; case "$pid" in ''|*[!0-9]*) pid=0;; esac
+  printf '%s %s %s %s' "$a" "${s:--}" "$n" "$pid"
+}
+# cp_proc_sig PID: what the process itself did (CPU ticks, bytes read and written): a start that reads a huge log moves these while nothing
+# else does. Empty when unreadable.
+cp_proc_sig() {
+  local pid="$1" r="${CP_PROC_ROOT:-/proc}" io cpu
+  [ "${pid:-0}" -gt 0 ] 2>/dev/null || return 0
+  io="$(awk '/^(rchar|wchar|read_bytes|write_bytes):/{printf "%s,", $2}' "$r/$pid/io" 2>/dev/null || true)"
+  cpu="$(sed 's/^.*) //' "$r/$pid/stat" 2>/dev/null | awk '{print $12+$13}' || true)"
+  printf '%s%s' "$io" "$cpu"
+}
 wait_cp_healthy() {
-  local code body now start last logged=0 sig prev="" wal ph cap="${TOUTWAF_CP_PREP_CAP:-5400}" stall="${TOUTWAF_CP_PREP_STALL:-600}" base="${TOUTWAF_CP_WAIT:-60}" preparing=0 out
-  start="$(now_s)"; last="$start"
+  local code body now start last logged=0 sig prev="" wal ph cap="${TOUTWAF_CP_PREP_CAP:-5400}" stall="${TOUTWAF_CP_PREP_STALL:-600}" base="${TOUTWAF_CP_WAIT:-60}"
+  local maxcrash="${TOUTWAF_CP_MAX_CRASH:-2}" handoff="${TOUTWAF_CP_HANDOFF_AFTER:-15}" big="${TOUTWAF_CP_WAL_BIG:-67108864}"
+  local preparing=0 since=0 out ui st sub nr pid nr0 crashes seen_crash=0 phased note procsig info0 bstart
+  start="$(now_s)"; last="$start"; bstart="$start"
+  info0="$(cp_unit_info)"; read -r _ _ nr0 _ <<<"$info0"
   while :; do
-    out="$(curl -ksS -w '\n%{http_code}' --max-time 2 "https://127.0.0.1:$CP_PORT/readyz" 2>/dev/null || true)"
+    out="$(curl -ksS -w '\n%{http_code}' --max-time "${TOUTWAF_CP_CURL_MAX:-5}" "https://127.0.0.1:$CP_PORT/readyz" 2>/dev/null || true)"
     code="${out##*$'\n'}"; body="${out%$'\n'*}"
-    if [ "$code" = 200 ]; then return 0; fi
+    if [ "$code" = 200 ]; then [ "$seen_crash" = 0 ] || log "toutwaf-cp is up after $(( $(now_s) - start ))s (it was restarted by systemd ${seen_crash} time(s) on the way)"; return 0; fi
     if [ "$code" != 503 ] && [ "$code" != 000 ]; then
-      code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 2 "https://127.0.0.1:$CP_PORT/healthz" 2>/dev/null || true)"
+      code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time "${TOUTWAF_CP_CURL_MAX:-5}" "https://127.0.0.1:$CP_PORT/healthz" 2>/dev/null || true)"
       if [ "$code" = 200 ]; then return 0; fi
     fi
     now="$(now_s)"
-    if [ "$code" = 503 ] && svc_active toutwaf-cp && printf '%s' "$body" | grep -q '"phase"\|database_preparing'; then
-      preparing=1
-      wal="$(cp_wal_bytes)"
+    # the process: alive, restarted by the supervisor, or gone
+    ui="$(cp_unit_info)"; read -r st sub nr pid <<<"$ui"
+    crashes=$((nr - nr0)); [ "$crashes" -ge 0 ] || { nr0="$nr"; crashes=0; }
+    [ "$sub" != auto-restart ] || crashes=$((crashes + 1))
+    if [ "$crashes" -gt "$seen_crash" ]; then
+      seen_crash="$crashes"; last="$now"; prev=""; since=0; preparing=0; bstart="$now"   # the new process proves itself again
+      log "toutwaf-cp stopped by itself ${crashes} time(s) in $((now - start))s (unit $st/$sub, systemd restarts it)"
+    fi
+    case "$st" in
+      active|activating) ;;
+      unknown) ;;
+      *) cp_wait_fail "toutwaf-cp is not running: the unit is $st/$sub after $((now - start))s"; return 1;;
+    esac
+    if [ "$crashes" -gt "$maxcrash" ]; then cp_wait_fail "toutwaf-cp keeps stopping: $crashes starts in $((now - start))s, the supervisor's restarts are not tolerated beyond $maxcrash"; return 1; fi
+    # does the answer say that the database is being prepared?
+    phased=0
+    [ "$code" != 503 ] || ! printf '%s' "$body" | grep -q '"phase"\|database_preparing' || phased=1
+    wal="$(cp_wal_bytes)"
+    if [ "$st" = active ] && { [ "$phased" = 1 ] || { [ "$wal" -ge "$big" ] 2>/dev/null; }; }; then
+      [ "$preparing" = 1 ] || { preparing=1; since="$now"; }
+    fi
+    if [ "$preparing" = 1 ]; then
       ph="$(printf '%s' "$body" | sed -n 's/.*"phase":"\([a-z]*\)".*/\1/p' | head -n1)"
-      sig="$(printf '%s' "$body" | sed 's/"uptime_s":[0-9]*//' | tr -d ' \n')|$wal"
+      procsig="$(cp_proc_sig "$pid")"
+      sig="$(printf '%s' "$body" | sed 's/"uptime_s":[0-9]*//' | tr -d ' \n')|$wal|$procsig"
       if [ "$sig" != "$prev" ]; then prev="$sig"; last="$now"; fi
-      if [ $((now - last)) -ge "$stall" ]; then log "database preparing: no progress for ${stall}s (phase ${ph:-database}, WAL $(fmt_bytes "$wal") left): giving up"; return 1; fi
-      if [ $((now - start)) -ge "$cap" ]; then log "database preparing: still not ready after ${cap}s: giving up"; return 1; fi
-      if [ $((now - logged)) -ge 60 ]; then logged="$now"; log "database preparing: phase ${ph:-database}, WAL $(fmt_bytes "$wal") left, $((now - start))s since the start"; fi
-    else
-      # not preparing: the service does not answer. After the plain wait, or once it was preparing and its process is gone / silent too long,
-      # it is a failure
-      if [ "$preparing" = 1 ]; then
-        if ! svc_active toutwaf-cp || [ $((now - last)) -ge "$stall" ] || [ $((now - start)) -ge "$cap" ]; then return 1; fi
-      elif [ $((now - start)) -ge "$base" ]; then return 1; fi
+      note="phase ${ph:-database}, WAL $(fmt_bytes "$wal") left, $((now - start))s since the start"; [ "$phased" = 1 ] || note="$note, no answer yet (HTTP $code)"
+      if [ $((now - last)) -ge "$stall" ]; then cp_wait_fail "database preparing: no progress for ${stall}s ($note): giving up"; return 1; fi
+      if [ $((now - start)) -ge "$cap" ]; then cp_wait_fail "database preparing: still not ready after ${cap}s ($note): giving up"; return 1; fi
+      if [ $((now - logged)) -ge 60 ]; then logged="$now"; log "database preparing: $note"; fi
+      if [ "${TOUTWAF_CP_PREP_HANDOFF:-0}" = 1 ] && [ $((now - since)) -ge "$handoff" ]; then
+        log "database preparing: toutwaf-cp is up and preparing its database ($note); the update assistant keeps watching it (its own stall, limit and rollback apply)"
+        return 0
+      fi
+    elif [ $((now - bstart)) -ge "$base" ]; then
+      cp_wait_fail "toutwaf-cp does not answer on :$CP_PORT after ${base}s (unit $st/$sub, HTTP $code)"; return 1
     fi
     sleep 1
   done
 }
+# cp_wait_fail MESSAGE: the reason the wait ended, with what systemd and the journal say (the log is what the owner sends back)
+cp_wait_fail() {
+  log "$1"
+  if [ "$HAS_SYSTEMD" = 1 ]; then
+    log "systemctl show toutwaf-cp: $(systemctl show toutwaf-cp -p ActiveState -p SubState -p Result -p ExecMainStatus -p ExecMainCode -p NRestarts -p MainPID 2>/dev/null | tr '\n' ' ')"
+    if have journalctl; then journalctl -u toutwaf-cp -n 25 --no-pager -o short-precise 2>/dev/null | cut -c1-300 | while IFS= read -r l; do log "  journal: $l"; done; fi
+  fi
+  return 0
+}
+# END cp-wait
 
 rollback_dp() {
   warn "$(t w_rollback)"
@@ -7564,7 +7646,8 @@ rollback_cp() {
     if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then cp -a "$DB_BACKUP_DIR"/. "$DATA_DIR"/ 2>/dev/null && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; selinux_restore "$DATA_DIR"; fi
     selinux_label_bin   # before the start: a restored program without bin_t cannot be executed by systemd
     systemctl restart toutwaf-cp || true
-    wait_cp_healthy && warn "rolled back to the previous version" || warn "rollback copy also unhealthy: check 'journalctl -u toutwaf-cp'"
+    # (never handed over to the update assistant here: the verdict on the restored version is this one's)
+    TOUTWAF_CP_PREP_HANDOFF=0 wait_cp_healthy && warn "rolled back to the previous version" || warn "rollback copy also unhealthy: check 'journalctl -u toutwaf-cp'"
   else
     warn "no previous binary to roll back to; check 'journalctl -u toutwaf-cp'"
   fi
