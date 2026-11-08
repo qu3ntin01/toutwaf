@@ -11,7 +11,7 @@
 set -euo pipefail
 
 # shellcheck disable=SC2034  # read by the release tooling (min_installer in channel.json)
-INSTALLER_VERSION=1
+INSTALLER_VERSION=2
 DEFAULT_CHANNEL="dev"
 DEFAULT_BASE_URL="https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup"
 FALLBACK_BASE_URL="https://raw.githubusercontent.com/qu3ntin01/toutwaf/toutwaf-backup"     # used only when the primary cannot be reached and no base URL was chosen
@@ -22,6 +22,7 @@ BASE_EXPLICIT=0; BASE_URL="$DEFAULT_BASE_URL"
 ROLE="" CHANNEL="$DEFAULT_CHANNEL" VERSION="" PREFIX="/usr/local" DESTDIR="" SERVICE_USER="toutwaf-backup"
 STATE_DIR="/var/lib/toutwaf-backup" CONF_DIR="/etc/toutwaf-backup" LISTEN=":8007" EXTERNAL_URL="" NO_SYSTEMD=0 START=0 UNINSTALL=0 PURGE=0 YES=0 FORCE=0 INIT=1 DATASTORE=""
 PUBKEY_OVERRIDE="" PUBKEY_FILE=""
+SYSUPDATE_SCHEDULED=0 SYSUPDATE=1 FIREWALL=1 FW_FROM="" AUTO="" NO_UM=0 MGR_CMD="" MGR_ARG="" CHECK_ONLY=0 SCHEDULED=0 NEW_BIN=0 CHANNEL_SET=0
 
 # ---- message catalog ----------------------------------------------------------------------------------------------------------------
 # 10 languages (en fr es de it pt nl ru zh ar). Generated: edit deploy/tools/gen-installer-i18n.py, not these lines. The translations are
@@ -898,6 +899,356 @@ nl|sh_s_then|Daarna: toutwaf-backup server --help   en open https://<host>:%s/ v
 ru|sh_s_then|Затем: toutwaf-backup server --help   и откройте https://<хост>:%s/ для веб-интерфейса.
 zh|sh_s_then|然后：toutwaf-backup server --help   并打开 https://<主机>:%s/ 使用网页界面。
 ar|sh_s_then|بعد ذلك: toutwaf-backup server --help   وافتح https://<المضيف>:%s/ لواجهة الويب.
+en|os_ok|System: %s (supported).
+fr|os_ok|Système : %s (pris en charge).
+es|os_ok|Sistema: %s (compatible).
+de|os_ok|System: %s (unterstützt).
+it|os_ok|Sistema: %s (supportato).
+pt|os_ok|Sistema: %s (suportado).
+nl|os_ok|Systeem: %s (ondersteund).
+ru|os_ok|Система: %s (поддерживается).
+zh|os_ok|系统：%s（受支持）。
+ar|os_ok|النظام: %s (مدعوم).
+en|os_untested|System: %s is not one of the tested systems (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/Rocky/RHEL 9/10); the installation goes on.
+fr|os_untested|Système : %s ne fait pas partie des systèmes testés (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/Rocky/RHEL 9/10) ; l'installation continue.
+es|os_untested|Sistema: %s no es uno de los sistemas probados (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/Rocky/RHEL 9/10); la instalación continúa.
+de|os_untested|System: %s gehört nicht zu den getesteten Systemen (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/Rocky/RHEL 9/10); die Installation läuft weiter.
+it|os_untested|Sistema: %s non è tra quelli testati (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/Rocky/RHEL 9/10); l'installazione continua.
+pt|os_untested|Sistema: %s não é um dos sistemas testados (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/Rocky/RHEL 9/10); a instalação continua.
+nl|os_untested|Systeem: %s is geen van de geteste systemen (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/Rocky/RHEL 9/10); de installatie gaat door.
+ru|os_untested|Система: %s не входит в число протестированных (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/Rocky/RHEL 9/10); установка продолжается.
+zh|os_untested|系统：%s 不在已测试的系统之列（Debian 12/13、Ubuntu 22.04/24.04/26.04、AlmaLinux/Rocky/RHEL 9/10）；安装将继续。
+ar|os_untested|النظام: %s ليس من الأنظمة المختبَرة (Debian 12/13 وUbuntu 22.04/24.04/26.04 وAlmaLinux/Rocky/RHEL 9/10)؛ ستستمر عملية التثبيت.
+en|su_run|Updating the system packages first (this can take several minutes)
+fr|su_run|Mise à jour préalable des paquets système (cela peut prendre plusieurs minutes)
+es|su_run|Actualización previa de los paquetes del sistema (puede tardar varios minutos)
+de|su_run|Zuerst werden die Systempakete aktualisiert (das kann einige Minuten dauern)
+it|su_run|Aggiornamento preliminare dei pacchetti di sistema (può richiedere alcuni minuti)
+pt|su_run|Atualização prévia dos pacotes do sistema (pode demorar vários minutos)
+nl|su_run|Eerst worden de systeempakketten bijgewerkt (dit kan enkele minuten duren)
+ru|su_run|Сначала обновляются системные пакеты (это может занять несколько минут)
+zh|su_run|先更新系统软件包（可能需要几分钟）
+ar|su_run|تحديث حزم النظام أولاً (قد يستغرق ذلك عدة دقائق)
+en|su_skipped|The system packages are not updated (--no-system-update).
+fr|su_skipped|Les paquets système ne sont pas mis à jour (--no-system-update).
+es|su_skipped|Los paquetes del sistema no se actualizan (--no-system-update).
+de|su_skipped|Die Systempakete werden nicht aktualisiert (--no-system-update).
+it|su_skipped|I pacchetti di sistema non vengono aggiornati (--no-system-update).
+pt|su_skipped|Os pacotes do sistema não são atualizados (--no-system-update).
+nl|su_skipped|De systeempakketten worden niet bijgewerkt (--no-system-update).
+ru|su_skipped|Системные пакеты не обновляются (--no-system-update).
+zh|su_skipped|不更新系统软件包（--no-system-update）。
+ar|su_skipped|لن يتم تحديث حزم النظام (--no-system-update).
+en|su_recent|The system packages were updated less than 6 hours ago: not repeated.
+fr|su_recent|Les paquets système ont été mis à jour il y a moins de 6 heures : pas de répétition.
+es|su_recent|Los paquetes del sistema se actualizaron hace menos de 6 horas: no se repite.
+de|su_recent|Die Systempakete wurden vor weniger als 6 Stunden aktualisiert: keine Wiederholung.
+it|su_recent|I pacchetti di sistema sono stati aggiornati meno di 6 ore fa: non si ripete.
+pt|su_recent|Os pacotes do sistema foram atualizados há menos de 6 horas: não se repete.
+nl|su_recent|De systeempakketten zijn minder dan 6 uur geleden bijgewerkt: niet herhaald.
+ru|su_recent|Системные пакеты обновлены менее 6 часов назад: повтор не нужен.
+zh|su_recent|系统软件包在 6 小时内已更新：不重复。
+ar|su_recent|تم تحديث حزم النظام قبل أقل من 6 ساعات: لن يتكرر ذلك.
+en|su_failed|The update of the system packages failed (exit %s); the installation goes on without it. Fix: run the update yourself and read its error, or use --no-system-update.
+fr|su_failed|La mise à jour des paquets système a échoué (code %s) ; l'installation continue sans elle. Correction : lancez la mise à jour vous-même et lisez son erreur, ou utilisez --no-system-update.
+es|su_failed|La actualización de los paquetes del sistema ha fallado (código %s); la instalación continúa sin ella. Solución: ejecute la actualización usted mismo y lea su error, o use --no-system-update.
+de|su_failed|Die Aktualisierung der Systempakete ist fehlgeschlagen (Code %s); die Installation läuft ohne sie weiter. Abhilfe: Führen Sie die Aktualisierung selbst aus und lesen Sie die Fehlermeldung, oder verwenden Sie --no-system-update.
+it|su_failed|L'aggiornamento dei pacchetti di sistema non è riuscito (codice %s); l'installazione continua senza. Soluzione: esegui tu l'aggiornamento e leggi l'errore, oppure usa --no-system-update.
+pt|su_failed|A atualização dos pacotes do sistema falhou (código %s); a instalação continua sem ela. Solução: execute a atualização e leia o erro, ou use --no-system-update.
+nl|su_failed|Het bijwerken van de systeempakketten is mislukt (code %s); de installatie gaat zonder verder. Oplossing: voer de update zelf uit en lees de foutmelding, of gebruik --no-system-update.
+ru|su_failed|Не удалось обновить системные пакеты (код %s); установка продолжается без этого. Что делать: запустите обновление вручную и прочитайте ошибку либо используйте --no-system-update.
+zh|su_failed|系统软件包更新失败（退出码 %s）；安装将在不更新的情况下继续。处理方法：请自行运行更新并查看错误，或使用 --no-system-update。
+ar|su_failed|فشل تحديث حزم النظام (الرمز %s)؛ ستستمر عملية التثبيت بدونه. الحل: شغّل التحديث بنفسك واقرأ رسالة الخطأ أو استخدم --no-system-update.
+en|su_nopm|No known package manager (apt-get, dnf, yum): the system packages are not updated.
+fr|su_nopm|Aucun gestionnaire de paquets connu (apt-get, dnf, yum) : les paquets système ne sont pas mis à jour.
+es|su_nopm|Ningún gestor de paquetes conocido (apt-get, dnf, yum): los paquetes del sistema no se actualizan.
+de|su_nopm|Kein bekannter Paketmanager (apt-get, dnf, yum): die Systempakete werden nicht aktualisiert.
+it|su_nopm|Nessun gestore di pacchetti noto (apt-get, dnf, yum): i pacchetti di sistema non vengono aggiornati.
+pt|su_nopm|Nenhum gestor de pacotes conhecido (apt-get, dnf, yum): os pacotes do sistema não são atualizados.
+nl|su_nopm|Geen bekende pakketbeheerder (apt-get, dnf, yum): de systeempakketten worden niet bijgewerkt.
+ru|su_nopm|Известный менеджер пакетов не найден (apt-get, dnf, yum): системные пакеты не обновляются.
+zh|su_nopm|未找到已知的包管理器（apt-get、dnf、yum）：不更新系统软件包。
+ar|su_nopm|لا يوجد مدير حزم معروف (apt-get وdnf وyum): لن يتم تحديث حزم النظام.
+en|su_reboot|The system asks for a restart (kernel or core libraries updated): restart it when convenient.
+fr|su_reboot|Le système demande un redémarrage (noyau ou bibliothèques centrales mis à jour) : redémarrez-le quand cela vous convient.
+es|su_reboot|El sistema pide reiniciar (núcleo o bibliotecas centrales actualizados): reinícielo cuando le convenga.
+de|su_reboot|Das System verlangt einen Neustart (Kernel oder Kernbibliotheken aktualisiert): starten Sie es bei Gelegenheit neu.
+it|su_reboot|Il sistema richiede un riavvio (kernel o librerie di base aggiornati): riavvialo quando conviene.
+pt|su_reboot|O sistema pede um reinício (kernel ou bibliotecas centrais atualizados): reinicie quando for conveniente.
+nl|su_reboot|Het systeem vraagt om een herstart (kernel of kernbibliotheken bijgewerkt): start het opnieuw op wanneer het uitkomt.
+ru|su_reboot|Системе требуется перезагрузка (обновлены ядро или основные библиотеки): перезагрузите её в удобное время.
+zh|su_reboot|系统需要重启（内核或核心库已更新）：请在方便时重启。
+ar|su_reboot|يطلب النظام إعادة التشغيل (تم تحديث النواة أو المكتبات الأساسية): أعد تشغيله عند الحاجة.
+en|pre_install|Installing the missing prerequisites: %s
+fr|pre_install|Installation des prérequis manquants : %s
+es|pre_install|Instalando los requisitos que faltan: %s
+de|pre_install|Fehlende Voraussetzungen werden installiert: %s
+it|pre_install|Installazione dei prerequisiti mancanti: %s
+pt|pre_install|A instalar os requisitos em falta: %s
+nl|pre_install|De ontbrekende vereisten worden geïnstalleerd: %s
+ru|pre_install|Устанавливаются недостающие зависимости: %s
+zh|pre_install|正在安装缺少的前置组件：%s
+ar|pre_install|جارٍ تثبيت المتطلبات الناقصة: %s
+en|pre_failed|Could not install the prerequisites automatically (%s). Install them yourself, then run this command again.
+fr|pre_failed|Impossible d'installer automatiquement les prérequis (%s). Installez-les vous-même, puis relancez cette commande.
+es|pre_failed|No se pudieron instalar automáticamente los requisitos (%s). Instálelos usted mismo y vuelva a ejecutar este comando.
+de|pre_failed|Die Voraussetzungen konnten nicht automatisch installiert werden (%s). Installieren Sie sie selbst und führen Sie den Befehl erneut aus.
+it|pre_failed|Impossibile installare automaticamente i prerequisiti (%s). Installali tu e rilancia questo comando.
+pt|pre_failed|Não foi possível instalar automaticamente os requisitos (%s). Instale-os e volte a executar este comando.
+nl|pre_failed|De vereisten konden niet automatisch worden geïnstalleerd (%s). Installeer ze zelf en voer dit commando opnieuw uit.
+ru|pre_failed|Не удалось автоматически установить зависимости (%s). Установите их вручную и повторите эту команду.
+zh|pre_failed|无法自动安装前置组件（%s）。请自行安装后重新运行此命令。
+ar|pre_failed|تعذّر تثبيت المتطلبات تلقائياً (%s). ثبّتها بنفسك ثم أعد تشغيل هذا الأمر.
+en|fw_open|Firewall (%s): TCP port %s opened%s.
+fr|fw_open|Pare-feu (%s) : port TCP %s ouvert%s.
+es|fw_open|Cortafuegos (%s): puerto TCP %s abierto%s.
+de|fw_open|Firewall (%s): TCP-Port %s geöffnet%s.
+it|fw_open|Firewall (%s): porta TCP %s aperta%s.
+pt|fw_open|Firewall (%s): porta TCP %s aberta%s.
+nl|fw_open|Firewall (%s): TCP-poort %s geopend%s.
+ru|fw_open|Файрвол (%s): TCP-порт %s открыт%s.
+zh|fw_open|防火墙（%s）：已开放 TCP 端口 %s%s。
+ar|fw_open|جدار الحماية (%s): تم فتح منفذ TCP %s%s.
+en|fw_inactive|No active firewall (firewalld or ufw) found: nothing to open. Check the firewall of your hosting provider too.
+fr|fw_inactive|Aucun pare-feu actif (firewalld ou ufw) : rien à ouvrir. Vérifiez aussi le pare-feu de votre hébergeur.
+es|fw_inactive|No hay cortafuegos activo (firewalld o ufw): nada que abrir. Compruebe también el cortafuegos de su proveedor.
+de|fw_inactive|Keine aktive Firewall (firewalld oder ufw) gefunden: nichts zu öffnen. Prüfen Sie auch die Firewall Ihres Hosters.
+it|fw_inactive|Nessun firewall attivo (firewalld o ufw): niente da aprire. Controlla anche il firewall del tuo provider.
+pt|fw_inactive|Nenhuma firewall ativa (firewalld ou ufw): nada a abrir. Verifique também a firewall do seu fornecedor.
+nl|fw_inactive|Geen actieve firewall (firewalld of ufw) gevonden: niets te openen. Controleer ook de firewall van uw hostingprovider.
+ru|fw_inactive|Активный файрвол (firewalld или ufw) не найден: открывать нечего. Проверьте также файрвол вашего хостинга.
+zh|fw_inactive|未发现启用的防火墙（firewalld 或 ufw）：无需开放端口。请同时检查托管商的防火墙。
+ar|fw_inactive|لم يتم العثور على جدار حماية نشط (firewalld أو ufw): لا شيء لفتحه. تحقّق أيضاً من جدار حماية مزوّد الاستضافة.
+en|fw_skipped|The firewall is left alone (--no-firewall): open TCP port %s yourself.
+fr|fw_skipped|Le pare-feu n'est pas touché (--no-firewall) : ouvrez vous-même le port TCP %s.
+es|fw_skipped|No se toca el cortafuegos (--no-firewall): abra usted el puerto TCP %s.
+de|fw_skipped|Die Firewall bleibt unberührt (--no-firewall): öffnen Sie den TCP-Port %s selbst.
+it|fw_skipped|Il firewall non viene toccato (--no-firewall): apri tu la porta TCP %s.
+pt|fw_skipped|A firewall não é alterada (--no-firewall): abra você a porta TCP %s.
+nl|fw_skipped|De firewall blijft ongemoeid (--no-firewall): open TCP-poort %s zelf.
+ru|fw_skipped|Файрвол не изменяется (--no-firewall): откройте TCP-порт %s самостоятельно.
+zh|fw_skipped|不改动防火墙（--no-firewall）：请自行开放 TCP 端口 %s。
+ar|fw_skipped|لن يتم تعديل جدار الحماية (--no-firewall): افتح منفذ TCP %s بنفسك.
+en|fw_failed|Could not open TCP port %s in %s. Open it yourself: %s
+fr|fw_failed|Impossible d'ouvrir le port TCP %s dans %s. Ouvrez-le vous-même : %s
+es|fw_failed|No se pudo abrir el puerto TCP %s en %s. Ábralo usted mismo: %s
+de|fw_failed|Der TCP-Port %s konnte in %s nicht geöffnet werden. Öffnen Sie ihn selbst: %s
+it|fw_failed|Impossibile aprire la porta TCP %s in %s. Aprila tu: %s
+pt|fw_failed|Não foi possível abrir a porta TCP %s em %s. Abra-a você: %s
+nl|fw_failed|TCP-poort %s kon niet worden geopend in %s. Open hem zelf: %s
+ru|fw_failed|Не удалось открыть TCP-порт %s в %s. Откройте его вручную: %s
+zh|fw_failed|无法在 %s 中开放 TCP 端口 %s。请自行开放：%s
+ar|fw_failed|تعذّر فتح منفذ TCP %s في %s. افتحه بنفسك: %s
+en|um_installed|Update manager installed: toutwaf-backup-update (daily check; automatic installation of updates: %s).
+fr|um_installed|Gestionnaire de mises à jour installé : toutwaf-backup-update (vérification quotidienne ; installation automatique des mises à jour : %s).
+es|um_installed|Gestor de actualizaciones instalado: toutwaf-backup-update (comprobación diaria; instalación automática de actualizaciones: %s).
+de|um_installed|Update-Manager installiert: toutwaf-backup-update (tägliche Prüfung; automatische Installation von Updates: %s).
+it|um_installed|Gestore degli aggiornamenti installato: toutwaf-backup-update (controllo giornaliero; installazione automatica degli aggiornamenti: %s).
+pt|um_installed|Gestor de atualizações instalado: toutwaf-backup-update (verificação diária; instalação automática de atualizações: %s).
+nl|um_installed|Updatebeheer geïnstalleerd: toutwaf-backup-update (dagelijkse controle; automatische installatie van updates: %s).
+ru|um_installed|Менеджер обновлений установлен: toutwaf-backup-update (ежедневная проверка; автоматическая установка обновлений: %s).
+zh|um_installed|更新管理器已安装：toutwaf-backup-update（每日检查；自动安装更新：%s）。
+ar|um_installed|تم تثبيت مدير التحديثات: toutwaf-backup-update (فحص يومي؛ التثبيت التلقائي للتحديثات: %s).
+en|um_on|on
+fr|um_on|activée
+es|um_on|activada
+de|um_on|ein
+it|um_on|attiva
+pt|um_on|ativa
+nl|um_on|aan
+ru|um_on|включена
+zh|um_on|开启
+ar|um_on|مفعّل
+en|um_off|off
+fr|um_off|désactivée
+es|um_off|desactivada
+de|um_off|aus
+it|um_off|disattiva
+pt|um_off|desativada
+nl|um_off|uit
+ru|um_off|выключена
+zh|um_off|关闭
+ar|um_off|معطّل
+en|um_uptodate|Up to date: version %s (channel %s).
+fr|um_uptodate|À jour : version %s (canal %s).
+es|um_uptodate|Al día: versión %s (canal %s).
+de|um_uptodate|Aktuell: Version %s (Kanal %s).
+it|um_uptodate|Aggiornato: versione %s (canale %s).
+pt|um_uptodate|Atualizado: versão %s (canal %s).
+nl|um_uptodate|Bijgewerkt: versie %s (kanaal %s).
+ru|um_uptodate|Актуально: версия %s (канал %s).
+zh|um_uptodate|已是最新：版本 %s（通道 %s）。
+ar|um_uptodate|محدَّث: الإصدار %s (القناة %s).
+en|um_available|Update available: %s -> %s (channel %s). Install it with: toutwaf-backup-update apply
+fr|um_available|Mise à jour disponible : %s -> %s (canal %s). Installez-la avec : toutwaf-backup-update apply
+es|um_available|Actualización disponible: %s -> %s (canal %s). Instálela con: toutwaf-backup-update apply
+de|um_available|Update verfügbar: %s -> %s (Kanal %s). Installation mit: toutwaf-backup-update apply
+it|um_available|Aggiornamento disponibile: %s -> %s (canale %s). Installalo con: toutwaf-backup-update apply
+pt|um_available|Atualização disponível: %s -> %s (canal %s). Instale com: toutwaf-backup-update apply
+nl|um_available|Update beschikbaar: %s -> %s (kanaal %s). Installeer met: toutwaf-backup-update apply
+ru|um_available|Доступно обновление: %s -> %s (канал %s). Установите командой: toutwaf-backup-update apply
+zh|um_available|有可用更新：%s -> %s（通道 %s）。安装命令：toutwaf-backup-update apply
+ar|um_available|يتوفر تحديث: %s -> %s (القناة %s). ثبّته بالأمر: toutwaf-backup-update apply
+en|um_status|Installed: %s | latest: %s | channel: %s | automatic installation: %s | last check: %s
+fr|um_status|Installée : %s | dernière : %s | canal : %s | installation automatique : %s | dernière vérification : %s
+es|um_status|Instalada: %s | última: %s | canal: %s | instalación automática: %s | última comprobación: %s
+de|um_status|Installiert: %s | neueste: %s | Kanal: %s | automatische Installation: %s | letzte Prüfung: %s
+it|um_status|Installata: %s | ultima: %s | canale: %s | installazione automatica: %s | ultimo controllo: %s
+pt|um_status|Instalada: %s | última: %s | canal: %s | instalação automática: %s | última verificação: %s
+nl|um_status|Geïnstalleerd: %s | nieuwste: %s | kanaal: %s | automatische installatie: %s | laatste controle: %s
+ru|um_status|Установлена: %s | последняя: %s | канал: %s | автоустановка: %s | последняя проверка: %s
+zh|um_status|已安装：%s | 最新：%s | 通道：%s | 自动安装：%s | 上次检查：%s
+ar|um_status|المثبّت: %s | الأحدث: %s | القناة: %s | التثبيت التلقائي: %s | آخر فحص: %s
+en|um_noprev|No previous version to go back to (%s is missing).
+fr|um_noprev|Aucune version précédente à restaurer (%s est absent).
+es|um_noprev|No hay versión anterior a la que volver (falta %s).
+de|um_noprev|Keine frühere Version zum Zurückgehen (%s fehlt).
+it|um_noprev|Nessuna versione precedente da ripristinare (%s manca).
+pt|um_noprev|Não há versão anterior para repor (%s não existe).
+nl|um_noprev|Geen eerdere versie om naar terug te gaan (%s ontbreekt).
+ru|um_noprev|Нет предыдущей версии для отката (%s отсутствует).
+zh|um_noprev|没有可回退的旧版本（缺少 %s）。
+ar|um_noprev|لا يوجد إصدار سابق للرجوع إليه (%s غير موجود).
+en|um_rolled|Went back to the previous version: %s.
+fr|um_rolled|Retour à la version précédente : %s.
+es|um_rolled|Se volvió a la versión anterior: %s.
+de|um_rolled|Zurück auf die vorherige Version: %s.
+it|um_rolled|Tornato alla versione precedente: %s.
+pt|um_rolled|Voltou-se à versão anterior: %s.
+nl|um_rolled|Teruggegaan naar de vorige versie: %s.
+ru|um_rolled|Выполнен откат к предыдущей версии: %s.
+zh|um_rolled|已回退到上一个版本：%s。
+ar|um_rolled|تمت العودة إلى الإصدار السابق: %s.
+en|um_auto|Automatic installation of updates: %s.
+fr|um_auto|Installation automatique des mises à jour : %s.
+es|um_auto|Instalación automática de actualizaciones: %s.
+de|um_auto|Automatische Installation von Updates: %s.
+it|um_auto|Installazione automatica degli aggiornamenti: %s.
+pt|um_auto|Instalação automática de atualizações: %s.
+nl|um_auto|Automatische installatie van updates: %s.
+ru|um_auto|Автоматическая установка обновлений: %s.
+zh|um_auto|自动安装更新：%s。
+ar|um_auto|التثبيت التلقائي للتحديثات: %s.
+en|um_noconf|No update configuration (%s): install ToutWAF Backup with install.sh first.
+fr|um_noconf|Pas de configuration de mise à jour (%s) : installez d'abord ToutWAF Backup avec install.sh.
+es|um_noconf|No hay configuración de actualización (%s): instale primero ToutWAF Backup con install.sh.
+de|um_noconf|Keine Update-Konfiguration (%s): installieren Sie ToutWAF Backup zuerst mit install.sh.
+it|um_noconf|Nessuna configurazione di aggiornamento (%s): installa prima ToutWAF Backup con install.sh.
+pt|um_noconf|Sem configuração de atualização (%s): instale primeiro o ToutWAF Backup com install.sh.
+nl|um_noconf|Geen updateconfiguratie (%s): installeer eerst ToutWAF Backup met install.sh.
+ru|um_noconf|Нет конфигурации обновлений (%s): сначала установите ToutWAF Backup с помощью install.sh.
+zh|um_noconf|没有更新配置（%s）：请先用 install.sh 安装 ToutWAF Backup。
+ar|um_noconf|لا توجد إعدادات للتحديث (%s): ثبّت ToutWAF Backup أولاً باستخدام install.sh.
+en|um_badcmd|Unknown update command '%s'. Commands: status, check, apply, rollback, auto on|off.
+fr|um_badcmd|Commande de mise à jour inconnue « %s ». Commandes : status, check, apply, rollback, auto on|off.
+es|um_badcmd|Comando de actualización desconocido «%s». Comandos: status, check, apply, rollback, auto on|off.
+de|um_badcmd|Unbekannter Update-Befehl „%s“. Befehle: status, check, apply, rollback, auto on|off.
+it|um_badcmd|Comando di aggiornamento sconosciuto «%s». Comandi: status, check, apply, rollback, auto on|off.
+pt|um_badcmd|Comando de atualização desconhecido «%s». Comandos: status, check, apply, rollback, auto on|off.
+nl|um_badcmd|Onbekend updatecommando '%s'. Commando's: status, check, apply, rollback, auto on|off.
+ru|um_badcmd|Неизвестная команда обновления «%s». Команды: status, check, apply, rollback, auto on|off.
+zh|um_badcmd|未知的更新命令“%s”。可用命令：status、check、apply、rollback、auto on|off。
+ar|um_badcmd|أمر تحديث غير معروف «%s». الأوامر: status وcheck وapply وrollback وauto on|off.
+en|hc_check|Checking that the service stays up with the new version…
+fr|hc_check|Vérification que le service reste actif avec la nouvelle version…
+es|hc_check|Comprobando que el servicio sigue activo con la nueva versión…
+de|hc_check|Prüfung, ob der Dienst mit der neuen Version läuft…
+it|hc_check|Verifica che il servizio resti attivo con la nuova versione…
+pt|hc_check|A verificar que o serviço se mantém ativo com a nova versão…
+nl|hc_check|Controle of de dienst actief blijft met de nieuwe versie…
+ru|hc_check|Проверяем, что служба работает с новой версией…
+zh|hc_check|正在检查服务在新版本下是否保持运行…
+ar|hc_check|جارٍ التحقق من بقاء الخدمة قيد التشغيل بالإصدار الجديد…
+en|hc_ok|The service is running with version %s.
+fr|hc_ok|Le service fonctionne avec la version %s.
+es|hc_ok|El servicio funciona con la versión %s.
+de|hc_ok|Der Dienst läuft mit Version %s.
+it|hc_ok|Il servizio funziona con la versione %s.
+pt|hc_ok|O serviço funciona com a versão %s.
+nl|hc_ok|De dienst draait met versie %s.
+ru|hc_ok|Служба работает с версией %s.
+zh|hc_ok|服务正在运行版本 %s。
+ar|hc_ok|تعمل الخدمة بالإصدار %s.
+en|hc_failed|The service does not stay up with version %s: going back to the previous version (%s). Look at: journalctl -u toutwaf-backup-server
+fr|hc_failed|Le service ne reste pas actif avec la version %s : retour à la version précédente (%s). À lire : journalctl -u toutwaf-backup-server
+es|hc_failed|El servicio no se mantiene activo con la versión %s: se vuelve a la anterior (%s). Consulte: journalctl -u toutwaf-backup-server
+de|hc_failed|Der Dienst bleibt mit Version %s nicht aktiv: Rückkehr zur vorherigen Version (%s). Siehe: journalctl -u toutwaf-backup-server
+it|hc_failed|Il servizio non resta attivo con la versione %s: si torna alla precedente (%s). Vedi: journalctl -u toutwaf-backup-server
+pt|hc_failed|O serviço não se mantém ativo com a versão %s: volta-se à anterior (%s). Consulte: journalctl -u toutwaf-backup-server
+nl|hc_failed|De dienst blijft niet actief met versie %s: terug naar de vorige versie (%s). Zie: journalctl -u toutwaf-backup-server
+ru|hc_failed|Служба не остаётся запущенной с версией %s: возврат к предыдущей (%s). Смотрите: journalctl -u toutwaf-backup-server
+zh|hc_failed|服务在版本 %s 下无法保持运行：回退到上一个版本（%s）。请查看：journalctl -u toutwaf-backup-server
+ar|hc_failed|لا تبقى الخدمة قيد التشغيل بالإصدار %s: العودة إلى الإصدار السابق (%s). راجع: journalctl -u toutwaf-backup-server
+en|u_nosysupd|do not update the system packages first (also TWB_SKIP_SYSUPDATE=1)
+fr|u_nosysupd|ne pas mettre à jour les paquets système au préalable (ou TWB_SKIP_SYSUPDATE=1)
+es|u_nosysupd|no actualizar antes los paquetes del sistema (o TWB_SKIP_SYSUPDATE=1)
+de|u_nosysupd|die Systempakete nicht vorher aktualisieren (oder TWB_SKIP_SYSUPDATE=1)
+it|u_nosysupd|non aggiornare prima i pacchetti di sistema (o TWB_SKIP_SYSUPDATE=1)
+pt|u_nosysupd|não atualizar antes os pacotes do sistema (ou TWB_SKIP_SYSUPDATE=1)
+nl|u_nosysupd|de systeempakketten niet eerst bijwerken (of TWB_SKIP_SYSUPDATE=1)
+ru|u_nosysupd|не обновлять сначала системные пакеты (или TWB_SKIP_SYSUPDATE=1)
+zh|u_nosysupd|不先更新系统软件包（或 TWB_SKIP_SYSUPDATE=1）
+ar|u_nosysupd|عدم تحديث حزم النظام أولاً (أو TWB_SKIP_SYSUPDATE=1)
+en|u_nofw|server: do not open the port in firewalld / ufw
+fr|u_nofw|serveur : ne pas ouvrir le port dans firewalld / ufw
+es|u_nofw|servidor: no abrir el puerto en firewalld / ufw
+de|u_nofw|Server: den Port nicht in firewalld / ufw öffnen
+it|u_nofw|server: non aprire la porta in firewalld / ufw
+pt|u_nofw|servidor: não abrir a porta em firewalld / ufw
+nl|u_nofw|server: de poort niet openen in firewalld / ufw
+ru|u_nofw|сервер: не открывать порт в firewalld / ufw
+zh|u_nofw|服务器：不在 firewalld / ufw 中开放端口
+ar|u_nofw|الخادم: عدم فتح المنفذ في firewalld / ufw
+en|u_fwfrom|server: open the port only for this network (CIDR, e.g. 203.0.113.0/24)
+fr|u_fwfrom|serveur : n'ouvrir le port que pour ce réseau (CIDR, ex. 203.0.113.0/24)
+es|u_fwfrom|servidor: abrir el puerto solo para esta red (CIDR, p. ej. 203.0.113.0/24)
+de|u_fwfrom|Server: den Port nur für dieses Netz öffnen (CIDR, z. B. 203.0.113.0/24)
+it|u_fwfrom|server: apri la porta solo per questa rete (CIDR, es. 203.0.113.0/24)
+pt|u_fwfrom|servidor: abrir a porta apenas para esta rede (CIDR, p. ex. 203.0.113.0/24)
+nl|u_fwfrom|server: de poort alleen voor dit netwerk openen (CIDR, bv. 203.0.113.0/24)
+ru|u_fwfrom|сервер: открыть порт только для этой сети (CIDR, напр. 203.0.113.0/24)
+zh|u_fwfrom|服务器：仅对该网络开放端口（CIDR，例如 203.0.113.0/24）
+ar|u_fwfrom|الخادم: فتح المنفذ لهذه الشبكة فقط (CIDR، مثل 203.0.113.0/24)
+en|u_auto|install the updates automatically (daily timer); default: only check and tell (toutwaf-backup-update auto on|off changes it later)
+fr|u_auto|installer les mises à jour automatiquement (minuterie quotidienne) ; par défaut : seulement vérifier et signaler (toutwaf-backup-update auto on|off le change ensuite)
+es|u_auto|instalar las actualizaciones automáticamente (temporizador diario); por defecto: solo comprobar y avisar (toutwaf-backup-update auto on|off lo cambia después)
+de|u_auto|Updates automatisch installieren (täglicher Timer); Standard: nur prüfen und melden (toutwaf-backup-update auto on|off ändert das später)
+it|u_auto|installa gli aggiornamenti automaticamente (timer giornaliero); predefinito: solo controllare e segnalare (toutwaf-backup-update auto on|off lo cambia in seguito)
+pt|u_auto|instalar as atualizações automaticamente (temporizador diário); por omissão: apenas verificar e avisar (toutwaf-backup-update auto on|off altera depois)
+nl|u_auto|updates automatisch installeren (dagelijkse timer); standaard: alleen controleren en melden (toutwaf-backup-update auto on|off wijzigt dit later)
+ru|u_auto|устанавливать обновления автоматически (ежедневный таймер); по умолчанию: только проверять и сообщать (toutwaf-backup-update auto on|off меняет это позже)
+zh|u_auto|自动安装更新（每日定时器）；默认：仅检查并提示（之后可用 toutwaf-backup-update auto on|off 修改）
+ar|u_auto|تثبيت التحديثات تلقائياً (مؤقّت يومي)؛ الافتراضي: الفحص والإبلاغ فقط (يغيّره لاحقاً toutwaf-backup-update auto on|off)
+en|u_noum|do not install the update manager (toutwaf-backup-update) and its timer
+fr|u_noum|ne pas installer le gestionnaire de mises à jour (toutwaf-backup-update) ni sa minuterie
+es|u_noum|no instalar el gestor de actualizaciones (toutwaf-backup-update) ni su temporizador
+de|u_noum|den Update-Manager (toutwaf-backup-update) und seinen Timer nicht installieren
+it|u_noum|non installare il gestore degli aggiornamenti (toutwaf-backup-update) né il suo timer
+pt|u_noum|não instalar o gestor de atualizações (toutwaf-backup-update) nem o seu temporizador
+nl|u_noum|het updatebeheer (toutwaf-backup-update) en zijn timer niet installeren
+ru|u_noum|не устанавливать менеджер обновлений (toutwaf-backup-update) и его таймер
+zh|u_noum|不安装更新管理器（toutwaf-backup-update）及其定时器
+ar|u_noum|عدم تثبيت مدير التحديثات (toutwaf-backup-update) ومؤقّته
+en|u_manager|update manager (status, check, apply, rollback, auto on|off, channel NAME); normally run as: toutwaf-backup-update
+fr|u_manager|gestionnaire de mises à jour (status, check, apply, rollback, auto on|off, channel NOM) ; normalement lancé par : toutwaf-backup-update
+es|u_manager|gestor de actualizaciones (status, check, apply, rollback, auto on|off, channel NOMBRE); normalmente se ejecuta con: toutwaf-backup-update
+de|u_manager|Update-Manager (status, check, apply, rollback, auto on|off, channel NAME); normalerweise aufgerufen als: toutwaf-backup-update
+it|u_manager|gestore degli aggiornamenti (status, check, apply, rollback, auto on|off, channel NOME); normalmente lanciato con: toutwaf-backup-update
+pt|u_manager|gestor de atualizações (status, check, apply, rollback, auto on|off, channel NOME); normalmente executado com: toutwaf-backup-update
+nl|u_manager|updatebeheer (status, check, apply, rollback, auto on|off, channel NAAM); normaal uitgevoerd als: toutwaf-backup-update
+ru|u_manager|менеджер обновлений (status, check, apply, rollback, auto on|off, channel ИМЯ); обычно запускается как: toutwaf-backup-update
+zh|u_manager|更新管理器（status、check、apply、rollback、auto on|off、channel 名称）；通常以 toutwaf-backup-update 运行
+ar|u_manager|مدير التحديثات (status وcheck وapply وrollback وauto on|off وchannel الاسم)؛ يُشغَّل عادةً بالأمر: toutwaf-backup-update
+en|hc_nofirst|The service does not stay up (the installation itself is complete). Look at: journalctl -u toutwaf-backup-server
+fr|hc_nofirst|Le service ne reste pas actif (l'installation elle-même est terminée). À lire : journalctl -u toutwaf-backup-server
+es|hc_nofirst|El servicio no se mantiene activo (la instalación en sí ha terminado). Consulte: journalctl -u toutwaf-backup-server
+de|hc_nofirst|Der Dienst bleibt nicht aktiv (die Installation selbst ist abgeschlossen). Siehe: journalctl -u toutwaf-backup-server
+it|hc_nofirst|Il servizio non resta attivo (l'installazione stessa è completa). Vedi: journalctl -u toutwaf-backup-server
+pt|hc_nofirst|O serviço não se mantém ativo (a instalação em si está concluída). Consulte: journalctl -u toutwaf-backup-server
+nl|hc_nofirst|De dienst blijft niet actief (de installatie zelf is voltooid). Zie: journalctl -u toutwaf-backup-server
+ru|hc_nofirst|Служба не остаётся запущенной (сама установка завершена). Смотрите: journalctl -u toutwaf-backup-server
+zh|hc_nofirst|服务无法保持运行（安装本身已完成）。请查看：journalctl -u toutwaf-backup-server
+ar|hc_nofirst|لا تبقى الخدمة قيد التشغيل (اكتمل التثبيت نفسه). راجع: journalctl -u toutwaf-backup-server
 # END CATALOG
 TWB_CATALOG
 }
@@ -957,6 +1308,12 @@ usage() {
   opt "--yes" "$(t u_yes)"
   opt "--pubkey-file FILE" "$(t u_pubkey)"
   opt "--force" "$(t u_force)"
+  opt "--no-system-update" "$(t u_nosysupd)"
+  opt "--no-firewall" "$(t u_nofw)"
+  opt "--firewall-from CIDR" "$(t u_fwfrom)"
+  opt "--auto-update" "$(t u_auto)"
+  opt "--no-update-manager" "$(t u_noum)"
+  opt "--manager CMD" "$(t u_manager)"
   opt "--lang CODE" "$(t u_lang)"
   opt "-h, --help" "$(t u_help)"
 }
@@ -964,7 +1321,7 @@ usage() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --role) ROLE="${2:-}"; shift 2 ;;
-    --channel) CHANNEL="${2:-}"; shift 2 ;;
+    --channel) CHANNEL="${2:-}"; CHANNEL_SET=1; shift 2 ;;
     --version) VERSION="${2:-}"; shift 2 ;;
     --base-url) BASE_URL="${2:-}"; BASE_EXPLICIT=1; shift 2 ;;
     --pubkey-file) PUBKEY_FILE="${2:-}"; shift 2 ;;
@@ -982,6 +1339,14 @@ while [ $# -gt 0 ]; do
     --purge) PURGE=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --force) FORCE=1; shift ;;
+    --no-system-update) SYSUPDATE=0; shift ;;
+    --no-firewall) FIREWALL=0; shift ;;
+    --firewall-from) FW_FROM="${2:-}"; shift 2 ;;
+    --auto-update) AUTO=1; shift ;;
+    --no-update-manager) NO_UM=1; shift ;;
+    --scheduled) SCHEDULED=1; shift ;;
+    --manager) MGR_CMD="${2:-status}"; shift 2
+      case "$MGR_CMD" in auto|channel) MGR_ARG="${1:-}"; [ $# -eq 0 ] || shift ;; esac ;;
     --pubkey) PUBKEY_OVERRIDE="${2:-}"; shift 2 ;;
     --lang) shift 2 ;;
     --lang=*|--en|--fr|--es|--de|--it|--pt|--nl|--ru|--zh|--ar) shift ;;
@@ -994,6 +1359,33 @@ say() { printf '%s\n' "$*"; }
 warn() { printf '%s: %s\n' "$(t sh_lbl_warning)" "$*" >&2; }
 die() { printf 'install.sh: %s: %s\n' "$(t sh_lbl_error)" "$*" >&2; exit 1; }
 
+[ "${TWB_SKIP_SYSUPDATE:-}" != 1 ] || SYSUPDATE=0
+# the update manager (toutwaf-backup-update) runs this same script with the settings saved at installation time
+if [ -n "$MGR_CMD" ]; then
+  case "$MGR_CMD" in status|check|apply|rollback|auto|channel|run) ;; *) die "$(t um_badcmd "$MGR_CMD")" ;; esac
+  _conf="$DESTDIR$CONF_DIR/update.conf"
+  [ -r "$_conf" ] || die "$(t um_noconf "$_conf")"
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    _k="${_line%%=*}"; _v="${_line#*=}"
+    case "$_k" in
+      ROLE|PREFIX|STATE_DIR|CONF_DIR|SERVICE_USER|LISTEN|AUTO|SYSUPDATE_SCHEDULED) printf -v "$_k" '%s' "$_v" ;;
+      CHANNEL) if [ "$CHANNEL_SET" -eq 0 ]; then CHANNEL="$_v"; fi ;;
+      BASE_URL) if [ "$BASE_EXPLICIT" -eq 0 ] && [ -n "$_v" ]; then BASE_URL="$_v"; BASE_EXPLICIT=1; fi ;;
+      PUBKEY) if [ -z "$PUBKEY_OVERRIDE" ] && [ -n "$_v" ]; then PUBKEY_OVERRIDE="$_v"; fi ;;
+    esac
+  done <"$_conf"
+  YES=1; INIT=0; START=0
+  [ "$MGR_CMD" != run ] || { if [ "${AUTO:-0}" = 1 ]; then MGR_CMD=apply; SCHEDULED=1; else MGR_CMD=check; fi; }
+  case "$MGR_CMD" in status|check) CHECK_ONLY=1 ;; esac
+fi
+if [ -z "$AUTO" ]; then   # not given: keep what an earlier installation chose
+  AUTO=0
+  if [ -r "$DESTDIR$CONF_DIR/update.conf" ]; then AUTO="$(sed -nE 's/^AUTO=([01])$/\1/p' "$DESTDIR$CONF_DIR/update.conf" | head -1)"; AUTO="${AUTO:-0}"; fi
+fi
+if [ -z "$MGR_CMD" ] && [ -r "$DESTDIR$CONF_DIR/update.conf" ]; then
+  _ss="$(sed -nE 's/^SYSUPDATE_SCHEDULED=([01])$/\1/p' "$DESTDIR$CONF_DIR/update.conf" | head -1)"; SYSUPDATE_SCHEDULED="${_ss:-0}"
+fi
+[[ "$FW_FROM" =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ ]] || [ -z "$FW_FROM" ] || die "bad --firewall-from"
 case "$ROLE" in server|client) ;; *) usage >&2; die "$(t sh_e_role_req)" ;; esac
 case "$CHANNEL" in stable|dev) ;; *) die "$(t sh_e_channel)" ;; esac
 [[ "$SERVICE_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "$(t sh_e_user)"
@@ -1001,7 +1393,7 @@ case "$CHANNEL" in stable|dev) ;; *) die "$(t sh_e_channel)" ;; esac
 [ -z "$PUBKEY_OVERRIDE" ] || { warn "$(t w_pubkey_override)"; RELEASE_PUBKEY="$PUBKEY_OVERRIDE"; }
 [[ "$RELEASE_PUBKEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || die "$(t sh_e_nokey)"
 
-if [ -z "$DESTDIR" ] && [ "$(id -u)" -ne 0 ]; then die "$(t sh_e_root)"; fi
+if [ -z "$DESTDIR" ] && [ "$(id -u)" -ne 0 ] && [ "$CHECK_ONLY" -eq 0 ]; then die "$(t sh_e_root)"; fi
 D="$DESTDIR"
 
 # ---- a backup SERVER must not live on a machine that runs ToutWAF ------------------------------------------------------------------
@@ -1009,6 +1401,7 @@ D="$DESTDIR"
 host_guard() {
   [ "$ROLE" = server ] || return 0
   [ "$UNINSTALL" -eq 0 ] || return 0
+  [ -z "$MGR_CMD" ] || return 0
   [ "${TWB_ALLOW_SAME_HOST:-}" = 1 ] && return 0
   local found="" p b
   for b in toutwaf-cp toutwaf-dp toutwafctl; do
@@ -1042,12 +1435,214 @@ confirm() { # an affirmative answer in any of the languages (y, o[ui], s[í/ì/i
   case "$a" in [yYoOsSjJ]*|д*|Д*|是*|ن*) return 0 ;; *) return 1 ;; esac
 }
 
+
+# ---- state, update manager settings, rollback ----------------------------------------------------------------------------------------
+STATE_FILE="$D$CONF_DIR/update.state"
+conf_set() { # key value: replaces or appends a line of update.conf (written atomically)
+  local f="$D$CONF_DIR/update.conf" k="$1" v="$2"
+  mkdir -p "$D$CONF_DIR"
+  { grep -v "^$k=" "$f" 2>/dev/null || true; printf '%s=%s\n' "$k" "$v"; } >"$f.new.$$"
+  mv -f "$f.new.$$" "$f"; chmod 0644 "$f"
+}
+write_state() { # result [latest]: what the last run of the update manager found or did
+  [ -d "$D$CONF_DIR" ] || return 0
+  { printf 'last_check=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; printf 'latest=%s\n' "${2:-${LATEST:-}}"; printf 'result=%s\n' "$1"; } >"$STATE_FILE" 2>/dev/null || true
+}
+onoff() { if [ "${1:-0}" = 1 ]; then t um_on; else t um_off; fi; }
+cur_version() { if [ -x "$BIN" ]; then "$BIN" version 2>/dev/null | sed -nE 's/^toutwaf-backup ([^ ]+).*/\1/p' | head -1 || true; fi; }
+service_restart_if_active() {
+  [ "$ROLE" = server ] || return 0
+  if use_systemd && systemctl is-active --quiet toutwaf-backup-server.service; then systemctl restart toutwaf-backup-server.service; fi
+  return 0
+}
+mgr_rollback() { # puts the previous binary back (running it again goes forward again)
+  [ -f "$BIN.prev" ] || die "$(t um_noprev "$BIN.prev")"
+  local was; was="$(cur_version)"
+  mv -f "$BIN" "$BIN.swap.$$"; mv -f "$BIN.prev" "$BIN"; mv -f "$BIN.swap.$$" "$BIN.prev"
+  service_restart_if_active
+  write_state "rolled-back"
+  say "$(t um_rolled "$(cur_version)")${was:+ ($was -> $BIN.prev)}"
+}
+mgr_auto() { # on | off: whether the daily timer installs the updates itself (otherwise it only checks)
+  case "${1:-}" in on) v=1 ;; off) v=0 ;; *) die "$(t um_badcmd "auto ${1:-}")" ;; esac
+  conf_set AUTO "$v"; say "$(t um_auto "$(onoff "$v")")"
+}
+case "$MGR_CMD" in
+  rollback) mgr_rollback; exit 0 ;;
+  auto) mgr_auto "$MGR_ARG"; exit 0 ;;
+  channel)
+    case "$MGR_ARG" in stable|dev) ;; *) die "$(t sh_e_channel)" ;; esac
+    conf_set CHANNEL "$MGR_ARG"; say "channel: $MGR_ARG"; exit 0 ;;
+esac
+
+# ---- the system: tested versions, prerequisites, packages updated before an installation or an upgrade ------------------------------------
+os_check() {
+  local f="${TWB_OS_RELEASE:-/etc/os-release}" id="" ver="" name=""
+  [ -r "$f" ] || return 0
+  # shellcheck disable=SC1090  # the os-release file is a shell fragment by definition
+  id="$( . "$f" 2>/dev/null; printf '%s' "${ID:-}" )"
+  # shellcheck disable=SC1090
+  ver="$( . "$f" 2>/dev/null; printf '%s' "${VERSION_ID:-}" )"
+  # shellcheck disable=SC1090
+  name="$( . "$f" 2>/dev/null; printf '%s' "${PRETTY_NAME:-$id $ver}" )"
+  case "$id:$ver" in
+    debian:12|debian:12.*|debian:13|debian:13.*|ubuntu:22.04|ubuntu:24.04|ubuntu:26.04) say "  $(t os_ok "$name")" ;;
+    almalinux:9|almalinux:9.*|almalinux:10|almalinux:10.*|rocky:9|rocky:9.*|rocky:10|rocky:10.*|rhel:9|rhel:9.*|rhel:10|rhel:10.*|centos:9|centos:10|ol:9|ol:9.*|ol:10|ol:10.*) say "  $(t os_ok "$name")" ;;
+    *) warn "$(t os_untested "$name")" ;;
+  esac
+}
+os_family() { # debian | rhel | "": from os-release (ID and ID_LIKE)
+  local f="${TWB_OS_RELEASE:-/etc/os-release}" w=""
+  # shellcheck disable=SC1090
+  [ -r "$f" ] && w="$( . "$f" 2>/dev/null; printf '%s %s' "${ID:-}" "${ID_LIKE:-}" )"
+  case " $w " in *" debian "*|*" ubuntu "*) echo debian ;; *" rhel "*|*" fedora "*|*" centos "*|*" almalinux "*|*" rocky "*|*" ol "*) echo rhel ;; esac
+}
+pkg_mgr() {
+  case "$(os_family)" in
+    debian) command -v apt-get >/dev/null 2>&1 && { echo apt; return 0; } ;;
+    rhel) if command -v dnf >/dev/null 2>&1; then echo dnf; return 0; elif command -v yum >/dev/null 2>&1; then echo yum; return 0; fi ;;
+  esac
+  if command -v apt-get >/dev/null 2>&1; then echo apt; elif command -v dnf >/dev/null 2>&1; then echo dnf; elif command -v yum >/dev/null 2>&1; then echo yum; fi; }
+pkg_install() { # packages...: quiet, one retry (a package lock held by an unattended upgrade is common right after a boot)
+  local pm rc=0 try=0 log="$TMP/pkg.log"
+  pm="$(pkg_mgr)"; [ -n "$pm" ] || return 1
+  while :; do
+    rc=0
+    case "$pm" in
+      apt) apt-get -o DPkg::Lock::Timeout=300 update -qq >>"$log" 2>&1 </dev/null || true
+           DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends "$@" >>"$log" 2>&1 </dev/null || rc=$? ;;
+      dnf|yum) "$pm" -y install "$@" >>"$log" 2>&1 </dev/null || rc=$? ;;
+    esac
+    [ "$rc" -ne 0 ] || return 0
+    try=$((try + 1)); [ "$try" -lt 2 ] || { tail -n 5 "$log" >&2 || true; return "$rc"; }
+    sleep "${TWB_PKG_RETRY_DELAY:-10}"
+  done
+}
+prereqs_run() { # what this installer itself needs, installed when missing; never run in staging
+  [ -z "$D" ] || return 0
+  local need=() have_dl=0
+  command -v curl >/dev/null 2>&1 && have_dl=1; command -v wget >/dev/null 2>&1 && have_dl=1
+  [ "$have_dl" -eq 1 ] || need+=(curl)
+  command -v openssl >/dev/null 2>&1 || need+=(openssl)
+  command -v tar >/dev/null 2>&1 || need+=(tar)
+  command -v gzip >/dev/null 2>&1 || need+=(gzip)
+  command -v sha256sum >/dev/null 2>&1 || need+=(coreutils)
+  [ -e /etc/ssl/certs/ca-certificates.crt ] || [ -e /etc/pki/tls/certs/ca-bundle.crt ] || [ -e /etc/ssl/cert.pem ] || need+=(ca-certificates)
+  [ "${#need[@]}" -gt 0 ] || return 0
+  say "  $(t pre_install "${need[*]}")"
+  pkg_install "${need[@]}" || die "$(t pre_failed "${need[*]}")"
+}
+sysupdate_run() { # the system packages first; a failure is a warning, never a stop
+  [ -z "$D" ] || return 0
+  if [ "$SYSUPDATE" -eq 0 ]; then say "  $(t su_skipped)"; return 0; fi
+  if [ "$SCHEDULED" -eq 1 ] && [ "$SYSUPDATE_SCHEDULED" != 1 ]; then return 0; fi   # the unattended timer touches the system only if asked to
+  local stamp="${TWB_STAMP:-/var/lib/toutwaf-backup-system-update.stamp}" pm rc=0 log="$TMP/sysupdate.log" to=()
+  if [ "${TWB_FORCE_SYSUPDATE:-}" != 1 ] && [ -n "$(find "$stamp" -mmin -360 2>/dev/null || true)" ]; then say "  $(t su_recent)"; return 0; fi
+  pm="$(pkg_mgr)"; if [ -z "$pm" ]; then warn "$(t su_nopm)"; return 0; fi
+  command -v timeout >/dev/null 2>&1 && to=(timeout "${TWB_UPDATE_TIMEOUT:-1800}")
+  say "  $(t su_run)"
+  case "$pm" in
+    apt) export DEBIAN_FRONTEND=noninteractive
+         { "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 update \
+             && "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y upgrade; } >>"$log" 2>&1 </dev/null || rc=$? ;;
+    dnf|yum) "${to[@]+"${to[@]}"}" "$pm" -y update >>"$log" 2>&1 </dev/null || rc=$? ;;
+  esac
+  if [ "$rc" -eq 0 ]; then
+    { mkdir -p "$(dirname "$stamp")" && : >"$stamp"; } 2>/dev/null || true
+  else
+    warn "$(t su_failed "$rc")"; tail -n 5 "$log" >&2 || true
+  fi
+  if { command -v needs-restarting >/dev/null 2>&1 && ! needs-restarting -r >/dev/null 2>&1; } || [ -f /var/run/reboot-required ]; then warn "$(t su_reboot)"; fi
+  return 0
+}
+
+# ---- the port of the server in the system firewall ----------------------------------------------------------------------------------------
+FW_DONE=0
+fw_apply() { # opens the port in firewalld or ufw when one of them is active; touches nothing else
+  local port="$1" via="" cmd="" rc=0
+  [ -z "$D" ] || return 0
+  if [ "$FIREWALL" -eq 0 ]; then say "$(t fw_skipped "$port")"; FW_DONE=1; return 0; fi
+  if command -v firewall-cmd >/dev/null 2>&1 && [ "$(firewall-cmd --state 2>/dev/null || true)" = running ]; then
+    via=firewalld
+    if [ -n "$FW_FROM" ]; then
+      local fam=ipv4; case "$FW_FROM" in *:*) fam=ipv6 ;; esac
+      cmd="firewall-cmd --permanent --add-rich-rule='rule family=$fam source address=$FW_FROM port port=$port protocol=tcp accept' && firewall-cmd --reload"
+      firewall-cmd --permanent --add-rich-rule="rule family=$fam source address=$FW_FROM port port=$port protocol=tcp accept" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 || rc=$?
+    else
+      cmd="firewall-cmd --permanent --add-port=$port/tcp && firewall-cmd --reload"
+      firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 || rc=$?
+    fi
+  elif command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi '^Status: active'; then
+    via=ufw
+    if [ -n "$FW_FROM" ]; then cmd="ufw allow from $FW_FROM to any port $port proto tcp"; ufw allow from "$FW_FROM" to any port "$port" proto tcp >/dev/null 2>&1 || rc=$?
+    else cmd="ufw allow $port/tcp"; ufw allow "$port/tcp" >/dev/null 2>&1 || rc=$?; fi
+  else
+    say "$(t fw_inactive)"; FW_DONE=1; return 0
+  fi
+  FW_DONE=1
+  if [ "$rc" -eq 0 ]; then say "$(t fw_open "$via" "$port" "${FW_FROM:+ ($FW_FROM)}")"; else warn "$(t fw_failed "$port" "$via" "$cmd")"; fi
+  return 0
+}
+
+# ---- the update manager: the same script, its saved settings and a daily timer ----------------------------------------------------------
+um_install() {
+  [ "$NO_UM" -eq 0 ] || return 0
+  local lib="$D$PREFIX/lib/toutwaf-backup" sbin="$D$PREFIX/sbin" self="${BASH_SOURCE[0]:-$0}"
+  { conf_set ROLE "$ROLE"; conf_set PREFIX "$PREFIX"; conf_set STATE_DIR "$STATE_DIR"; conf_set CONF_DIR "$CONF_DIR"
+    conf_set SERVICE_USER "$SERVICE_USER"; conf_set LISTEN "$LISTEN"; conf_set CHANNEL "$CHANNEL"; conf_set AUTO "$AUTO"
+    conf_set SYSUPDATE_SCHEDULED "$SYSUPDATE_SCHEDULED"
+    if [ "$BASE_EXPLICIT" -eq 1 ]; then conf_set BASE_URL "$BASE_URL"; fi
+    if [ -n "$PUBKEY_OVERRIDE" ]; then conf_set PUBKEY "$PUBKEY_OVERRIDE"; fi; }
+  mkdir -p "$lib" "$sbin"
+  if [ -f "$self" ] && head -n 1 "$self" | grep -q 'bash'; then
+    if ! [ "$self" -ef "$lib/install.sh" ]; then cp "$self" "$lib/install.sh.new.$$"; mv -f "$lib/install.sh.new.$$" "$lib/install.sh"; fi
+  else   # started through a pipe (curl | bash): the script is downloaded again, over HTTPS, from where it came from
+    if fetch "$BASE_URL/install.sh" "$lib/install.sh.new.$$" && bash -n "$lib/install.sh.new.$$" 2>/dev/null; then mv -f "$lib/install.sh.new.$$" "$lib/install.sh"
+    else rm -f "$lib/install.sh.new.$$"; [ -f "$lib/install.sh" ] || { NO_UM=1; return 0; }; fi
+  fi
+  chmod 0755 "$lib/install.sh"
+  printf '#!/bin/sh\n# toutwaf-backup-update: the update manager of ToutWAF Backup (status, check, apply, rollback, auto on|off, channel NAME)\nexec /bin/bash %s/lib/toutwaf-backup/install.sh --manager "$@"\n' "$PREFIX" >"$sbin/toutwaf-backup-update.new.$$"
+  chmod 0755 "$sbin/toutwaf-backup-update.new.$$"; mv -f "$sbin/toutwaf-backup-update.new.$$" "$sbin/toutwaf-backup-update"
+  if [ "$NO_SYSTEMD" -eq 0 ] || [ -n "$D" ]; then
+    mkdir -p "$UNIT_DIR"
+    printf '[Unit]\nDescription=ToutWAF Backup: check for (and, if enabled, install) updates\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nNice=10\nTimeoutStartSec=3h\nExecStart=%s/sbin/toutwaf-backup-update run\n' "$PREFIX" >"$UNIT_DIR/toutwaf-backup-update.service"
+    printf '[Unit]\nDescription=ToutWAF Backup: daily update check\n\n[Timer]\nOnCalendar=*-*-* 03:30:00\nRandomizedDelaySec=2h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' >"$UNIT_DIR/toutwaf-backup-update.timer"
+    chmod 0644 "$UNIT_DIR/toutwaf-backup-update.service" "$UNIT_DIR/toutwaf-backup-update.timer"
+    if use_systemd; then systemctl daemon-reload; systemctl enable --now toutwaf-backup-update.timer >/dev/null 2>&1 || true; fi
+  fi
+  say "$(t um_installed "$(onoff "$AUTO")")"
+}
+
+# the service has to stay up with the new binary; if it does not, the previous binary is put back
+hc_verify() {
+  use_systemd || return 0
+  local i=0 ok=0 v
+  say "$(t hc_check)"
+  while [ "$i" -lt "${TWB_HC_WAIT:-20}" ]; do
+    if systemctl is-active --quiet toutwaf-backup-server.service; then ok=1; break; fi
+    sleep 1; i=$((i + 1))
+  done
+  if [ "$ok" -eq 1 ]; then sleep "${TWB_HC_STABLE:-4}"; systemctl is-active --quiet toutwaf-backup-server.service || ok=0; fi
+  v="$(cur_version)"
+  if [ "$ok" -eq 1 ]; then say "$(t hc_ok "$v")"; return 0; fi
+  if [ "$NEW_BIN" -eq 1 ] && [ -n "${CUR:-}" ] && [ -f "$BIN.prev" ]; then
+    warn "$(t hc_failed "$v" "$CUR")"
+    mv -f "$BIN.prev" "$BIN"; systemctl restart toutwaf-backup-server.service || true
+    write_state "rolled-back"; exit 1
+  fi
+  warn "$(t hc_nofirst)"
+  return 0
+}
+
 # ---- uninstall ----------------------------------------------------------------------------------------------------------------
 if [ "$UNINSTALL" -eq 1 ]; then
   if use_systemd; then
     systemctl disable --now toutwaf-backup-server.service 2>/dev/null || true
+    systemctl disable --now toutwaf-backup-update.timer 2>/dev/null || true
   fi
-  rm -f "$BIN" "$BIN.prev" "$UNIT_DIR/toutwaf-backup-server.service"
+  rm -f "$BIN" "$BIN.prev" "$UNIT_DIR/toutwaf-backup-server.service" "$UNIT_DIR/toutwaf-backup-update.service" "$UNIT_DIR/toutwaf-backup-update.timer" \
+    "$D$PREFIX/sbin/toutwaf-backup-update" "$D$PREFIX/lib/toutwaf-backup/install.sh"
+  rmdir "$D$PREFIX/lib/toutwaf-backup" 2>/dev/null || true
   use_systemd && systemctl daemon-reload || true
   say "$(t sh_un_removed "$BIN")"
   say "$(t sh_un_timers)"
@@ -1071,6 +1666,7 @@ fetch() { # url dest
   else die "$(t sh_e_curl)"; fi
 }
 case "$BASE_URL" in https://*|http://127.0.0.1*|http://localhost*|file://*) ;; *) die "$(t e_https)" ;; esac
+if [ "$CHECK_ONLY" -eq 0 ]; then os_check; prereqs_run; fi
 command -v openssl >/dev/null 2>&1 || die "$(t sh_e_openssl)"
 OSSL_MAJOR="$(openssl version | sed -E 's/^[A-Za-z]+ ([0-9]+)\..*/\1/')"
 [ "${OSSL_MAJOR:-0}" -ge 3 ] 2>/dev/null || die "$(t sh_e_openssl3 "$(openssl version)")"
@@ -1100,9 +1696,20 @@ if printf '%s' "$YANKED" | grep -q "\"$WANT\""; then [ "$FORCE" -eq 1 ] || die "
 
 CUR=""
 if [ -x "$BIN" ]; then CUR="$("$BIN" version 2>/dev/null | sed -nE 's/^toutwaf-backup ([^ ]+).*/\1/p' || true)"; fi
+if [ "$CHECK_ONLY" -eq 1 ]; then   # status / check: nothing is changed
+  _last="-"; [ ! -r "$STATE_FILE" ] || _last="$(sed -nE 's/^last_check=(.*)$/\1/p' "$STATE_FILE" | head -1)"
+  if [ "$MGR_CMD" = status ]; then say "$(t um_status "${CUR:--}" "$LATEST" "$CHANNEL" "$(onoff "$AUTO")" "$_last")"; fi
+  if [ -n "$CUR" ] && [ "$CUR" != "$LATEST" ]; then
+    say "$(t um_available "$CUR" "$LATEST" "$CHANNEL")"; write_state "available"; exit 10
+  fi
+  if [ "$MGR_CMD" != status ]; then say "$(t um_uptodate "${CUR:--}" "$CHANNEL")"; fi
+  write_state "up-to-date"; exit 0
+fi
 if [ "$CUR" = "$WANT" ] && [ "$FORCE" -eq 0 ]; then
   say "$(t s_uptodate "$CUR")"
+  if [ -n "$MGR_CMD" ]; then write_state "up-to-date" "$LATEST"; exit 0; fi   # the update manager never restarts a service for nothing
 else
+  sysupdate_run   # before the new version goes in: the system packages (an installation or an upgrade)
   ASSET="toutwaf-backup-linux-$ARCH.tar.gz"
   REL="$BASE_URL/releases/$WANT"
   say "$(t sh_s_download "$WANT" "$CHANNEL" "$ARCH")"
@@ -1132,6 +1739,7 @@ else
   if [ -f "$BIN" ]; then cp -p "$BIN" "$BIN.prev"; fi
   install -m 0755 "$SRC/toutwaf-backup" "$BIN.new.$$"
   mv -f "$BIN.new.$$" "$BIN"
+  NEW_BIN=1
   say "$(t s_installed "$BIN" "$WANT")"
   if [ -f "$BIN.prev" ] && [ -n "$CUR" ]; then say "$(t sh_s_prev "$CUR" "$BIN.prev")"; fi
   UNIT_SRC="$SRC/systemd"
@@ -1139,8 +1747,10 @@ fi
 
 # ---- roles --------------------------------------------------------------------------------------------------------------------
 mkdir -p "$D$CONF_DIR"; chmod 0750 "$D$CONF_DIR"
+um_install
 
 if [ "$ROLE" = client ]; then
+  if [ -n "$MGR_CMD" ]; then write_state "installed" "$WANT"; exit 0; fi
   say ""
   say "$(t c_done)"
   say "  1. toutwaf-backup client init --server https://BACKUP-SERVER:8007 --tofu --token <token> --datastore <name> --create-key"
@@ -1201,18 +1811,23 @@ if use_systemd; then
   if [ "$START" -eq 1 ]; then
     systemctl enable --now toutwaf-backup-server.service
     say "$(t sh_s_enabled)"
+    hc_verify
   elif systemctl is-active --quiet toutwaf-backup-server.service; then
     systemctl restart toutwaf-backup-server.service
     say "$(t s_restarted)"
+    hc_verify
   else
     say "$(t sh_s_startit)"
   fi
 fi
 port="${LISTEN##*:}"
 say ""
-say "$(t sh_s_fw "$port")"
-if command -v ufw >/dev/null 2>&1; then say "  ufw allow from <client-network> to any port $port proto tcp"
-elif command -v firewall-cmd >/dev/null 2>&1; then say "  firewall-cmd --permanent --add-port=$port/tcp && firewall-cmd --reload"
-else say "  iptables -A INPUT -p tcp --dport $port -s <client-network> -j ACCEPT"; fi
+fw_apply "$port"
+if [ "$FW_DONE" -eq 0 ]; then
+  say "$(t sh_s_fw "$port")"
+  say "  iptables -A INPUT -p tcp --dport $port -s <client-network> -j ACCEPT"
+fi
+write_state "installed" "$WANT"
+[ -z "$MGR_CMD" ] || exit 0
 [ "$FIRST" -eq 0 ] || say "$(t sh_s_then "$port")"
 exit 0

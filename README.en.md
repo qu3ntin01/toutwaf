@@ -29,6 +29,8 @@ irm https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup/install.ps1 -O
 
 Mirror if the first host is unreachable: `https://raw.githubusercontent.com/qu3ntin01/toutwaf/toutwaf-backup` (`--base-url` or `TOUTWAF_BACKUP_BASE_URL` to choose).
 
+The installer first updates the system packages (`--no-system-update` to skip it), installs what it needs, opens the server's port in firewalld or ufw when one is active (`--no-firewall`, `--firewall-from CIDR`), and installs the update manager: `toutwaf-backup-update status | check | apply | rollback | auto on|off | channel stable|dev` (a daily timer checks; it installs by itself only with `auto on`). Tested on Debian 12/13, Ubuntu 22.04/24.04/26.04 and AlmaLinux/Rocky/RHEL 9/10.
+
 Language of the installer: `--lang fr` (or `--es`, `--de` ...; `-Lang fr` on Windows), otherwise the language of your system, in a UTF-8 terminal.
 
 ## Verify a release

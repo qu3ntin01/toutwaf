@@ -3,6 +3,18 @@
 Format: [Keep a Changelog](https://keepachangelog.com). Versions follow SemVer. The repository format version (see `docs/ARCHITECTURE.md`) and the
 API version (`/api/v1`) change independently of the program version and are never changed incompatibly within a major version.
 
+## [Installer 2] - 2026-11-08
+
+Installer only (`install.sh`, `INSTALLER_VERSION=2`): the signed binaries of 0.1.2 are unchanged.
+
+### Added
+- **System packages updated first**, before an installation or an upgrade (`apt-get update && upgrade`, `dnf -y update`; skipped with `--no-system-update` or `TWB_SKIP_SYSUPDATE=1`, not repeated within 6 hours, a failure is a warning, a restart notice when the system asks for one). An upgrade that finds nothing new touches nothing.
+- **Tested systems**: Debian 12 and 13, Ubuntu 22.04, 24.04 and 26.04, AlmaLinux / Rocky / RHEL 9 and 10 (OpenSSL 3 is required). Any other system gets a warning and the installation goes on.
+- **Prerequisites installed when missing** (curl, openssl, tar, gzip, coreutils, CA certificates).
+- **The server's port is opened** in firewalld or ufw when one of them is active (`--firewall-from CIDR` to restrict it to one network, `--no-firewall` to leave the firewall alone).
+- **Update manager** `toutwaf-backup-update` (`status`, `check`, `apply`, `rollback`, `auto on|off`, `channel stable|dev`) and a daily systemd timer that checks for updates (and installs them only after `auto on` or `--auto-update`). The Ed25519 signature and the SHA-256 of every archive are verified as before; `--no-update-manager` skips it.
+- After an upgrade the server's service must stay up: otherwise the previous binary is put back automatically.
+
 ## [0.1.2] - 2026-10-24
 
 ### Fixed
