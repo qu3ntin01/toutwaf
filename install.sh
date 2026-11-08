@@ -3232,7 +3232,7 @@ detect_lang() {
 }
 
 paint() { printf '%s%s%s' "$1" "$2" "$R"; }
-say()  { if [ "$QUIET" = 0 ]; then printf '%s\n' "$*"; fi; return 0; }
+say()  { local IFS=' '; if [ "$QUIET" = 0 ]; then printf '%s\n' "$*"; fi; return 0; }   # ("$*" joins on the first character of IFS: a newline in this script, hence the local IFS)
 rule() { local n="${1:-60}" i s=""; for ((i = 0; i < n; i++)); do s+="$H"; done; printf '%s' "$s"; }
 
 banner() {
@@ -3287,16 +3287,18 @@ box_top()    { [ "$QUIET" = 1 ] || printf '%s%s%s %s%s%s %s%s\n' "$ACC" "$TL" "$
 box_line()   { [ "$QUIET" = 1 ] || printf '%s%s%s %s\n' "$ACC" "$V" "$R" "$1"; }
 box_bottom() { [ "$QUIET" = 1 ] || printf '%s%s%s%s\n' "$ACC" "$BL" "$(rule $((FRAME_W - 1)))" "$R"; }
 
-log()  { printf '%s\n' "$*" >>"${LOG:-/dev/null}" 2>/dev/null || true; return 0; }
+log()  { local IFS=' '; printf '%s\n' "$*" >>"${LOG:-/dev/null}" 2>/dev/null || true; return 0; }
 # progress: when the control plane's update helper runs us (TOUTWAF_PROGRESS_FILE), every step is appended there for the console
-progress() { if [ -n "${TOUTWAF_PROGRESS_FILE:-}" ]; then printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$TOUTWAF_PROGRESS_FILE" 2>/dev/null || true; fi; return 0; }
+progress() { local IFS=' '; if [ -n "${TOUTWAF_PROGRESS_FILE:-}" ]; then printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$TOUTWAF_PROGRESS_FILE" 2>/dev/null || true; fi; return 0; }
 # info: detail line; shown on plain (non-TTY / --no-color) output, kept in the log only while a spinner runs
 info() {
+  local IFS=' '
   log "$*"
   if [ "$SPIN_PID" = "" ] && [ "$UI_COLOR" = 0 ] && [ "$QUIET" = 0 ]; then printf '    %s %s\n' "$BUL" "$*" >&3; fi
   return 0
 }
 warn() {
+  local IFS=' '
   WARNINGS+=("$*"); log "[warn] $*"; progress "[warn] $*"
   if [ "$SPIN_PID" = "" ] && [ "$UI_COLOR" = 0 ] && [ "$QUIET" = 0 ]; then printf '[warn] %s\n' "$*" >&3; fi
   return 0
@@ -3309,7 +3311,9 @@ fail_report() {   # message
   printf '%s%s %s%s%s\n' "$RED" "$ERM" "$1" "$R" "${2:+ ($2)}" >&3
   if [ -n "$LOG" ] && [ -s "$LOG" ]; then tail -n 15 "$LOG" | sed 's/^/    /' >&3; printf '    %s\n' "$(t log_hint "$LOG")" >&3; fi
 }
-die() { fail_report "$*"; exit 1; }
+die() { local _m; _m="$(IFS=' '; printf '%s' "$*")"; fail_report "$_m"; exit 1; }   # (the report itself keeps the strict IFS)
+# jn ARGS...: the words joined with a blank ("${arr[*]}" would join them with a newline under the IFS of this script)
+jn() { local IFS=' '; printf '%s' "$*"; }
 on_err() { local rc=$?; trap - ERR; fail_report "${CUR_STEP:-$(t failed)}" "$(t failed) rc=$rc"; exit "$rc"; }
 cleanup() {
   # the spinner runs in a background subshell that may inherit this EXIT trap: only the main shell may clean up
@@ -3551,10 +3555,10 @@ compat_gate() {
   if [ "$CP_STATUS" = unsupported ]; then
     if [ "$SKIP_OS_CHECK" = 1 ] && [ "$CP_HARD" = 0 ]; then
       warn "$(t cp_w_skip)"; for r in "${CP_REASONS[@]}"; do warn "  - $r"; done
-      COMPAT_LINE="$(t cp_w_skip) ${CP_REASONS[*]}"
+      COMPAT_LINE="$(t cp_w_skip) $(jn "${CP_REASONS[@]}")"
     elif [ "$STAGING" = 1 ]; then
       warn "$(t cp_w_stage)"; for r in "${CP_REASONS[@]}"; do warn "  - $r"; done
-      COMPAT_LINE="$(t cp_w_stage) ${CP_REASONS[*]}"
+      COMPAT_LINE="$(t cp_w_stage) $(jn "${CP_REASONS[@]}")"
     else
       { compat_print; printf '  %s\n' "$(t cp_nochange)"; [ "$CP_HARD" = 1 ] || printf '  %s\n' "$(t cp_override)"; echo; } >&2
       exit 3
@@ -3693,8 +3697,8 @@ env_check() {   # fills EC_LV / EC_CA / EC_AC from what this machine is; changes
     local ok=1
     # the cloud is reached with the proxy of the environment (HTTPS_PROXY), certificate verified: a node that cannot get out cannot enrol
     # a platform with a private certificate authority (--cloud-ca) is checked with that authority, like the link will do
-    if have curl; then curl -s -o /dev/null --max-time 15 ${CLOUD_CA:+--cacert "$CLOUD_CA"} "$CLOUD_URL/cloud/v1/node/info" >/dev/null 2>&1 || ok=0
-    elif have wget; then wget -q -O /dev/null --timeout=15 ${CLOUD_CA:+--ca-certificate="$CLOUD_CA"} "$CLOUD_URL/cloud/v1/node/info" >/dev/null 2>&1 || ok=0; fi
+    if have curl; then curl -s -o /dev/null --max-time 15 ${CLOUD_CA:+--cacert} ${CLOUD_CA:+"$CLOUD_CA"} "$CLOUD_URL/cloud/v1/node/info" >/dev/null 2>&1 || ok=0
+    elif have wget; then wget -q -O /dev/null --timeout=15 ${CLOUD_CA:+"--ca-certificate=$CLOUD_CA"} "$CLOUD_URL/cloud/v1/node/info" >/dev/null 2>&1 || ok=0; fi
     [ "$ok" = 1 ] || ec_add "$refuse" "$(t pf_cp_cause "$CLOUD_URL")$nostart" "$(t pf_cloud_action)"
   elif want_dp && [ -n "$CP_URL" ] && [ "$COMPONENT" = dp ]; then
     local ok=1
@@ -3925,7 +3929,7 @@ REPO_LINUX="${TOUTWAF_REPO_LINUX_URL:-https://repo.qu3ntin.com/include/toutwaf/l
 REPO_KEY_FPR=""                               # 40-hex fingerprint of the repository key, frozen here at release time (no environment override); empty = --via-repo refused
 VIA_REPO_EL="9 10"                            # Enterprise Linux majors the repository serves
 VIA_PAYLOAD="${TOUTWAF_VIA_PAYLOAD:-/usr/share/toutwaf/release}"
-via_repo_fail() { warn "--via-repo: $*; using the direct download instead (GitLab, then GitHub)"; return 1; }
+via_repo_fail() { local IFS=' '; warn "--via-repo: $*; using the direct download instead (GitLab, then GitHub)"; return 1; }
 via_repo_stage() {   # DIR (the unpacked package payload) -> BASE_URL = a file:// tree in the release layout; 1 when the payload is unusable or not signed by the release key
   local d="$1" asset="toutwaf-linux-$ARCH.tar.gz" pv want got tree="$TMP/viarepo" f vrc=0
   for f in "$asset" SHA256SUMS SHA256SUMS.sig channel.json; do [ -s "$d/$f" ] || { via_repo_fail "the package has no $f"; return 1; }; done
@@ -4164,7 +4168,7 @@ licence_pin_parse() {   # "FP:KEY" -> LP_FP (32 lower case hex) LP_KEY (canonica
   LP_FP="$fp"; LP_KEY="$key="
   return 0
 }
-licence_warn() { if declare -F warn >/dev/null 2>&1; then warn "$@"; else printf 'WARNING: %s\n' "$*" >&2; fi; }
+licence_warn() { local IFS=' '; if declare -F warn >/dev/null 2>&1; then warn "$@"; else printf 'WARNING: %s\n' "$*" >&2; fi; }
 licence_check_options() {
   local line n=0 all=""
   if [ -n "$LICENCE_API_URL" ]; then
@@ -5141,13 +5145,13 @@ install_pkgs() {
     if have dnf; then pm=dnf; elif have yum; then pm=yum; elif have apt-get; then pm=apt; elif have zypper; then pm=zypper; elif have pacman; then pm=pacman; fi
   fi
   if [ ${#missing[@]} -gt 0 ]; then
-    [ -n "$pm" ] || die "cannot install prerequisites automatically (${missing[*]}); install them and re-run"
-    log "Installing prerequisites with $pm: ${missing[*]}"
-    pkg_install "$pm" "${missing[@]}" || die "installing the prerequisites failed (${missing[*]}); install them and re-run"
+    [ -n "$pm" ] || die "cannot install prerequisites automatically ($(jn "${missing[@]}")); install them and re-run"
+    log "Installing prerequisites with $pm: $(jn "${missing[@]}")"
+    pkg_install "$pm" "${missing[@]}" || die "installing the prerequisites failed ($(jn "${missing[@]}")); install them and re-run"
   fi
   if [ ${#optional[@]} -gt 0 ] && [ -n "$pm" ]; then
-    log "Installing optional packages with $pm: ${optional[*]}"
-    pkg_install "$pm" "${optional[@]}" || warn "optional package(s) not installed (${optional[*]}): log rotation will not run"
+    log "Installing optional packages with $pm: $(jn "${optional[@]}")"
+    pkg_install "$pm" "${optional[@]}" || warn "optional package(s) not installed ($(jn "${optional[@]}")): log rotation will not run"
   fi
   return 0
 }
@@ -5640,7 +5644,7 @@ secure_link_dir() {
 }
 # the CLIs stay on PATH when the binaries live under HOME, and on the PATH sudo uses (secure_path): the commands work with `sudo`
 link_cli() {
-  local b l d dirs="" sd; sd="$(secure_link_dir)"
+  local IFS=' ' b l d dirs="" sd; sd="$(secure_link_dir)"   # (dirs is a blank separated list)
   [ "$BIN_DIR" = /usr/local/bin ] || dirs=/usr/local/bin
   if [ -n "$sd" ] && [ "$sd" != "$BIN_DIR" ] && [ "$sd" != /usr/local/bin ]; then dirs="$dirs $sd"; fi
   for d in $dirs; do
@@ -7487,7 +7491,7 @@ setup_firewall() {
   if [ "$ACTION" != update ] && [ "$INST_CP" = 1 ] && [ "$OPEN_CP_PORT" = 1 ]; then args+=(--console "$CP_PORT"); [ -z "$CONSOLE_FROM" ] || args+=(--console-from "$CONSOLE_FROM"); fi
   [ "${#args[@]}" -gt 0 ] || return 0
   out="$("$fwh" open "${args[@]}" 2>&1)" || rc=$?
-  log "toutwaf-firewall open ${args[*]} -> rc=$rc: $out"
+  log "toutwaf-firewall open $(jn "${args[@]}") -> rc=$rc: $out"
   backend="$("$fwh" status 2>/dev/null | sed -n 's/^BACKEND=//p' | head -n1 || true)"
   case "$rc:$backend" in
     0:firewalld|0:ufw) info "firewall ($backend): ports opened$([ "$(http3_on)" = 1 ] && echo " (UDP $HTTPS_PORT for HTTP/3 included)")";
@@ -7564,7 +7568,7 @@ wait_cp_healthy() {
   local maxcrash="${TOUTWAF_CP_MAX_CRASH:-2}" handoff="${TOUTWAF_CP_HANDOFF_AFTER:-15}" big="${TOUTWAF_CP_WAL_BIG:-67108864}"
   local preparing=0 since=0 out ui st sub nr pid nr0 crashes seen_crash=0 phased note procsig info0 bstart
   start="$(now_s)"; last="$start"; bstart="$start"
-  info0="$(cp_unit_info)"; read -r _ _ nr0 _ <<<"$info0"
+  info0="$(cp_unit_info)"; IFS=" " read -r _ _ nr0 _ <<<"$info0"
   while :; do
     out="$(curl -ksS -w '\n%{http_code}' --max-time "${TOUTWAF_CP_CURL_MAX:-5}" "https://127.0.0.1:$CP_PORT/readyz" 2>/dev/null || true)"
     code="${out##*$'\n'}"; body="${out%$'\n'*}"
@@ -7575,7 +7579,7 @@ wait_cp_healthy() {
     fi
     now="$(now_s)"
     # the process: alive, restarted by the supervisor, or gone
-    ui="$(cp_unit_info)"; read -r st sub nr pid <<<"$ui"
+    ui="$(cp_unit_info)"; IFS=" " read -r st sub nr pid <<<"$ui"
     crashes=$((nr - nr0)); [ "$crashes" -ge 0 ] || { nr0="$nr"; crashes=0; }
     [ "$sub" != auto-restart ] || crashes=$((crashes + 1))
     if [ "$crashes" -gt "$seen_crash" ]; then
@@ -7734,7 +7738,7 @@ backup_before_update() {
 #             connection creates or upgrades the schema; when the rights are not enough, prints the exact GRANT statements
 # Every step can be run again; a failed run undoes what it created. Passwords are never printed, never put on a command line, never logged:
 # they travel through files of mode 0600 and standard input.
-db_log() { log "db: $*"; }
+db_log() { local IFS=' '; log "db: $*"; }
 db_die() { db_undo; die "$@"; }
 db_secret_file() { printf '%s' "$(p "$CONF_DIR/db.dsn")"; }
 # the engine of an existing installation, read from its configuration (empty when it has none)
@@ -7819,8 +7823,8 @@ db_install_server() {
   # Red Hat 8: the default stream is too old
   if [ "$pm" = dnf ] && [ "$fam" = rhel ] && [ "${OS_VER%%.*}" = 8 ]; then run dnf -y module enable postgresql:15 || true; fi
   db_log "installing $pk with $pm"
-  # shellcheck disable=SC2086
-  pkg_install "$pm" $pk || db_die "$(t db_install_failed)"
+  local -a pka; IFS=' ' read -ra pka <<<"$pk"   # the packages are blank separated whatever the IFS of the script
+  pkg_install "$pm" "${pka[@]}" || db_die "$(t db_install_failed)"
   # shellcheck disable=SC2034  # set when this run installed the database server package; no step reads it yet
   DB_UNDO_PKG=1
   return 0
@@ -8029,7 +8033,7 @@ db_setup_existing() {
   return 0
 }
 
-db_say() { [ "$QUIET" = 1 ] || printf '%s\n' "$*" >&3 2>/dev/null || true; }   # to the terminal even from inside a step (whose output goes to the log)
+db_say() { local IFS=' '; [ "$QUIET" = 1 ] || printf '%s\n' "$*" >&3 2>/dev/null || true; }   # to the terminal even from inside a step (whose output goes to the log)
 db_print_grants() {
   db_say ""
   "$(cp_exe)" db grants --database "$DB_NAME" --user "$DB_USER" 2>/dev/null | while IFS= read -r l; do db_say "    $l"; done
@@ -8059,8 +8063,8 @@ db_backup_units() {
   local sd; sd="$(p /etc/systemd/system)"; mkdir -p "$sd"
   local pk; pk="$(db_packages client 2>/dev/null || true)"
   if ! have pg_dump && ! ls /usr/lib/postgresql/*/bin/pg_dump >/dev/null 2>&1 && [ -n "$pk" ]; then
-    local pm; pm="$(db_pkg_manager)"; # shellcheck disable=SC2086
-    [ -z "$pm" ] || pkg_install "$pm" $pk >>"$LOG" 2>&1 || warn "$(t db_no_pgdump)"
+    local pm; pm="$(db_pkg_manager)"; local -a pka; IFS=' ' read -ra pka <<<"$pk"
+    [ -z "$pm" ] || pkg_install "$pm" "${pka[@]}" >>"$LOG" 2>&1 || warn "$(t db_no_pgdump)"
   fi
   cat >"$sd/toutwaf-db-backup.service" <<EOT
 [Unit]
