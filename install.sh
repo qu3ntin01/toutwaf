@@ -3872,7 +3872,7 @@ sysupdate_do() {   # the update itself, run as a step (output goes to the log); 
 sysupdate_run() {   # before the prerequisites are installed: a failed or skipped update never changes what follows
   # shellcheck disable=SC2034  # the outcome of the update: read by deploy/tests/prereq-test.sh, which sources this block
   SYSUPD=skipped
-  { [ "$STAGING" = 0 ] && [ "$ACTION" = install ]; } || return 0
+  { [ "$STAGING" = 0 ] && { [ "$ACTION" = install ] || [ "$ACTION" = update ]; }; } || return 0
   if [ "$SKIP_SYSUPDATE" = 1 ]; then say "  $BUL $(t su_skipped)"; return 0; fi
   if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) $(t su_dry)"; return 0; fi
   local stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}"
@@ -8638,7 +8638,7 @@ fi
 if want_cp && [ "$ACTION" = install ]; then telemetry_notice; fi   # what is shared with the publisher space, said before anything is installed
 if [ "$ACTION" = install ]; then env_gate; fi   # what is in the way is said now, before anything is changed (exit 4)
 prereq_gate          # disk space, DNS and clock, with the fix of each problem (only a full disk refuses, exit 4)
-sysupdate_run        # then the system packages (an installation only; TOUTWAF_SKIP_SYSUPDATE=1 skips it; a failure is a warning)
+sysupdate_run        # then the system packages (an installation or an update; TOUTWAF_SKIP_SYSUPDATE=1 skips it; a failure is a warning)
 if want_cp && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; then detect_public_ip; fi
 do_install_flow
 
