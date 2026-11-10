@@ -8,7 +8,7 @@ Cette branche ne contient que des **binaires signés** de ToutWAF Backup (serveu
 
 | Version | Canal | Build | Publiée |
 |---|---|---|---|
-| `0.1.2` | dev | `8efe447af258` | 2026-10-24 |
+| `0.2.0` | stable | `27f716a97b5e` | 2026-11-10 |
 
 ## Installer
 
@@ -33,10 +33,10 @@ Langue de l'installateur : `--lang fr` (ou `--es`, `--de` ... ; `-Lang fr` sous 
 
 ## Vérifier une version
 
-`releases/<version>/SHA256SUMS` liste les empreintes SHA-256 des archives ; `SHA256SUMS.sig` est la signature Ed25519 (base64) de ce fichier. La clé publique est `release.pub` (la même que celle du produit ToutWAF : `ebd2a20ce5a5650f`). Les installateurs vérifient la signature puis l'empreinte avant d'installer quoi que ce soit.
+`releases/<version>/SHA256SUMS` liste les empreintes SHA-256 des archives ; `SHA256SUMS.sig` est la signature Ed25519 (base64) de ce fichier. La clé publique est `release.pub` (la même que celle du produit ToutWAF : `3fc61b30f128ff14`). Les installateurs vérifient la signature puis l'empreinte avant d'installer quoi que ce soit.
 
 ```sh
-V=0.1.2
+V=0.2.0
 cd releases/$V
 base64 -d SHA256SUMS.sig > sig.bin
 ( printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; base64 -d ../../release.pub ) > pub.der

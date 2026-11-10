@@ -3,17 +3,17 @@
 Format: [Keep a Changelog](https://keepachangelog.com). Versions follow SemVer. The repository format version (see `docs/ARCHITECTURE.md`) and the
 API version (`/api/v1`) change independently of the program version and are never changed incompatibly within a major version.
 
-## [Installer 2] - 2026-11-08
-
-Installer only (`install.sh`, `INSTALLER_VERSION=2`): the signed binaries of 0.1.2 are unchanged.
+## [0.2.0] - unreleased
 
 ### Added
-- **System packages updated first**, before an installation or an upgrade (`apt-get update && upgrade`, `dnf -y update`; skipped with `--no-system-update` or `TWB_SKIP_SYSUPDATE=1`, not repeated within 6 hours, a failure is a warning, a restart notice when the system asks for one). An upgrade that finds nothing new touches nothing.
-- **Tested systems**: Debian 12 and 13, Ubuntu 22.04, 24.04 and 26.04, AlmaLinux / Rocky / RHEL 9 and 10 (OpenSSL 3 is required). Any other system gets a warning and the installation goes on.
-- **Prerequisites installed when missing** (curl, openssl, tar, gzip, coreutils, CA certificates).
-- **The server's port is opened** in firewalld or ufw when one of them is active (`--firewall-from CIDR` to restrict it to one network, `--no-firewall` to leave the firewall alone).
-- **Update manager** `toutwaf-backup-update` (`status`, `check`, `apply`, `rollback`, `auto on|off`, `channel stable|dev`) and a daily systemd timer that checks for updates (and installs them only after `auto on` or `--auto-update`). The Ed25519 signature and the SHA-256 of every archive are verified as before; `--no-update-manager` skips it.
-- After an upgrade the server's service must stay up: otherwise the previous binary is put back automatically.
+- **First-run setup link** (`docs/i18n/*/SETUP.md`). The last screen of `install.sh` / `install.ps1` is one block: what was installed and where, a **single-use, 60-minute setup link** (`https://HOST:8007/setup/KEY`, 256-bit key, stored only as a SHA-256, tied to the fingerprint of the server certificate, never logged), the fingerprint to compare, the firewall reminder, how to get a new link, how to uninstall, and a text QR code when `qrencode` is installed. The link opens a wizard in ten languages: administrator (strength meter, 12 characters minimum, common-password list, optional TOTP with QR code and eight recovery codes), first admin token shown once (and a token for ToutWAF), server settings (external address with a reachability and certificate-name check from the server, listen address, first datastore on disk or S3 with write and free-space checks, default retention, e-mail and webhook notifications, update channel and automatic updates), summary and "Finish", which consumes the link. Until then the web interface and the API refuse everything except the wizard (`/health` and API calls with a token that root made on the machine still work, which keeps ToutWAF's remote deployment running); a wrong key is rate limited (5 per address, 40 in total).
+- `toutwaf-backup server setup-link [--new] [--reopen]` (status or a new link; a new link invalidates the previous one), `server user hash`, `server init --no-setup-link | --admin-user | --admin-password-hash-file | --admin-token-file | --machine`.
+- Installer: `--no-setup-link`, `--admin-user`, `--admin-password-hash-file`, `--admin-token-file`, `--no-qr` (the unattended path keeps working: without the wizard the first admin token is printed as before). Recovery codes for two-factor sign-in (each works once).
+- `tools/test-installer-setup.sh` (installer against the real binary: block, hash-only storage, ten languages, unattended paths, a running server gated until the wizard is done), `tools/e2e-ui/setup.js` (the wizard in a browser).
+
+### Changed
+- **Web interface design aligned with ToutPanel**: the new default style is **Classic** (the ToutPanel default: flat 248 px menu with a hairline edge, 56 px top bar, white cards with 12 px radii, 8 px controls, Inter and JetBrains Mono, the blue accent #2563eb, the same light and dark tokens). **Aurora** (the glass style used until now) stays one click away in the new Style menu of the top bar and the sign-in page (remembered per browser). Fonts are self-hosted (SIL OFL, copied from ToutPanel). The contrast test now covers both styles in both modes; the first-run wizard and the Updates page follow the style like every page. The sign-in field accepts a recovery code (14 characters).
+- `server init` makes the setup link instead of an admin token (use `--no-setup-link` for the old behaviour). A server without `setup.json` (every server installed before) is not gated.
 
 ## [0.1.2] - 2026-10-24
 

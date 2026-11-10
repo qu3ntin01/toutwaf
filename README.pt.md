@@ -8,7 +8,7 @@ Este ramo contém apenas **binários assinados** do ToutWAF Backup (servidor e c
 
 | Versão | Canal | Compilação | Publicada |
 |---|---|---|---|
-| `0.1.2` | dev | `8efe447af258` | 2026-10-24 |
+| `0.2.0` | stable | `27f716a97b5e` | 2026-11-10 |
 
 ## Instalar
 
@@ -33,10 +33,10 @@ Idioma do instalador: `--lang fr` (ou `--es`, `--de` ...; `-Lang fr` no Windows)
 
 ## Verificar uma versão
 
-`releases/<versão>/SHA256SUMS` lista os SHA-256 dos arquivos; `SHA256SUMS.sig` é a assinatura Ed25519 (base64) desse ficheiro. A chave pública é `release.pub` (a mesma do produto ToutWAF: `ebd2a20ce5a5650f`). Os instaladores verificam a assinatura e depois o hash antes de instalar seja o que for.
+`releases/<versão>/SHA256SUMS` lista os SHA-256 dos arquivos; `SHA256SUMS.sig` é a assinatura Ed25519 (base64) desse ficheiro. A chave pública é `release.pub` (a mesma do produto ToutWAF: `3fc61b30f128ff14`). Os instaladores verificam a assinatura e depois o hash antes de instalar seja o que for.
 
 ```sh
-V=0.1.2
+V=0.2.0
 cd releases/$V
 base64 -d SHA256SUMS.sig > sig.bin
 ( printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; base64 -d ../../release.pub ) > pub.der

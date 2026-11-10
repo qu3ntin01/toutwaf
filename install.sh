@@ -11,16 +11,17 @@
 set -euo pipefail
 
 # shellcheck disable=SC2034  # read by the release tooling (min_installer in channel.json)
-INSTALLER_VERSION=2
-DEFAULT_CHANNEL="dev"
+INSTALLER_VERSION=3
+DEFAULT_CHANNEL="stable"
 DEFAULT_BASE_URL="https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup"
 FALLBACK_BASE_URL="https://raw.githubusercontent.com/qu3ntin01/toutwaf/toutwaf-backup"     # used only when the primary cannot be reached and no base URL was chosen
-RELEASE_PUBKEY="V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA="
+RELEASE_PUBKEY="gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0="
 
 BASE_EXPLICIT=0; BASE_URL="$DEFAULT_BASE_URL"
 [ -z "${TOUTWAF_BACKUP_BASE_URL:-}" ] || { BASE_URL="$TOUTWAF_BACKUP_BASE_URL"; BASE_EXPLICIT=1; }
 ROLE="" CHANNEL="$DEFAULT_CHANNEL" VERSION="" PREFIX="/usr/local" DESTDIR="" SERVICE_USER="toutwaf-backup"
-STATE_DIR="/var/lib/toutwaf-backup" CONF_DIR="/etc/toutwaf-backup" LISTEN=":8007" EXTERNAL_URL="" NO_SYSTEMD=0 START=0 UNINSTALL=0 PURGE=0 YES=0 FORCE=0 INIT=1 DATASTORE=""
+STATE_DIR="/var/lib/toutwaf-backup" CONF_DIR="/etc/toutwaf-backup" LISTEN=":8007" EXTERNAL_URL="" NO_SYSTEMD=0 START=0 UNINSTALL=0 PURGE=0 YES=0 FORCE=0 INIT=1 DATASTORE="" SETUP_LINK=1 ADMIN_USER="${TWB_ADMIN_USER:-}" ADMIN_HASH_FILE="" ADMIN_TOKEN_FILE="" QR=1
+SETUP_URL="" SETUP_EXP="" SETUP_FP="" FIRST_TOKEN=""
 PUBKEY_OVERRIDE="" PUBKEY_FILE=""
 SYSUPDATE_SCHEDULED=0 SYSUPDATE=1 FIREWALL=1 FW_FROM="" AUTO="" NO_UM=0 MGR_CMD="" MGR_ARG="" CHECK_ONLY=0 SCHEDULED=0 NEW_BIN=0 CHANNEL_SET=0
 
@@ -839,16 +840,6 @@ nl|s_first|Eerste installatie: de serverconfiguratie wordt aangemaakt.
 ru|s_first|Первая установка: создаётся конфигурация сервера.
 zh|s_first|首次安装：正在创建服务器配置。
 ar|s_first|التثبيت الأول: إنشاء إعدادات الخادم.
-en|s_writedown|WRITE DOWN the admin token and the certificate fingerprint above: the token is not shown again.
-fr|s_writedown|NOTEZ le jeton d'administration et l'empreinte du certificat ci-dessus : le jeton n'est plus affiché ensuite.
-es|s_writedown|ANOTE el token de administración y la huella del certificado de arriba: el token no se vuelve a mostrar.
-de|s_writedown|NOTIEREN Sie das Admin-Token und den Zertifikat-Fingerabdruck oben: Das Token wird nicht noch einmal angezeigt.
-it|s_writedown|ANNOTA il token di amministrazione e l'impronta del certificato qui sopra: il token non viene mostrato di nuovo.
-pt|s_writedown|ANOTE o token de administração e a impressão digital do certificado acima: o token não volta a ser mostrado.
-nl|s_writedown|NOTEER het beheerderstoken en de vingerafdruk van het certificaat hierboven: het token wordt niet opnieuw getoond.
-ru|s_writedown|ЗАПИШИТЕ токен администратора и отпечаток сертификата выше: токен больше не показывается.
-zh|s_writedown|请记下上面的管理员令牌和证书指纹：令牌不会再次显示。
-ar|s_writedown|دوّن رمز المسؤول وبصمة الشهادة أعلاه: لن يُعرض الرمز مرة أخرى.
 en|sh_s_enabled|Service enabled and started.
 fr|sh_s_enabled|Service activé et démarré.
 es|sh_s_enabled|Servicio habilitado e iniciado.
@@ -1249,6 +1240,226 @@ nl|hc_nofirst|De dienst blijft niet actief (de installatie zelf is voltooid). Zi
 ru|hc_nofirst|Служба не остаётся запущенной (сама установка завершена). Смотрите: journalctl -u toutwaf-backup-server
 zh|hc_nofirst|服务无法保持运行（安装本身已完成）。请查看：journalctl -u toutwaf-backup-server
 ar|hc_nofirst|لا تبقى الخدمة قيد التشغيل (اكتمل التثبيت نفسه). راجع: journalctl -u toutwaf-backup-server
+en|e_nochannel|no release has been published on the %s channel yet (the release branch carries a %s release): use --channel %s or wait
+fr|e_nochannel|aucune version n'a encore été publiée sur le canal %s (la branche porte une version %s) : utilisez --channel %s ou attendez
+es|e_nochannel|todavía no se ha publicado ninguna versión en el canal %s (la rama lleva una versión %s): use --channel %s o espere
+de|e_nochannel|auf dem Kanal %s wurde noch keine Version veröffentlicht (der Branch enthält eine %s-Version): verwenden Sie --channel %s oder warten Sie
+it|e_nochannel|nessuna versione è ancora stata pubblicata sul canale %s (il ramo contiene una versione %s): usa --channel %s oppure attendi
+pt|e_nochannel|ainda não foi publicada nenhuma versão no canal %s (o ramo contém uma versão %s): use --channel %s ou aguarde
+nl|e_nochannel|op het kanaal %s is nog geen versie gepubliceerd (de branch bevat een %s-versie): gebruik --channel %s of wacht
+ru|e_nochannel|в канале %s ещё не опубликовано ни одной версии (ветка содержит версию %s): используйте --channel %s или подождите
+zh|e_nochannel|渠道 %s 上尚未发布任何版本（分支中是 %s 版本）：请使用 --channel %s 或等待
+ar|e_nochannel|لم يُنشر أي إصدار على القناة %s بعد (يحتوي الفرع على إصدار %s): استخدم --channel %s أو انتظر
+en|u_nosetup|server: no first-run setup link; print a first admin token instead (unattended installations)
+fr|u_nosetup|serveur : pas de lien de configuration initiale ; affiche à la place un premier jeton d'administration (installations sans surveillance)
+es|u_nosetup|servidor: sin enlace de configuración inicial; muestra en su lugar un primer token de administración (instalaciones desatendidas)
+de|u_nosetup|Server: kein Einrichtungslink; stattdessen wird ein erstes Admin-Token ausgegeben (unbeaufsichtigte Installationen)
+it|u_nosetup|server: nessun link di configurazione iniziale; stampa invece un primo token di amministrazione (installazioni automatiche)
+pt|u_nosetup|servidor: sem ligação de configuração inicial; mostra em vez disso um primeiro token de administração (instalações não assistidas)
+nl|u_nosetup|server: geen installatielink; toont in plaats daarvan een eerste beheerderstoken (installaties zonder toezicht)
+ru|u_nosetup|сервер: без ссылки первоначальной настройки; вместо неё выводится первый токен администратора (автоматическая установка)
+zh|u_nosetup|服务器：不生成首次设置链接，改为打印第一个管理员令牌（无人值守安装）
+ar|u_nosetup|الخادم: بدون رابط إعداد أول؛ يُطبع بدلًا منه أول رمز مسؤول (للتثبيت غير المراقب)
+en|u_adminuser|server: preset the administrator's name (with --admin-password-hash-file)
+fr|u_adminuser|serveur : pré-définir le nom de l'administrateur (avec --admin-password-hash-file)
+es|u_adminuser|servidor: predefinir el nombre del administrador (con --admin-password-hash-file)
+de|u_adminuser|Server: Namen des Administrators vorgeben (mit --admin-password-hash-file)
+it|u_adminuser|server: imposta in anticipo il nome dell'amministratore (con --admin-password-hash-file)
+pt|u_adminuser|servidor: predefinir o nome do administrador (com --admin-password-hash-file)
+nl|u_adminuser|server: naam van de beheerder vooraf instellen (met --admin-password-hash-file)
+ru|u_adminuser|сервер: заранее задать имя администратора (вместе с --admin-password-hash-file)
+zh|u_adminuser|服务器：预设管理员名称（配合 --admin-password-hash-file）
+ar|u_adminuser|الخادم: تحديد اسم المسؤول مسبقًا (مع --admin-password-hash-file)
+en|u_adminhash|server: file with the Argon2id hash of the administrator's password (made with: toutwaf-backup server user hash)
+fr|u_adminhash|serveur : fichier contenant l'empreinte Argon2id du mot de passe de l'administrateur (créée avec : toutwaf-backup server user hash)
+es|u_adminhash|servidor: archivo con el hash Argon2id de la contraseña del administrador (creado con: toutwaf-backup server user hash)
+de|u_adminhash|Server: Datei mit dem Argon2id-Hash des Administrator-Passworts (erzeugt mit: toutwaf-backup server user hash)
+it|u_adminhash|server: file con l'hash Argon2id della password dell'amministratore (creato con: toutwaf-backup server user hash)
+pt|u_adminhash|servidor: ficheiro com o hash Argon2id da palavra-passe do administrador (criado com: toutwaf-backup server user hash)
+nl|u_adminhash|server: bestand met de Argon2id-hash van het wachtwoord van de beheerder (gemaakt met: toutwaf-backup server user hash)
+ru|u_adminhash|сервер: файл с хешем Argon2id пароля администратора (создаётся командой: toutwaf-backup server user hash)
+zh|u_adminhash|服务器：包含管理员密码 Argon2id 哈希的文件（由 toutwaf-backup server user hash 生成）
+ar|u_adminhash|الخادم: ملف يحوي تجزئة Argon2id لكلمة مرور المسؤول (يُنشأ بالأمر: toutwaf-backup server user hash)
+en|u_admintoken|server: file with a first admin token twb_<8 hex>_<secret> that you chose (it is not printed)
+fr|u_admintoken|serveur : fichier contenant un premier jeton d'administration twb_<8 hex>_<secret> choisi par vous (il n'est pas affiché)
+es|u_admintoken|servidor: archivo con un primer token de administración twb_<8 hex>_<secreto> elegido por usted (no se muestra)
+de|u_admintoken|Server: Datei mit einem selbst gewählten ersten Admin-Token twb_<8 hex>_<Geheimnis> (wird nicht angezeigt)
+it|u_admintoken|server: file con un primo token di amministrazione twb_<8 hex>_<segreto> scelto da te (non viene stampato)
+pt|u_admintoken|servidor: ficheiro com um primeiro token de administração twb_<8 hex>_<segredo> escolhido por si (não é mostrado)
+nl|u_admintoken|server: bestand met een zelf gekozen eerste beheerderstoken twb_<8 hex>_<geheim> (wordt niet getoond)
+ru|u_admintoken|сервер: файл с первым токеном администратора twb_<8 hex>_<секрет>, выбранным вами (не выводится)
+zh|u_admintoken|服务器：包含您自选的第一个管理员令牌 twb_<8 位十六进制>_<密钥> 的文件（不会打印）
+ar|u_admintoken|الخادم: ملف يحوي أول رمز مسؤول twb_<8 hex>_<السر> تختاره أنت (لا يُطبع)
+en|u_noqr|do not draw the QR code of the setup link
+fr|u_noqr|ne pas dessiner le QR code du lien de configuration
+es|u_noqr|no dibujar el código QR del enlace de configuración
+de|u_noqr|den QR-Code des Einrichtungslinks nicht zeichnen
+it|u_noqr|non disegnare il QR code del link di configurazione
+pt|u_noqr|não desenhar o código QR da ligação de configuração
+nl|u_noqr|de QR-code van de installatielink niet tekenen
+ru|u_noqr|не рисовать QR-код ссылки настройки
+zh|u_noqr|不绘制设置链接的二维码
+ar|u_noqr|عدم رسم رمز QR لرابط الإعداد
+en|sh_e_nofile|cannot read %s
+fr|sh_e_nofile|impossible de lire %s
+es|sh_e_nofile|no se puede leer %s
+de|sh_e_nofile|%s kann nicht gelesen werden
+it|sh_e_nofile|impossibile leggere %s
+pt|sh_e_nofile|não é possível ler %s
+nl|sh_e_nofile|kan %s niet lezen
+ru|sh_e_nofile|не удаётся прочитать %s
+zh|sh_e_nofile|无法读取 %s
+ar|sh_e_nofile|تعذّرت قراءة %s
+en|b_title|ToutWAF Backup server %s is installed
+fr|b_title|Le serveur ToutWAF Backup %s est installé
+es|b_title|El servidor ToutWAF Backup %s está instalado
+de|b_title|Der ToutWAF-Backup-Server %s ist installiert
+it|b_title|Il server ToutWAF Backup %s è installato
+pt|b_title|O servidor ToutWAF Backup %s está instalado
+nl|b_title|De ToutWAF Backup-server %s is geïnstalleerd
+ru|b_title|Сервер ToutWAF Backup %s установлен
+zh|b_title|ToutWAF Backup 服务器 %s 已安装
+ar|b_title|تم تثبيت خادم ToutWAF Backup %s
+en|b_prog|Program: %s
+fr|b_prog|Programme : %s
+es|b_prog|Programa: %s
+de|b_prog|Programm: %s
+it|b_prog|Programma: %s
+pt|b_prog|Programa: %s
+nl|b_prog|Programma: %s
+ru|b_prog|Программа: %s
+zh|b_prog|程序：%s
+ar|b_prog|البرنامج: %s
+en|b_state|Data and settings: %s
+fr|b_state|Données et réglages : %s
+es|b_state|Datos y ajustes: %s
+de|b_state|Daten und Einstellungen: %s
+it|b_state|Dati e impostazioni: %s
+pt|b_state|Dados e definições: %s
+nl|b_state|Gegevens en instellingen: %s
+ru|b_state|Данные и настройки: %s
+zh|b_state|数据和设置：%s
+ar|b_state|البيانات والإعدادات: %s
+en|b_listen|Address: %s
+fr|b_listen|Adresse : %s
+es|b_listen|Dirección: %s
+de|b_listen|Adresse: %s
+it|b_listen|Indirizzo: %s
+pt|b_listen|Endereço: %s
+nl|b_listen|Adres: %s
+ru|b_listen|Адрес: %s
+zh|b_listen|地址：%s
+ar|b_listen|العنوان: %s
+en|b_guess|(guessed from this machine: if your clients use a DNS name, install again with the external URL option)
+fr|b_guess|(deviné d'après cette machine : si vos clients utilisent un nom DNS, relancez l'installation avec l'option d'adresse externe)
+es|b_guess|(deducida de esta máquina: si sus clientes usan un nombre DNS, instale de nuevo con la opción de dirección externa)
+de|b_guess|(von diesem Rechner abgeleitet: Wenn Ihre Clients einen DNS-Namen verwenden, installieren Sie erneut mit der Option für die externe Adresse)
+it|b_guess|(dedotto da questa macchina: se i tuoi client usano un nome DNS, reinstalla con l'opzione dell'indirizzo esterno)
+pt|b_guess|(deduzido desta máquina: se os seus clientes usam um nome DNS, instale de novo com a opção de endereço externo)
+nl|b_guess|(afgeleid van deze machine: gebruiken uw clients een DNS-naam, installeer dan opnieuw met de optie voor het externe adres)
+ru|b_guess|(определён по этой машине: если клиенты используют DNS-имя, повторите установку с параметром внешнего адреса)
+zh|b_guess|（根据本机推测：如果客户端使用 DNS 名称，请使用外部地址选项重新安装）
+ar|b_guess|(مستنتج من هذا الجهاز: إذا كان عملاؤك يستخدمون اسم DNS فأعد التثبيت مع خيار العنوان الخارجي)
+en|b_finish|FINISH THE SETUP in your browser: choose the administrator, get your access token and configure the server. The server stays closed until you do.
+fr|b_finish|TERMINEZ LA CONFIGURATION dans votre navigateur : choisissez l'administrateur, obtenez votre jeton d'accès et configurez le serveur. Le serveur reste fermé tant que ce n'est pas fait.
+es|b_finish|TERMINE LA CONFIGURACIÓN en su navegador: elija el administrador, obtenga su token de acceso y configure el servidor. El servidor permanece cerrado hasta entonces.
+de|b_finish|SCHLIESSEN SIE DIE EINRICHTUNG im Browser ab: Administrator wählen, Zugriffstoken erhalten und den Server konfigurieren. Bis dahin bleibt der Server gesperrt.
+it|b_finish|COMPLETA LA CONFIGURAZIONE nel browser: scegli l'amministratore, ottieni il token di accesso e configura il server. Il server resta chiuso finché non lo fai.
+pt|b_finish|CONCLUA A CONFIGURAÇÃO no navegador: escolha o administrador, obtenha o token de acesso e configure o servidor. O servidor fica fechado até o fazer.
+nl|b_finish|RONDT DE CONFIGURATIE AF in uw browser: kies de beheerder, haal uw toegangstoken op en configureer de server. De server blijft dicht tot u dat doet.
+ru|b_finish|ЗАВЕРШИТЕ НАСТРОЙКУ в браузере: выберите администратора, получите токен доступа и настройте сервер. Пока вы этого не сделаете, сервер закрыт.
+zh|b_finish|请在浏览器中完成设置：选择管理员、获取访问令牌并配置服务器。完成之前服务器保持关闭。
+ar|b_finish|أكمل الإعداد في المتصفح: اختر المسؤول واحصل على رمز الوصول وهيّئ الخادم. يبقى الخادم مغلقًا حتى تفعل ذلك.
+en|b_valid|Single use, valid until %s (60 minutes), tied to this server's certificate.
+fr|b_valid|Usage unique, valable jusqu'à %s (60 minutes), lié au certificat de ce serveur.
+es|b_valid|Un solo uso, válido hasta las %s (60 minutos), ligado al certificado de este servidor.
+de|b_valid|Einmal verwendbar, gültig bis %s (60 Minuten), an das Zertifikat dieses Servers gebunden.
+it|b_valid|Monouso, valido fino alle %s (60 minuti), legato al certificato di questo server.
+pt|b_valid|Uso único, válida até às %s (60 minutos), associada ao certificado deste servidor.
+nl|b_valid|Eenmalig bruikbaar, geldig tot %s (60 minuten), gebonden aan het certificaat van deze server.
+ru|b_valid|Одноразовая, действует до %s (60 минут), привязана к сертификату этого сервера.
+zh|b_valid|仅可使用一次，有效期至 %s（60 分钟），并绑定到此服务器的证书。
+ar|b_valid|لمرة واحدة، صالح حتى %s (60 دقيقة)، ومرتبط بشهادة هذا الخادم.
+en|b_fp|Certificate fingerprint (the setup page shows the same one: if they differ, stop):
+fr|b_fp|Empreinte du certificat (la page de configuration affiche la même : si elles diffèrent, arrêtez-vous) :
+es|b_fp|Huella del certificado (la página de configuración muestra la misma: si difieren, deténgase):
+de|b_fp|Zertifikat-Fingerabdruck (die Einrichtungsseite zeigt denselben: Weicht er ab, brechen Sie ab):
+it|b_fp|Impronta del certificato (la pagina di configurazione mostra la stessa: se differiscono, fermati):
+pt|b_fp|Impressão digital do certificado (a página de configuração mostra a mesma: se diferirem, pare):
+nl|b_fp|Vingerafdruk van het certificaat (de configuratiepagina toont dezelfde: verschilt hij, stop dan):
+ru|b_fp|Отпечаток сертификата (страница настройки покажет тот же: если они различаются, остановитесь):
+zh|b_fp|证书指纹（设置页面显示相同的指纹：若不一致，请停止）：
+ar|b_fp|بصمة الشهادة (تعرض صفحة الإعداد البصمة نفسها: إن اختلفتا فتوقف):
+en|b_fw|Firewall: TCP port %s must be reachable from your browser and from the machines to protect.
+fr|b_fw|Pare-feu : le port TCP %s doit être joignable depuis votre navigateur et depuis les machines à protéger.
+es|b_fw|Cortafuegos: el puerto TCP %s debe ser accesible desde su navegador y desde las máquinas que se protegen.
+de|b_fw|Firewall: Der TCP-Port %s muss von Ihrem Browser und von den zu schützenden Rechnern erreichbar sein.
+it|b_fw|Firewall: la porta TCP %s deve essere raggiungibile dal tuo browser e dalle macchine da proteggere.
+pt|b_fw|Firewall: a porta TCP %s tem de ser acessível a partir do seu navegador e das máquinas a proteger.
+nl|b_fw|Firewall: TCP-poort %s moet bereikbaar zijn vanuit uw browser en vanaf de te beschermen machines.
+ru|b_fw|Брандмауэр: TCP-порт %s должен быть доступен из вашего браузера и с защищаемых машин.
+zh|b_fw|防火墙：TCP 端口 %s 必须能从您的浏览器和需要保护的机器访问。
+ar|b_fw|جدار الحماية: يجب أن يكون منفذ TCP رقم %s متاحًا من متصفحك ومن الأجهزة المراد حمايتها.
+en|b_again|Link lost or expired? Make a new one (the old one stops working): %s
+fr|b_again|Lien perdu ou expiré ? Créez-en un nouveau (l'ancien cesse de fonctionner) : %s
+es|b_again|¿Enlace perdido o caducado? Cree uno nuevo (el antiguo deja de funcionar): %s
+de|b_again|Link verloren oder abgelaufen? Erzeugen Sie einen neuen (der alte funktioniert dann nicht mehr): %s
+it|b_again|Link perso o scaduto? Creane uno nuovo (il vecchio smette di funzionare): %s
+pt|b_again|Ligação perdida ou expirada? Crie uma nova (a antiga deixa de funcionar): %s
+nl|b_again|Link kwijt of verlopen? Maak een nieuwe (de oude werkt dan niet meer): %s
+ru|b_again|Ссылка потеряна или истекла? Создайте новую (старая перестанет работать): %s
+zh|b_again|链接丢失或已过期？请生成新链接（旧链接随即失效）：%s
+ar|b_again|ضاع الرابط أو انتهت صلاحيته؟ أنشئ رابطًا جديدًا (يتوقف القديم عن العمل): %s
+en|b_uninst|To uninstall: %s (the data is kept; add %s to delete it too)
+fr|b_uninst|Pour désinstaller : %s (les données sont conservées ; ajoutez %s pour les supprimer aussi)
+es|b_uninst|Para desinstalar: %s (los datos se conservan; añada %s para borrarlos también)
+de|b_uninst|Zum Deinstallieren: %s (die Daten bleiben erhalten; mit %s werden sie ebenfalls gelöscht)
+it|b_uninst|Per disinstallare: %s (i dati vengono conservati; aggiungi %s per eliminarli)
+pt|b_uninst|Para desinstalar: %s (os dados são mantidos; acrescente %s para os apagar também)
+nl|b_uninst|Verwijderen: %s (de gegevens blijven bewaard; voeg %s toe om ze ook te wissen)
+ru|b_uninst|Для удаления: %s (данные сохраняются; добавьте %s, чтобы удалить и их)
+zh|b_uninst|卸载：%s（数据会保留；添加 %s 可一并删除）
+ar|b_uninst|للإزالة: %s (تبقى البيانات؛ أضف %s لحذفها أيضًا)
+en|b_token_title|ADMINISTRATOR TOKEN (shown ONCE: note it down now)
+fr|b_token_title|JETON D'ADMINISTRATION (affiché UNE SEULE fois : notez-le maintenant)
+es|b_token_title|TOKEN DE ADMINISTRACIÓN (se muestra UNA sola vez: anótelo ahora)
+de|b_token_title|ADMIN-TOKEN (wird nur EINMAL angezeigt: jetzt notieren)
+it|b_token_title|TOKEN DI AMMINISTRAZIONE (mostrato UNA sola volta: annotalo ora)
+pt|b_token_title|TOKEN DE ADMINISTRAÇÃO (mostrado UMA só vez: anote-o agora)
+nl|b_token_title|BEHEERDERSTOKEN (slechts EENMAAL getoond: noteer het nu)
+ru|b_token_title|ТОКЕН АДМИНИСТРАТОРА (показывается ТОЛЬКО один раз: запишите его сейчас)
+zh|b_token_title|管理员令牌（只显示一次：请立即记下）
+ar|b_token_title|رمز المسؤول (يُعرض مرة واحدة فقط: دوّنه الآن)
+en|b_token_fp|Certificate fingerprint (clients pin it):
+fr|b_token_fp|Empreinte du certificat (les clients l'épinglent) :
+es|b_token_fp|Huella del certificado (los clientes la fijan):
+de|b_token_fp|Zertifikat-Fingerabdruck (Clients legen ihn fest):
+it|b_token_fp|Impronta del certificato (i client la fissano):
+pt|b_token_fp|Impressão digital do certificado (os clientes fixam-na):
+nl|b_token_fp|Vingerafdruk van het certificaat (clients zetten hem vast):
+ru|b_token_fp|Отпечаток сертификата (клиенты закрепляют его):
+zh|b_token_fp|证书指纹（客户端会固定它）：
+ar|b_token_fp|بصمة الشهادة (يثبّتها العملاء):
+en|b_pending|The first-run setup of this server is not finished. New setup link (the old one stops working): %s
+fr|b_pending|La configuration initiale de ce serveur n'est pas terminée. Nouveau lien de configuration (l'ancien cesse de fonctionner) : %s
+es|b_pending|La configuración inicial de este servidor no ha terminado. Enlace de configuración nuevo (el antiguo deja de funcionar): %s
+de|b_pending|Die Ersteinrichtung dieses Servers ist nicht abgeschlossen. Neuer Einrichtungslink (der alte funktioniert dann nicht mehr): %s
+it|b_pending|La configurazione iniziale di questo server non è terminata. Nuovo link di configurazione (il vecchio smette di funzionare): %s
+pt|b_pending|A configuração inicial deste servidor não está concluída. Nova ligação de configuração (a antiga deixa de funcionar): %s
+nl|b_pending|De eerste configuratie van deze server is niet afgerond. Nieuwe installatielink (de oude werkt dan niet meer): %s
+ru|b_pending|Первоначальная настройка этого сервера не завершена. Новая ссылка настройки (старая перестанет работать): %s
+zh|b_pending|此服务器的首次设置尚未完成。新的设置链接（旧链接随即失效）：%s
+ar|b_pending|لم يكتمل الإعداد الأول لهذا الخادم. رابط إعداد جديد (يتوقف القديم عن العمل): %s
+en|e_otherkey|this release is signed with another release key (%s): the release key of ToutWAF Backup was rotated; download and run the current install.sh once
+fr|e_otherkey|cette version est signée avec une autre clé de publication (%s) : la clé de publication de ToutWAF Backup a changé ; téléchargez et lancez une fois le install.sh actuel
+es|e_otherkey|esta versión está firmada con otra clave de publicación (%s): la clave de publicación de ToutWAF Backup cambió; descargue y ejecute una vez el install.sh actual
+de|e_otherkey|diese Version ist mit einem anderen Release-Schlüssel signiert (%s): der Release-Schlüssel von ToutWAF Backup wurde gewechselt; laden Sie das aktuelle install.sh herunter und führen Sie es einmal aus
+it|e_otherkey|questa versione è firmata con un'altra chiave di rilascio (%s): la chiave di rilascio di ToutWAF Backup è cambiata; scarica ed esegui una volta l'install.sh attuale
+pt|e_otherkey|esta versão está assinada com outra chave de lançamento (%s): a chave de lançamento do ToutWAF Backup mudou; descarregue e execute uma vez o install.sh atual
+nl|e_otherkey|deze versie is ondertekend met een andere releasesleutel (%s): de releasesleutel van ToutWAF Backup is gewisseld; download en voer het huidige install.sh eenmalig uit
+ru|e_otherkey|этот выпуск подписан другим ключом выпусков (%s): ключ выпусков ToutWAF Backup был заменён; скачайте и один раз запустите актуальный install.sh
+zh|e_otherkey|此版本使用另一个发布密钥签名（%s）：ToutWAF Backup 的发布密钥已更换；请下载并运行一次当前的 install.sh
+ar|e_otherkey|هذا الإصدار موقّع بمفتاح إصدار آخر (%s): تم تغيير مفتاح إصدار ToutWAF Backup؛ نزّل install.sh الحالي وشغّله مرة واحدة
 # END CATALOG
 TWB_CATALOG
 }
@@ -1299,6 +1510,11 @@ usage() {
   opt "--external-url URL" "$(t u_exturl)"
   opt "--datastore NAME=PATH" "$(t u_ds)"
   opt "--no-init" "$(t u_noinit)"
+  opt "--no-setup-link" "$(t u_nosetup)"
+  opt "--admin-user NAME" "$(t u_adminuser)"
+  opt "--admin-password-hash-file F" "$(t u_adminhash)"
+  opt "--admin-token-file F" "$(t u_admintoken)"
+  opt "--no-qr" "$(t u_noqr)"
   opt "--start" "$(t u_start)"
   opt "--no-systemd" "$(t u_nosystemd)"
   opt "--user NAME" "$(t u_user)"
@@ -1331,6 +1547,11 @@ while [ $# -gt 0 ]; do
     --external-url) EXTERNAL_URL="${2:-}"; shift 2 ;;
     --datastore) DATASTORE="${2:-}"; shift 2 ;;
     --no-init) INIT=0; shift ;;
+    --no-setup-link) SETUP_LINK=0; shift ;;
+    --admin-user) ADMIN_USER="${2:-}"; shift 2 ;;
+    --admin-password-hash-file) ADMIN_HASH_FILE="${2:-}"; shift 2 ;;
+    --admin-token-file) ADMIN_TOKEN_FILE="${2:-}"; shift 2 ;;
+    --no-qr) QR=0; shift ;;
     --start) START=1; shift ;;
     --no-systemd) NO_SYSTEMD=1; shift ;;
     --user) SERVICE_USER="${2:-}"; shift 2 ;;
@@ -1678,15 +1899,32 @@ case "$(uname -m)" in
 esac
 [ "$(uname -s)" = Linux ] || die "$(t sh_e_os)"
 
-if ! fetch "$BASE_URL/channel.json" "$TMP/channel.json"; then
+# The release channels: channels/NAME.json (installer 3), else the legacy channel.json when it describes the same channel. A channel nobody has published on is an error, never
+# a silent switch to another channel.
+fetch_channel() { # base URL
+  local c
+  fetch "$1/channels/$CHANNEL.json" "$TMP/channel.json" 2>/dev/null && return 0
+  fetch "$1/channel.json" "$TMP/channel.json" || return 1
+  c="$(sed -nE 's/^[[:space:]]*"channel":[[:space:]]*"([^"]*)".*/\1/p' "$TMP/channel.json" | head -1)"
+  [ -z "$c" ] || [ "$c" = "$CHANNEL" ] || die "$(t e_nochannel "$CHANNEL" "$c" "$c")"
+}
+# a release signed by another release key (after a key rotation) is refused before anything is downloaded
+check_channel_key() {
+  local k kid
+  k="$(sed -nE 's/^[[:space:]]*"public_key":[[:space:]]*"([^"]*)".*/\1/p' "$TMP/channel.json" | head -1)"
+  kid="$(sed -nE 's/^[[:space:]]*"public_key_id":[[:space:]]*"([^"]*)".*/\1/p' "$TMP/channel.json" | head -1)"
+  [ -z "$k" ] || [ "$k" = "$RELEASE_PUBKEY" ] || die "$(t e_otherkey "${kid:-?}")"
+}
+if ! fetch_channel "$BASE_URL"; then
   if [ "$BASE_EXPLICIT" -eq 0 ] && [ -n "$FALLBACK_BASE_URL" ]; then
     warn "$(t w_fallback "$BASE_URL" "$FALLBACK_BASE_URL")"
     BASE_URL="$FALLBACK_BASE_URL"
-    fetch "$BASE_URL/channel.json" "$TMP/channel.json" || die "$(t sh_e_chan_both)"
+    fetch_channel "$BASE_URL" || die "$(t sh_e_chan_both)"
   else
     die "$(t e_chan_one "$BASE_URL")"
   fi
 fi
+check_channel_key
 LATEST="$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]*)".*/\1/p' "$TMP/channel.json" | head -1)"
 YANKED="$(sed -nE 's/^[[:space:]]*"yanked":[[:space:]]*\[(.*)\].*/\1/p' "$TMP/channel.json" | head -1)"
 [ -n "$LATEST" ] || die "$(t e_nover)"
@@ -1745,6 +1983,57 @@ else
   UNIT_SRC="$SRC/systemd"
 fi
 
+# ---- the last screen of a server installation ---------------------------------------------------------------------------------------
+rule() { printf '%s\n' "================================================================================"; }
+fmt_fp() { printf '%s' "$1" | tr 'a-f' 'A-F' | sed 's/\(..\)/\1:/g; s/:$//'; }
+local_time() { # RFC 3339 (UTC) to HH:MM local time; the text itself when it cannot be converted
+  date -d "$1" +%H:%M 2>/dev/null || date -u -d "$1" +%H:%M 2>/dev/null || printf '%s' "$1"
+}
+final_block() {
+  [ "$ROLE" = server ] || return 0
+  local ver port url state_dir="$STATE_DIR" cmd_new="sudo toutwaf-backup server setup-link --new" self="sudo bash install.sh"
+  ver="$(cur_version)"; port="${LISTEN##*:}"
+  if [ "$FIRST" -eq 0 ]; then
+    # an installation run again: nothing is shown twice, but a setup that was never finished is pointed out
+    if [ -f "$D$STATE_DIR/setup.json" ] && grep -q '"state": "pending"' "$D$STATE_DIR/setup.json" 2>/dev/null; then say ""; say "$(t b_pending "$cmd_new")"; fi
+    return 0
+  fi
+  if [ -z "$SETUP_URL" ] && [ -z "$FIRST_TOKEN" ] && [ "$INIT" -eq 1 ]; then return 0; fi
+  say ""; rule
+  say "  $(t b_title "$ver")"
+  rule
+  say "  $(t b_prog "$BIN")"
+  say "  $(t b_state "$state_dir")"
+  if [ -n "$SETUP_URL" ]; then
+    url="${SETUP_URL%/setup/*}"
+    say "  $(t b_listen "$url")"
+    [ -n "$EXTERNAL_URL" ] || say "      $(t b_guess)"
+    say ""
+    say "  $(t b_finish)"
+    say ""
+    say "$SETUP_URL"
+    say ""
+    say "  $(t b_valid "$(local_time "$SETUP_EXP")")"
+    say "  $(t b_fp)"
+    say "      $(fmt_fp "$SETUP_FP")"
+    if [ "$QR" -eq 1 ] && [ -t 1 ] && command -v qrencode >/dev/null 2>&1; then say ""; qrencode -t ANSIUTF8 -m 1 "$SETUP_URL" 2>/dev/null || true; fi
+  elif [ -n "$FIRST_TOKEN" ]; then
+    say ""
+    say "  $(t b_token_title)"
+    say "$FIRST_TOKEN"
+    say ""
+    say "  $(t b_token_fp)"
+    say "      $(fmt_fp "$SETUP_FP")"
+    say ""
+    say "  $(t sh_s_then "$port")"
+  fi
+  say ""
+  say "  $(t b_fw "$port")"
+  if [ -n "$SETUP_URL" ]; then say "  $(t b_again "$cmd_new")"; fi
+  say "  $(t b_uninst "$self --uninstall" "--purge")"
+  rule
+}
+
 # ---- roles --------------------------------------------------------------------------------------------------------------------
 mkdir -p "$D$CONF_DIR"; chmod 0750 "$D$CONF_DIR"
 um_install
@@ -1790,20 +2079,31 @@ fi
 FIRST=0
 if [ "$INIT" -eq 1 ] && [ ! -f "$D$STATE_DIR/config.json" ]; then
   FIRST=1
-  args=(server init --state "$D$STATE_DIR" --listen "$LISTEN")
+  args=(server init --state "$D$STATE_DIR" --listen "$LISTEN" --machine)
   [ -z "$EXTERNAL_URL" ] || args+=(--external-url "$EXTERNAL_URL")
   [ -z "$DATASTORE" ] || args+=(--datastore "$DATASTORE")
+  [ "$SETUP_LINK" -eq 1 ] || args+=(--no-setup-link)
+  # presets for automation: read here, as root, and handed to the command through its environment (the service user may not read the files)
+  if [ -n "$ADMIN_USER" ]; then args+=(--admin-user "$ADMIN_USER"); fi
+  if [ -n "$ADMIN_HASH_FILE" ]; then [ -r "$ADMIN_HASH_FILE" ] || die "$(t sh_e_nofile "$ADMIN_HASH_FILE")"; TWB_ADMIN_PASSWORD_HASH="$(tr -d ' \r\n' <"$ADMIN_HASH_FILE")"; export TWB_ADMIN_PASSWORD_HASH; fi
+  if [ -n "$ADMIN_TOKEN_FILE" ]; then [ -r "$ADMIN_TOKEN_FILE" ] || die "$(t sh_e_nofile "$ADMIN_TOKEN_FILE")"; TWB_ADMIN_TOKEN="$(tr -d ' \r\n' <"$ADMIN_TOKEN_FILE")"; export TWB_ADMIN_TOKEN; fi
   say ""
   say "$(t s_first)"
+  INIT_OUT=""
   if [ -z "$D" ]; then
-    if command -v runuser >/dev/null 2>&1; then runuser -u "$SERVICE_USER" -- "$BIN" "${args[@]}"
-    else su -s /bin/sh "$SERVICE_USER" -c "$(printf '%q ' "$BIN" "${args[@]}")"; fi
+    if command -v runuser >/dev/null 2>&1; then INIT_OUT="$(runuser -u "$SERVICE_USER" -- "$BIN" "${args[@]}")" || die "$(t s_first)"
+    else INIT_OUT="$(su -s /bin/sh "$SERVICE_USER" -c "$(printf '%q ' "$BIN" "${args[@]}")")" || die "$(t s_first)"; fi
   else
     # staging: the binary may be for another CPU; only run it when it can run here
-    if [ "$ARCH" = "$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" ]; then "$BIN" "${args[@]}"; fi
+    if [ "$ARCH" = "$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" ]; then INIT_OUT="$("$BIN" "${args[@]}")" || die "$(t s_first)"; fi
   fi
-  say ""
-  say "$(t s_writedown)"
+  unset TWB_ADMIN_PASSWORD_HASH TWB_ADMIN_TOKEN
+  # what the command printed is kept in variables and shown once, in the final block: never in a log line, never written to a file
+  SETUP_URL="$(printf '%s\n' "$INIT_OUT" | sed -n 's/^setup_url=//p' | head -1)"
+  SETUP_EXP="$(printf '%s\n' "$INIT_OUT" | sed -n 's/^setup_expires=//p' | head -1)"
+  SETUP_FP="$(printf '%s\n' "$INIT_OUT" | sed -n 's/^fingerprint=//p' | head -1)"
+  FIRST_TOKEN="$(printf '%s\n' "$INIT_OUT" | sed -n 's/^admin_token=//p' | head -1)"
+  INIT_OUT=""
 fi
 
 if use_systemd; then
@@ -1829,5 +2129,5 @@ if [ "$FW_DONE" -eq 0 ]; then
 fi
 write_state "installed" "$WANT"
 [ -z "$MGR_CMD" ] || exit 0
-[ "$FIRST" -eq 0 ] || say "$(t sh_s_then "$port")"
+final_block
 exit 0

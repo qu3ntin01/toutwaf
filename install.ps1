@@ -31,6 +31,10 @@ param(
   [string]$ExternalUrl = '',
   [string]$Datastore = '',
   [switch]$NoInit,
+  [switch]$NoSetupLink,
+  [string]$AdminUser = $env:TWB_ADMIN_USER,
+  [string]$AdminPasswordHashFile = '',
+  [string]$AdminTokenFile = '',
   [switch]$Start,
   [switch]$NoFirewall,
   [switch]$Uninstall,
@@ -43,11 +47,11 @@ param(
   [switch]$En, [switch]$Fr, [switch]$Es, [switch]$De, [switch]$It, [switch]$Pt, [switch]$Nl, [switch]$Ru, [switch]$Zh, [switch]$Ar
 )
 $ErrorActionPreference = 'Stop'
-$InstallerVersion = 1
-$DefaultChannel = 'dev'
+$InstallerVersion = 2
+$DefaultChannel = 'stable'
 $DefaultBaseUrl = 'https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup'
 $FallbackBaseUrl = 'https://raw.githubusercontent.com/qu3ntin01/toutwaf/toutwaf-backup'
-$ReleasePubKey = 'V7tJBQsSrIsDTGIqlFhJZ8q4t/Fc8iNvg/cKkfRDATA='
+$ReleasePubKey = 'gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0='
 
 # ---- message catalog ------------------------------------------------------------------------------------------------------------------
 # 10 languages (en fr es de it pt nl ru zh ar). Generated: edit deploy/tools/gen-installer-i18n.py, not these lines (ASCII only: \uXXXX escapes).
@@ -80,7 +84,6 @@ $script:Catalog = @{
         'ps_c_task' = 'then: schtasks /Create /TN ... /XML ...'
         'c_keys' = 'Keep the key file, its passphrase and the paper key OFF this machine too: without them a restore is impossible.'
         's_first' = 'First installation: creating the server configuration.'
-        's_writedown' = 'WRITE DOWN the admin token and the certificate fingerprint above: the token is not shown again.'
         's_restarted' = 'Service restarted on the new version.'
         'ps_untested' = 'This installer and the Windows-specific parts of ToutWAF Backup (service, VSS, NTFS ACLs, long paths) have NOT been tested on a real Windows machine in this release. Try it on a non-critical machine first (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = 'this installer has no valid release public key (it is baked in by tools/build-release.sh; use the install.ps1 served with the release)'
@@ -99,6 +102,22 @@ $script:Catalog = @{
         'ps_s_started' = 'Service started.'
         'ps_s_startit' = 'Start it with: Start-Service {0}'
         'ps_s_then' = 'Then open https://<host>:{0}/ for the web interface.'
+        'ps_s_update' = 'Updates: toutwaf-backup update status | check | apply (signature and checksum are verified; restart the service afterwards).'
+        'ps_e_nofile' = 'cannot read {0}'
+        'b_title' = 'ToutWAF Backup server {0} is installed'
+        'b_prog' = 'Program: {0}'
+        'b_state' = 'Data and settings: {0}'
+        'b_listen' = 'Address: {0}'
+        'b_guess' = '(guessed from this machine: if your clients use a DNS name, install again with the external URL option)'
+        'b_finish' = 'FINISH THE SETUP in your browser: choose the administrator, get your access token and configure the server. The server stays closed until you do.'
+        'b_valid' = 'Single use, valid until {0} (60 minutes), tied to this server''s certificate.'
+        'b_fp' = 'Certificate fingerprint (the setup page shows the same one: if they differ, stop):'
+        'b_fw' = 'Firewall: TCP port {0} must be reachable from your browser and from the machines to protect.'
+        'b_again' = 'Link lost or expired? Make a new one (the old one stops working): {0}'
+        'b_uninst' = 'To uninstall: {0} (the data is kept; add {1} to delete it too)'
+        'b_token_title' = 'ADMINISTRATOR TOKEN (shown ONCE: note it down now)'
+        'b_token_fp' = 'Certificate fingerprint (clients pin it):'
+        'b_pending' = 'The first-run setup of this server is not finished. New setup link (the old one stops working): {0}'
     }
     'fr' = @{
         'aborted' = 'abandon'
@@ -126,7 +145,6 @@ $script:Catalog = @{
         'ps_c_task' = 'puis : schtasks /Create /TN ... /XML ...'
         'c_keys' = 'Gardez aussi le fichier de cl\u00e9, sa phrase secr\u00e8te et la cl\u00e9 papier HORS de cette machine : sans eux, une restauration est impossible.'
         's_first' = 'Premi\u00e8re installation : cr\u00e9ation de la configuration du serveur.'
-        's_writedown' = 'NOTEZ le jeton d''administration et l''empreinte du certificat ci-dessus : le jeton n''est plus affich\u00e9 ensuite.'
         's_restarted' = 'Service red\u00e9marr\u00e9 sur la nouvelle version.'
         'ps_untested' = 'Cet installeur et les parties de ToutWAF Backup propres \u00e0 Windows (service, VSS, ACL NTFS, chemins longs) n''ont PAS \u00e9t\u00e9 test\u00e9s sur une vraie machine Windows dans cette version. Essayez d''abord sur une machine non critique (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = 'cet installeur n''a pas de cl\u00e9 publique de version valide (elle est int\u00e9gr\u00e9e par tools/build-release.sh ; utilisez l''install.ps1 servi avec la version)'
@@ -145,6 +163,22 @@ $script:Catalog = @{
         'ps_s_started' = 'Service d\u00e9marr\u00e9.'
         'ps_s_startit' = 'D\u00e9marrez-le avec : Start-Service {0}'
         'ps_s_then' = 'Ouvrez ensuite https://<h\u00f4te>:{0}/ pour l''interface web.'
+        'ps_s_update' = 'Mises \u00e0 jour : toutwaf-backup update status | check | apply (signature et somme de contr\u00f4le v\u00e9rifi\u00e9es ; red\u00e9marrez ensuite le service).'
+        'ps_e_nofile' = 'impossible de lire {0}'
+        'b_title' = 'Le serveur ToutWAF Backup {0} est install\u00e9'
+        'b_prog' = 'Programme : {0}'
+        'b_state' = 'Donn\u00e9es et r\u00e9glages : {0}'
+        'b_listen' = 'Adresse : {0}'
+        'b_guess' = '(devin\u00e9 d''apr\u00e8s cette machine : si vos clients utilisent un nom DNS, relancez l''installation avec l''option d''adresse externe)'
+        'b_finish' = 'TERMINEZ LA CONFIGURATION dans votre navigateur : choisissez l''administrateur, obtenez votre jeton d''acc\u00e8s et configurez le serveur. Le serveur reste ferm\u00e9 tant que ce n''est pas fait.'
+        'b_valid' = 'Usage unique, valable jusqu''\u00e0 {0} (60 minutes), li\u00e9 au certificat de ce serveur.'
+        'b_fp' = 'Empreinte du certificat (la page de configuration affiche la m\u00eame : si elles diff\u00e8rent, arr\u00eatez-vous) :'
+        'b_fw' = 'Pare-feu : le port TCP {0} doit \u00eatre joignable depuis votre navigateur et depuis les machines \u00e0 prot\u00e9ger.'
+        'b_again' = 'Lien perdu ou expir\u00e9 ? Cr\u00e9ez-en un nouveau (l''ancien cesse de fonctionner) : {0}'
+        'b_uninst' = 'Pour d\u00e9sinstaller : {0} (les donn\u00e9es sont conserv\u00e9es ; ajoutez {1} pour les supprimer aussi)'
+        'b_token_title' = 'JETON D''ADMINISTRATION (affich\u00e9 UNE SEULE fois : notez-le maintenant)'
+        'b_token_fp' = 'Empreinte du certificat (les clients l''\u00e9pinglent) :'
+        'b_pending' = 'La configuration initiale de ce serveur n''est pas termin\u00e9e. Nouveau lien de configuration (l''ancien cesse de fonctionner) : {0}'
     }
     'es' = @{
         'aborted' = 'cancelado'
@@ -172,7 +206,6 @@ $script:Catalog = @{
         'ps_c_task' = 'luego: schtasks /Create /TN ... /XML ...'
         'c_keys' = 'Guarde tambi\u00e9n el archivo de clave, su frase de contrase\u00f1a y la clave en papel FUERA de esta m\u00e1quina: sin ellos no se puede restaurar.'
         's_first' = 'Primera instalaci\u00f3n: se crea la configuraci\u00f3n del servidor.'
-        's_writedown' = 'ANOTE el token de administraci\u00f3n y la huella del certificado de arriba: el token no se vuelve a mostrar.'
         's_restarted' = 'Servicio reiniciado con la versi\u00f3n nueva.'
         'ps_untested' = 'Este instalador y las partes de ToutWAF Backup espec\u00edficas de Windows (servicio, VSS, ACL NTFS, rutas largas) NO se han probado en una m\u00e1quina Windows real en esta versi\u00f3n. Pru\u00e9belo primero en una m\u00e1quina no cr\u00edtica (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = 'este instalador no tiene una clave p\u00fablica de versiones v\u00e1lida (la incorpora tools/build-release.sh; use el install.ps1 que se sirve con la versi\u00f3n)'
@@ -191,6 +224,22 @@ $script:Catalog = @{
         'ps_s_started' = 'Servicio iniciado.'
         'ps_s_startit' = 'In\u00edcielo con: Start-Service {0}'
         'ps_s_then' = 'Despu\u00e9s abra https://<host>:{0}/ para la interfaz web.'
+        'ps_s_update' = 'Actualizaciones: toutwaf-backup update status | check | apply (se verifican la firma y la suma de comprobaci\u00f3n; reinicie despu\u00e9s el servicio).'
+        'ps_e_nofile' = 'no se puede leer {0}'
+        'b_title' = 'El servidor ToutWAF Backup {0} est\u00e1 instalado'
+        'b_prog' = 'Programa: {0}'
+        'b_state' = 'Datos y ajustes: {0}'
+        'b_listen' = 'Direcci\u00f3n: {0}'
+        'b_guess' = '(deducida de esta m\u00e1quina: si sus clientes usan un nombre DNS, instale de nuevo con la opci\u00f3n de direcci\u00f3n externa)'
+        'b_finish' = 'TERMINE LA CONFIGURACI\u00d3N en su navegador: elija el administrador, obtenga su token de acceso y configure el servidor. El servidor permanece cerrado hasta entonces.'
+        'b_valid' = 'Un solo uso, v\u00e1lido hasta las {0} (60 minutos), ligado al certificado de este servidor.'
+        'b_fp' = 'Huella del certificado (la p\u00e1gina de configuraci\u00f3n muestra la misma: si difieren, det\u00e9ngase):'
+        'b_fw' = 'Cortafuegos: el puerto TCP {0} debe ser accesible desde su navegador y desde las m\u00e1quinas que se protegen.'
+        'b_again' = '\u00bfEnlace perdido o caducado? Cree uno nuevo (el antiguo deja de funcionar): {0}'
+        'b_uninst' = 'Para desinstalar: {0} (los datos se conservan; a\u00f1ada {1} para borrarlos tambi\u00e9n)'
+        'b_token_title' = 'TOKEN DE ADMINISTRACI\u00d3N (se muestra UNA sola vez: an\u00f3telo ahora)'
+        'b_token_fp' = 'Huella del certificado (los clientes la fijan):'
+        'b_pending' = 'La configuraci\u00f3n inicial de este servidor no ha terminado. Enlace de configuraci\u00f3n nuevo (el antiguo deja de funcionar): {0}'
     }
     'de' = @{
         'aborted' = 'abgebrochen'
@@ -218,7 +267,6 @@ $script:Catalog = @{
         'ps_c_task' = 'dann: schtasks /Create /TN ... /XML ...'
         'c_keys' = 'Bewahren Sie die Schl\u00fcsseldatei, ihre Passphrase und den Papierschl\u00fcssel AUCH au\u00dferhalb dieses Rechners auf: Ohne sie ist keine Wiederherstellung m\u00f6glich.'
         's_first' = 'Erstinstallation: Die Serverkonfiguration wird angelegt.'
-        's_writedown' = 'NOTIEREN Sie das Admin-Token und den Zertifikat-Fingerabdruck oben: Das Token wird nicht noch einmal angezeigt.'
         's_restarted' = 'Dienst mit der neuen Version neu gestartet.'
         'ps_untested' = 'Dieser Installer und die Windows-spezifischen Teile von ToutWAF Backup (Dienst, VSS, NTFS-ACLs, lange Pfade) wurden in diesem Release NICHT auf einem echten Windows-Rechner getestet. Probieren Sie es zuerst auf einem unkritischen Rechner aus (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = 'dieser Installer hat keinen g\u00fcltigen \u00f6ffentlichen Release-Schl\u00fcssel (er wird von tools/build-release.sh eingebaut; verwenden Sie die mit dem Release ausgelieferte install.ps1)'
@@ -237,6 +285,22 @@ $script:Catalog = @{
         'ps_s_started' = 'Dienst gestartet.'
         'ps_s_startit' = 'Starten Sie ihn mit: Start-Service {0}'
         'ps_s_then' = '\u00d6ffnen Sie danach https://<Host>:{0}/ f\u00fcr die Weboberfl\u00e4che.'
+        'ps_s_update' = 'Updates: toutwaf-backup update status | check | apply (Signatur und Pr\u00fcfsumme werden verifiziert; starten Sie danach den Dienst neu).'
+        'ps_e_nofile' = '{0} kann nicht gelesen werden'
+        'b_title' = 'Der ToutWAF-Backup-Server {0} ist installiert'
+        'b_prog' = 'Programm: {0}'
+        'b_state' = 'Daten und Einstellungen: {0}'
+        'b_listen' = 'Adresse: {0}'
+        'b_guess' = '(von diesem Rechner abgeleitet: Wenn Ihre Clients einen DNS-Namen verwenden, installieren Sie erneut mit der Option f\u00fcr die externe Adresse)'
+        'b_finish' = 'SCHLIESSEN SIE DIE EINRICHTUNG im Browser ab: Administrator w\u00e4hlen, Zugriffstoken erhalten und den Server konfigurieren. Bis dahin bleibt der Server gesperrt.'
+        'b_valid' = 'Einmal verwendbar, g\u00fcltig bis {0} (60 Minuten), an das Zertifikat dieses Servers gebunden.'
+        'b_fp' = 'Zertifikat-Fingerabdruck (die Einrichtungsseite zeigt denselben: Weicht er ab, brechen Sie ab):'
+        'b_fw' = 'Firewall: Der TCP-Port {0} muss von Ihrem Browser und von den zu sch\u00fctzenden Rechnern erreichbar sein.'
+        'b_again' = 'Link verloren oder abgelaufen? Erzeugen Sie einen neuen (der alte funktioniert dann nicht mehr): {0}'
+        'b_uninst' = 'Zum Deinstallieren: {0} (die Daten bleiben erhalten; mit {1} werden sie ebenfalls gel\u00f6scht)'
+        'b_token_title' = 'ADMIN-TOKEN (wird nur EINMAL angezeigt: jetzt notieren)'
+        'b_token_fp' = 'Zertifikat-Fingerabdruck (Clients legen ihn fest):'
+        'b_pending' = 'Die Ersteinrichtung dieses Servers ist nicht abgeschlossen. Neuer Einrichtungslink (der alte funktioniert dann nicht mehr): {0}'
     }
     'it' = @{
         'aborted' = 'annullato'
@@ -264,7 +328,6 @@ $script:Catalog = @{
         'ps_c_task' = 'poi: schtasks /Create /TN ... /XML ...'
         'c_keys' = 'Conserva il file della chiave, la sua passphrase e la chiave su carta ANCHE fuori da questa macchina: senza di essi un ripristino \u00e8 impossibile.'
         's_first' = 'Prima installazione: creazione della configurazione del server.'
-        's_writedown' = 'ANNOTA il token di amministrazione e l''impronta del certificato qui sopra: il token non viene mostrato di nuovo.'
         's_restarted' = 'Servizio riavviato con la nuova versione.'
         'ps_untested' = 'Questo installer e le parti di ToutWAF Backup specifiche di Windows (servizio, VSS, ACL NTFS, percorsi lunghi) NON sono stati testati su una vera macchina Windows in questa release. Provalo prima su una macchina non critica (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = 'questo installer non ha una chiave pubblica di release valida (la incorpora tools/build-release.sh; usa l''install.ps1 servito con la release)'
@@ -283,6 +346,22 @@ $script:Catalog = @{
         'ps_s_started' = 'Servizio avviato.'
         'ps_s_startit' = 'Avvialo con: Start-Service {0}'
         'ps_s_then' = 'Poi apri https://<host>:{0}/ per l''interfaccia web.'
+        'ps_s_update' = 'Aggiornamenti: toutwaf-backup update status | check | apply (firma e checksum verificati; riavvia poi il servizio).'
+        'ps_e_nofile' = 'impossibile leggere {0}'
+        'b_title' = 'Il server ToutWAF Backup {0} \u00e8 installato'
+        'b_prog' = 'Programma: {0}'
+        'b_state' = 'Dati e impostazioni: {0}'
+        'b_listen' = 'Indirizzo: {0}'
+        'b_guess' = '(dedotto da questa macchina: se i tuoi client usano un nome DNS, reinstalla con l''opzione dell''indirizzo esterno)'
+        'b_finish' = 'COMPLETA LA CONFIGURAZIONE nel browser: scegli l''amministratore, ottieni il token di accesso e configura il server. Il server resta chiuso finch\u00e9 non lo fai.'
+        'b_valid' = 'Monouso, valido fino alle {0} (60 minuti), legato al certificato di questo server.'
+        'b_fp' = 'Impronta del certificato (la pagina di configurazione mostra la stessa: se differiscono, fermati):'
+        'b_fw' = 'Firewall: la porta TCP {0} deve essere raggiungibile dal tuo browser e dalle macchine da proteggere.'
+        'b_again' = 'Link perso o scaduto? Creane uno nuovo (il vecchio smette di funzionare): {0}'
+        'b_uninst' = 'Per disinstallare: {0} (i dati vengono conservati; aggiungi {1} per eliminarli)'
+        'b_token_title' = 'TOKEN DI AMMINISTRAZIONE (mostrato UNA sola volta: annotalo ora)'
+        'b_token_fp' = 'Impronta del certificato (i client la fissano):'
+        'b_pending' = 'La configurazione iniziale di questo server non \u00e8 terminata. Nuovo link di configurazione (il vecchio smette di funzionare): {0}'
     }
     'pt' = @{
         'aborted' = 'cancelado'
@@ -310,7 +389,6 @@ $script:Catalog = @{
         'ps_c_task' = 'depois: schtasks /Create /TN ... /XML ...'
         'c_keys' = 'Guarde tamb\u00e9m o ficheiro de chave, a sua frase-passe e a chave em papel FORA desta m\u00e1quina: sem eles n\u00e3o \u00e9 poss\u00edvel restaurar.'
         's_first' = 'Primeira instala\u00e7\u00e3o: a criar a configura\u00e7\u00e3o do servidor.'
-        's_writedown' = 'ANOTE o token de administra\u00e7\u00e3o e a impress\u00e3o digital do certificado acima: o token n\u00e3o volta a ser mostrado.'
         's_restarted' = 'Servi\u00e7o reiniciado na nova vers\u00e3o.'
         'ps_untested' = 'Este instalador e as partes do ToutWAF Backup espec\u00edficas do Windows (servi\u00e7o, VSS, ACL NTFS, caminhos longos) N\u00c3O foram testados numa m\u00e1quina Windows real nesta vers\u00e3o. Experimente primeiro numa m\u00e1quina n\u00e3o cr\u00edtica (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = 'este instalador n\u00e3o tem uma chave p\u00fablica de vers\u00f5es v\u00e1lida (\u00e9 incorporada por tools/build-release.sh; use o install.ps1 servido com a vers\u00e3o)'
@@ -329,6 +407,22 @@ $script:Catalog = @{
         'ps_s_started' = 'Servi\u00e7o iniciado.'
         'ps_s_startit' = 'Inicie-o com: Start-Service {0}'
         'ps_s_then' = 'Depois abra https://<anfitri\u00e3o>:{0}/ para a interface web.'
+        'ps_s_update' = 'Atualiza\u00e7\u00f5es: toutwaf-backup update status | check | apply (assinatura e soma de verifica\u00e7\u00e3o verificadas; reinicie depois o servi\u00e7o).'
+        'ps_e_nofile' = 'n\u00e3o \u00e9 poss\u00edvel ler {0}'
+        'b_title' = 'O servidor ToutWAF Backup {0} est\u00e1 instalado'
+        'b_prog' = 'Programa: {0}'
+        'b_state' = 'Dados e defini\u00e7\u00f5es: {0}'
+        'b_listen' = 'Endere\u00e7o: {0}'
+        'b_guess' = '(deduzido desta m\u00e1quina: se os seus clientes usam um nome DNS, instale de novo com a op\u00e7\u00e3o de endere\u00e7o externo)'
+        'b_finish' = 'CONCLUA A CONFIGURA\u00c7\u00c3O no navegador: escolha o administrador, obtenha o token de acesso e configure o servidor. O servidor fica fechado at\u00e9 o fazer.'
+        'b_valid' = 'Uso \u00fanico, v\u00e1lida at\u00e9 \u00e0s {0} (60 minutos), associada ao certificado deste servidor.'
+        'b_fp' = 'Impress\u00e3o digital do certificado (a p\u00e1gina de configura\u00e7\u00e3o mostra a mesma: se diferirem, pare):'
+        'b_fw' = 'Firewall: a porta TCP {0} tem de ser acess\u00edvel a partir do seu navegador e das m\u00e1quinas a proteger.'
+        'b_again' = 'Liga\u00e7\u00e3o perdida ou expirada? Crie uma nova (a antiga deixa de funcionar): {0}'
+        'b_uninst' = 'Para desinstalar: {0} (os dados s\u00e3o mantidos; acrescente {1} para os apagar tamb\u00e9m)'
+        'b_token_title' = 'TOKEN DE ADMINISTRA\u00c7\u00c3O (mostrado UMA s\u00f3 vez: anote-o agora)'
+        'b_token_fp' = 'Impress\u00e3o digital do certificado (os clientes fixam-na):'
+        'b_pending' = 'A configura\u00e7\u00e3o inicial deste servidor n\u00e3o est\u00e1 conclu\u00edda. Nova liga\u00e7\u00e3o de configura\u00e7\u00e3o (a antiga deixa de funcionar): {0}'
     }
     'nl' = @{
         'aborted' = 'afgebroken'
@@ -356,7 +450,6 @@ $script:Catalog = @{
         'ps_c_task' = 'daarna: schtasks /Create /TN ... /XML ...'
         'c_keys' = 'Bewaar het sleutelbestand, de wachtzin en de papieren sleutel OOK buiten deze machine: zonder die is herstel onmogelijk.'
         's_first' = 'Eerste installatie: de serverconfiguratie wordt aangemaakt.'
-        's_writedown' = 'NOTEER het beheerderstoken en de vingerafdruk van het certificaat hierboven: het token wordt niet opnieuw getoond.'
         's_restarted' = 'Service opnieuw gestart met de nieuwe versie.'
         'ps_untested' = 'Dit installatieprogramma en de Windows-specifieke onderdelen van ToutWAF Backup (service, VSS, NTFS-ACL''s, lange paden) zijn in deze release NIET getest op een echte Windows-machine. Probeer het eerst op een niet-kritieke machine (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = 'dit installatieprogramma heeft geen geldige publieke releasesleutel (die wordt ingebouwd door tools/build-release.sh; gebruik de met de release meegeleverde install.ps1)'
@@ -375,6 +468,22 @@ $script:Catalog = @{
         'ps_s_started' = 'Service gestart.'
         'ps_s_startit' = 'Start hem met: Start-Service {0}'
         'ps_s_then' = 'Open daarna https://<host>:{0}/ voor de webinterface.'
+        'ps_s_update' = 'Updates: toutwaf-backup update status | check | apply (handtekening en controlesom worden geverifieerd; herstart daarna de dienst).'
+        'ps_e_nofile' = 'kan {0} niet lezen'
+        'b_title' = 'De ToutWAF Backup-server {0} is ge\u00efnstalleerd'
+        'b_prog' = 'Programma: {0}'
+        'b_state' = 'Gegevens en instellingen: {0}'
+        'b_listen' = 'Adres: {0}'
+        'b_guess' = '(afgeleid van deze machine: gebruiken uw clients een DNS-naam, installeer dan opnieuw met de optie voor het externe adres)'
+        'b_finish' = 'RONDT DE CONFIGURATIE AF in uw browser: kies de beheerder, haal uw toegangstoken op en configureer de server. De server blijft dicht tot u dat doet.'
+        'b_valid' = 'Eenmalig bruikbaar, geldig tot {0} (60 minuten), gebonden aan het certificaat van deze server.'
+        'b_fp' = 'Vingerafdruk van het certificaat (de configuratiepagina toont dezelfde: verschilt hij, stop dan):'
+        'b_fw' = 'Firewall: TCP-poort {0} moet bereikbaar zijn vanuit uw browser en vanaf de te beschermen machines.'
+        'b_again' = 'Link kwijt of verlopen? Maak een nieuwe (de oude werkt dan niet meer): {0}'
+        'b_uninst' = 'Verwijderen: {0} (de gegevens blijven bewaard; voeg {1} toe om ze ook te wissen)'
+        'b_token_title' = 'BEHEERDERSTOKEN (slechts EENMAAL getoond: noteer het nu)'
+        'b_token_fp' = 'Vingerafdruk van het certificaat (clients zetten hem vast):'
+        'b_pending' = 'De eerste configuratie van deze server is niet afgerond. Nieuwe installatielink (de oude werkt dan niet meer): {0}'
     }
     'ru' = @{
         'aborted' = '\u043e\u0442\u043c\u0435\u043d\u0435\u043d\u043e'
@@ -402,7 +511,6 @@ $script:Catalog = @{
         'ps_c_task' = '\u0437\u0430\u0442\u0435\u043c: schtasks /Create /TN ... /XML ...'
         'c_keys' = '\u0425\u0440\u0430\u043d\u0438\u0442\u0435 \u0444\u0430\u0439\u043b \u043a\u043b\u044e\u0447\u0430, \u0435\u0433\u043e \u043f\u0430\u0440\u043e\u043b\u044c\u043d\u0443\u044e \u0444\u0440\u0430\u0437\u0443 \u0438 \u0431\u0443\u043c\u0430\u0436\u043d\u044b\u0439 \u043a\u043b\u044e\u0447 \u0422\u0410\u041a\u0416\u0415 \u0432\u043d\u0435 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u044b: \u0431\u0435\u0437 \u043d\u0438\u0445 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u043d\u0435\u0432\u043e\u0437\u043c\u043e\u0436\u043d\u043e.'
         's_first' = '\u041f\u0435\u0440\u0432\u0430\u044f \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430: \u0441\u043e\u0437\u0434\u0430\u0451\u0442\u0441\u044f \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f \u0441\u0435\u0440\u0432\u0435\u0440\u0430.'
-        's_writedown' = '\u0417\u0410\u041f\u0418\u0428\u0418\u0422\u0415 \u0442\u043e\u043a\u0435\u043d \u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\u0430 \u0438 \u043e\u0442\u043f\u0435\u0447\u0430\u0442\u043e\u043a \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0430 \u0432\u044b\u0448\u0435: \u0442\u043e\u043a\u0435\u043d \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f.'
         's_restarted' = '\u0421\u043b\u0443\u0436\u0431\u0430 \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0449\u0435\u043d\u0430 \u043d\u0430 \u043d\u043e\u0432\u043e\u0439 \u0432\u0435\u0440\u0441\u0438\u0438.'
         'ps_untested' = '\u042d\u0442\u043e\u0442 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0438 \u0441\u043f\u0435\u0446\u0438\u0444\u0438\u0447\u043d\u044b\u0435 \u0434\u043b\u044f Windows \u0447\u0430\u0441\u0442\u0438 ToutWAF Backup (\u0441\u043b\u0443\u0436\u0431\u0430, VSS, ACL NTFS, \u0434\u043b\u0438\u043d\u043d\u044b\u0435 \u043f\u0443\u0442\u0438) \u0432 \u044d\u0442\u043e\u043c \u0440\u0435\u043b\u0438\u0437\u0435 \u041d\u0415 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u043b\u0438\u0441\u044c \u043d\u0430 \u043d\u0430\u0441\u0442\u043e\u044f\u0449\u0435\u0439 \u043c\u0430\u0448\u0438\u043d\u0435 Windows. \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043d\u0430 \u043d\u0435\u043a\u0440\u0438\u0442\u0438\u0447\u043d\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435 (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = '\u0432 \u044d\u0442\u043e\u043c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a\u0435 \u043d\u0435\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0433\u043e \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u0433\u043e \u043a\u043b\u044e\u0447\u0430 \u0440\u0435\u043b\u0438\u0437\u043e\u0432 (\u0435\u0433\u043e \u0432\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u0442 tools/build-release.sh; \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 install.ps1, \u043f\u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u043c\u044b\u0439 \u0441 \u0440\u0435\u043b\u0438\u0437\u043e\u043c)'
@@ -421,6 +529,22 @@ $script:Catalog = @{
         'ps_s_started' = '\u0421\u043b\u0443\u0436\u0431\u0430 \u0437\u0430\u043f\u0443\u0449\u0435\u043d\u0430.'
         'ps_s_startit' = '\u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0435\u0433\u043e \u0442\u0430\u043a: Start-Service {0}'
         'ps_s_then' = '\u0417\u0430\u0442\u0435\u043c \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 https://<\u0445\u043e\u0441\u0442>:{0}/ \u0434\u043b\u044f \u0432\u0435\u0431-\u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430.'
+        'ps_s_update' = '\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f: toutwaf-backup update status | check | apply (\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u0438 \u043a\u043e\u043d\u0442\u0440\u043e\u043b\u044c\u043d\u0430\u044f \u0441\u0443\u043c\u043c\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u044e\u0442\u0441\u044f; \u0437\u0430\u0442\u0435\u043c \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u043b\u0443\u0436\u0431\u0443).'
+        'ps_e_nofile' = '\u043d\u0435 \u0443\u0434\u0430\u0451\u0442\u0441\u044f \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c {0}'
+        'b_title' = '\u0421\u0435\u0440\u0432\u0435\u0440 ToutWAF Backup {0} \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d'
+        'b_prog' = '\u041f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430: {0}'
+        'b_state' = '\u0414\u0430\u043d\u043d\u044b\u0435 \u0438 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438: {0}'
+        'b_listen' = '\u0410\u0434\u0440\u0435\u0441: {0}'
+        'b_guess' = '(\u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0451\u043d \u043f\u043e \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435: \u0435\u0441\u043b\u0438 \u043a\u043b\u0438\u0435\u043d\u0442\u044b \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442 DNS-\u0438\u043c\u044f, \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0443 \u0441 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u043e\u043c \u0432\u043d\u0435\u0448\u043d\u0435\u0433\u043e \u0430\u0434\u0440\u0435\u0441\u0430)'
+        'b_finish' = '\u0417\u0410\u0412\u0415\u0420\u0428\u0418\u0422\u0415 \u041d\u0410\u0421\u0422\u0420\u041e\u0419\u041a\u0423 \u0432 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0435: \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\u0430, \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u0435 \u0442\u043e\u043a\u0435\u043d \u0434\u043e\u0441\u0442\u0443\u043f\u0430 \u0438 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u0442\u0435 \u0441\u0435\u0440\u0432\u0435\u0440. \u041f\u043e\u043a\u0430 \u0432\u044b \u044d\u0442\u043e\u0433\u043e \u043d\u0435 \u0441\u0434\u0435\u043b\u0430\u0435\u0442\u0435, \u0441\u0435\u0440\u0432\u0435\u0440 \u0437\u0430\u043a\u0440\u044b\u0442.'
+        'b_valid' = '\u041e\u0434\u043d\u043e\u0440\u0430\u0437\u043e\u0432\u0430\u044f, \u0434\u0435\u0439\u0441\u0442\u0432\u0443\u0435\u0442 \u0434\u043e {0} (60 \u043c\u0438\u043d\u0443\u0442), \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u0430 \u043a \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0443 \u044d\u0442\u043e\u0433\u043e \u0441\u0435\u0440\u0432\u0435\u0440\u0430.'
+        'b_fp' = '\u041e\u0442\u043f\u0435\u0447\u0430\u0442\u043e\u043a \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0430 (\u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0430 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u043f\u043e\u043a\u0430\u0436\u0435\u0442 \u0442\u043e\u0442 \u0436\u0435: \u0435\u0441\u043b\u0438 \u043e\u043d\u0438 \u0440\u0430\u0437\u043b\u0438\u0447\u0430\u044e\u0442\u0441\u044f, \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435\u0441\u044c):'
+        'b_fw' = '\u0411\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440: TCP-\u043f\u043e\u0440\u0442 {0} \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d \u0438\u0437 \u0432\u0430\u0448\u0435\u0433\u043e \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430 \u0438 \u0441 \u0437\u0430\u0449\u0438\u0449\u0430\u0435\u043c\u044b\u0445 \u043c\u0430\u0448\u0438\u043d.'
+        'b_again' = '\u0421\u0441\u044b\u043b\u043a\u0430 \u043f\u043e\u0442\u0435\u0440\u044f\u043d\u0430 \u0438\u043b\u0438 \u0438\u0441\u0442\u0435\u043a\u043b\u0430? \u0421\u043e\u0437\u0434\u0430\u0439\u0442\u0435 \u043d\u043e\u0432\u0443\u044e (\u0441\u0442\u0430\u0440\u0430\u044f \u043f\u0435\u0440\u0435\u0441\u0442\u0430\u043d\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c): {0}'
+        'b_uninst' = '\u0414\u043b\u044f \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u044f: {0} (\u0434\u0430\u043d\u043d\u044b\u0435 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u044e\u0442\u0441\u044f; \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 {1}, \u0447\u0442\u043e\u0431\u044b \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0438 \u0438\u0445)'
+        'b_token_title' = '\u0422\u041e\u041a\u0415\u041d \u0410\u0414\u041c\u0418\u041d\u0418\u0421\u0422\u0420\u0410\u0422\u041e\u0420\u0410 (\u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0422\u041e\u041b\u042c\u041a\u041e \u043e\u0434\u0438\u043d \u0440\u0430\u0437: \u0437\u0430\u043f\u0438\u0448\u0438\u0442\u0435 \u0435\u0433\u043e \u0441\u0435\u0439\u0447\u0430\u0441)'
+        'b_token_fp' = '\u041e\u0442\u043f\u0435\u0447\u0430\u0442\u043e\u043a \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0430 (\u043a\u043b\u0438\u0435\u043d\u0442\u044b \u0437\u0430\u043a\u0440\u0435\u043f\u043b\u044f\u044e\u0442 \u0435\u0433\u043e):'
+        'b_pending' = '\u041f\u0435\u0440\u0432\u043e\u043d\u0430\u0447\u0430\u043b\u044c\u043d\u0430\u044f \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u044d\u0442\u043e\u0433\u043e \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u043d\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0430. \u041d\u043e\u0432\u0430\u044f \u0441\u0441\u044b\u043b\u043a\u0430 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 (\u0441\u0442\u0430\u0440\u0430\u044f \u043f\u0435\u0440\u0435\u0441\u0442\u0430\u043d\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c): {0}'
     }
     'zh' = @{
         'aborted' = '\u5df2\u53d6\u6d88'
@@ -448,7 +572,6 @@ $script:Catalog = @{
         'ps_c_task' = '\u7136\u540e\uff1aschtasks /Create /TN ... /XML ...'
         'c_keys' = '\u8bf7\u628a\u5bc6\u94a5\u6587\u4ef6\u3001\u5176\u53e3\u4ee4\u548c\u7eb8\u8d28\u5bc6\u94a5\u4e5f\u4fdd\u5b58\u5728\u672c\u673a\u4e4b\u5916\uff1a\u6ca1\u6709\u5b83\u4eec\u5c31\u65e0\u6cd5\u6062\u590d\u3002'
         's_first' = '\u9996\u6b21\u5b89\u88c5\uff1a\u6b63\u5728\u521b\u5efa\u670d\u52a1\u5668\u914d\u7f6e\u3002'
-        's_writedown' = '\u8bf7\u8bb0\u4e0b\u4e0a\u9762\u7684\u7ba1\u7406\u5458\u4ee4\u724c\u548c\u8bc1\u4e66\u6307\u7eb9\uff1a\u4ee4\u724c\u4e0d\u4f1a\u518d\u6b21\u663e\u793a\u3002'
         's_restarted' = '\u670d\u52a1\u5df2\u7528\u65b0\u7248\u672c\u91cd\u542f\u3002'
         'ps_untested' = '\u5728\u6b64\u7248\u672c\u4e2d\uff0c\u672c\u5b89\u88c5\u7a0b\u5e8f\u548c ToutWAF Backup \u4e2d Windows \u4e13\u6709\u7684\u90e8\u5206\uff08\u670d\u52a1\u3001VSS\u3001NTFS ACL\u3001\u957f\u8def\u5f84\uff09\u5c1a\u672a\u5728\u771f\u5b9e\u7684 Windows \u673a\u5668\u4e0a\u6d4b\u8bd5\u3002\u8bf7\u5148\u5728\u975e\u5173\u952e\u673a\u5668\u4e0a\u8bd5\u7528\uff08docs/INSTALL-WINDOWS.md\uff09\u3002'
         'ps_e_nokey' = '\u6b64\u5b89\u88c5\u7a0b\u5e8f\u6ca1\u6709\u6709\u6548\u7684\u53d1\u5e03\u516c\u94a5\uff08\u7531 tools/build-release.sh \u5185\u7f6e\uff1b\u8bf7\u4f7f\u7528\u968f\u53d1\u5e03\u7248\u63d0\u4f9b\u7684 install.ps1\uff09'
@@ -467,6 +590,22 @@ $script:Catalog = @{
         'ps_s_started' = '\u670d\u52a1\u5df2\u542f\u52a8\u3002'
         'ps_s_startit' = '\u7528\u4ee5\u4e0b\u547d\u4ee4\u542f\u52a8\uff1aStart-Service {0}'
         'ps_s_then' = '\u7136\u540e\u6253\u5f00 https://<\u4e3b\u673a>:{0}/ \u4f7f\u7528\u7f51\u9875\u754c\u9762\u3002'
+        'ps_s_update' = '\u66f4\u65b0\uff1atoutwaf-backup update status | check | apply\uff08\u9a8c\u8bc1\u7b7e\u540d\u4e0e\u6821\u9a8c\u548c\uff1b\u4e4b\u540e\u8bf7\u91cd\u542f\u670d\u52a1\uff09\u3002'
+        'ps_e_nofile' = '\u65e0\u6cd5\u8bfb\u53d6 {0}'
+        'b_title' = 'ToutWAF Backup \u670d\u52a1\u5668 {0} \u5df2\u5b89\u88c5'
+        'b_prog' = '\u7a0b\u5e8f\uff1a{0}'
+        'b_state' = '\u6570\u636e\u548c\u8bbe\u7f6e\uff1a{0}'
+        'b_listen' = '\u5730\u5740\uff1a{0}'
+        'b_guess' = '\uff08\u6839\u636e\u672c\u673a\u63a8\u6d4b\uff1a\u5982\u679c\u5ba2\u6237\u7aef\u4f7f\u7528 DNS \u540d\u79f0\uff0c\u8bf7\u4f7f\u7528\u5916\u90e8\u5730\u5740\u9009\u9879\u91cd\u65b0\u5b89\u88c5\uff09'
+        'b_finish' = '\u8bf7\u5728\u6d4f\u89c8\u5668\u4e2d\u5b8c\u6210\u8bbe\u7f6e\uff1a\u9009\u62e9\u7ba1\u7406\u5458\u3001\u83b7\u53d6\u8bbf\u95ee\u4ee4\u724c\u5e76\u914d\u7f6e\u670d\u52a1\u5668\u3002\u5b8c\u6210\u4e4b\u524d\u670d\u52a1\u5668\u4fdd\u6301\u5173\u95ed\u3002'
+        'b_valid' = '\u4ec5\u53ef\u4f7f\u7528\u4e00\u6b21\uff0c\u6709\u6548\u671f\u81f3 {0}\uff0860 \u5206\u949f\uff09\uff0c\u5e76\u7ed1\u5b9a\u5230\u6b64\u670d\u52a1\u5668\u7684\u8bc1\u4e66\u3002'
+        'b_fp' = '\u8bc1\u4e66\u6307\u7eb9\uff08\u8bbe\u7f6e\u9875\u9762\u663e\u793a\u76f8\u540c\u7684\u6307\u7eb9\uff1a\u82e5\u4e0d\u4e00\u81f4\uff0c\u8bf7\u505c\u6b62\uff09\uff1a'
+        'b_fw' = '\u9632\u706b\u5899\uff1aTCP \u7aef\u53e3 {0} \u5fc5\u987b\u80fd\u4ece\u60a8\u7684\u6d4f\u89c8\u5668\u548c\u9700\u8981\u4fdd\u62a4\u7684\u673a\u5668\u8bbf\u95ee\u3002'
+        'b_again' = '\u94fe\u63a5\u4e22\u5931\u6216\u5df2\u8fc7\u671f\uff1f\u8bf7\u751f\u6210\u65b0\u94fe\u63a5\uff08\u65e7\u94fe\u63a5\u968f\u5373\u5931\u6548\uff09\uff1a{0}'
+        'b_uninst' = '\u5378\u8f7d\uff1a{0}\uff08\u6570\u636e\u4f1a\u4fdd\u7559\uff1b\u6dfb\u52a0 {1} \u53ef\u4e00\u5e76\u5220\u9664\uff09'
+        'b_token_title' = '\u7ba1\u7406\u5458\u4ee4\u724c\uff08\u53ea\u663e\u793a\u4e00\u6b21\uff1a\u8bf7\u7acb\u5373\u8bb0\u4e0b\uff09'
+        'b_token_fp' = '\u8bc1\u4e66\u6307\u7eb9\uff08\u5ba2\u6237\u7aef\u4f1a\u56fa\u5b9a\u5b83\uff09\uff1a'
+        'b_pending' = '\u6b64\u670d\u52a1\u5668\u7684\u9996\u6b21\u8bbe\u7f6e\u5c1a\u672a\u5b8c\u6210\u3002\u65b0\u7684\u8bbe\u7f6e\u94fe\u63a5\uff08\u65e7\u94fe\u63a5\u968f\u5373\u5931\u6548\uff09\uff1a{0}'
     }
     'ar' = @{
         'aborted' = '\u062a\u0645 \u0627\u0644\u0625\u0644\u063a\u0627\u0621'
@@ -494,7 +633,6 @@ $script:Catalog = @{
         'ps_c_task' = '\u062b\u0645: schtasks /Create /TN ... /XML ...'
         'c_keys' = '\u0627\u062d\u062a\u0641\u0638 \u0628\u0645\u0644\u0641 \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0648\u0639\u0628\u0627\u0631\u062a\u0647 \u0627\u0644\u0633\u0631\u064a\u0629 \u0648\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0648\u0631\u0642\u064a \u062e\u0627\u0631\u062c \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u0623\u064a\u0636\u064b\u0627: \u0628\u062f\u0648\u0646\u0647\u0627 \u062a\u0633\u062a\u062d\u064a\u0644 \u0627\u0644\u0627\u0633\u062a\u0639\u0627\u062f\u0629.'
         's_first' = '\u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0627\u0644\u0623\u0648\u0644: \u0625\u0646\u0634\u0627\u0621 \u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0627\u0644\u062e\u0627\u062f\u0645.'
-        's_writedown' = '\u062f\u0648\u0651\u0646 \u0631\u0645\u0632 \u0627\u0644\u0645\u0633\u0624\u0648\u0644 \u0648\u0628\u0635\u0645\u0629 \u0627\u0644\u0634\u0647\u0627\u062f\u0629 \u0623\u0639\u0644\u0627\u0647: \u0644\u0646 \u064a\u064f\u0639\u0631\u0636 \u0627\u0644\u0631\u0645\u0632 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.'
         's_restarted' = '\u0623\u064f\u0639\u064a\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u062e\u062f\u0645\u0629 \u0628\u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0627\u0644\u062c\u062f\u064a\u062f.'
         'ps_untested' = '\u0644\u0645 \u064a\u064f\u062e\u062a\u0628\u0631 \u0647\u0630\u0627 \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0648\u0644\u0627 \u0627\u0644\u0623\u062c\u0632\u0627\u0621 \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0640 Windows \u0641\u064a ToutWAF Backup (\u0627\u0644\u062e\u062f\u0645\u0629 \u0648VSS \u0648\u0642\u0648\u0627\u0626\u0645 NTFS ACL \u0648\u0627\u0644\u0645\u0633\u0627\u0631\u0627\u062a \u0627\u0644\u0637\u0648\u064a\u0644\u0629) \u0639\u0644\u0649 \u062c\u0647\u0627\u0632 Windows \u062d\u0642\u064a\u0642\u064a \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0625\u0635\u062f\u0627\u0631. \u062c\u0631\u0651\u0628\u0647 \u0623\u0648\u0644\u064b\u0627 \u0639\u0644\u0649 \u062c\u0647\u0627\u0632 \u063a\u064a\u0631 \u062d\u0631\u062c (docs/INSTALL-WINDOWS.md).'
         'ps_e_nokey' = '\u0644\u064a\u0633 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0645\u0641\u062a\u0627\u062d \u0639\u0627\u0645 \u0635\u0627\u0644\u062d \u0644\u0644\u0625\u0635\u062f\u0627\u0631\u0627\u062a (\u064a\u0636\u0645\u0651\u0646\u0647 tools/build-release.sh\u061b \u0627\u0633\u062a\u062e\u062f\u0645 install.ps1 \u0627\u0644\u0645\u0642\u062f\u064e\u0651\u0645 \u0645\u0639 \u0627\u0644\u0625\u0635\u062f\u0627\u0631)'
@@ -513,11 +651,60 @@ $script:Catalog = @{
         'ps_s_started' = '\u062a\u0645 \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u062e\u062f\u0645\u0629.'
         'ps_s_startit' = '\u0634\u063a\u0651\u0644\u0647 \u0628\u0627\u0644\u0623\u0645\u0631: Start-Service {0}'
         'ps_s_then' = '\u062b\u0645 \u0627\u0641\u062a\u062d https://<\u0627\u0644\u0645\u0636\u064a\u0641>:{0}/ \u0644\u0648\u0627\u062c\u0647\u0629 \u0627\u0644\u0648\u064a\u0628.'
+        'ps_s_update' = '\u0627\u0644\u062a\u062d\u062f\u064a\u062b\u0627\u062a: toutwaf-backup update status | check | apply (\u064a\u064f\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u062a\u0648\u0642\u064a\u0639 \u0648\u0645\u062c\u0645\u0648\u0639 \u0627\u0644\u062a\u062d\u0642\u0642\u061b \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u062e\u062f\u0645\u0629).'
+        'ps_e_nofile' = '\u062a\u0639\u0630\u0651\u0631\u062a \u0642\u0631\u0627\u0621\u0629 {0}'
+        'b_title' = '\u062a\u0645 \u062a\u062b\u0628\u064a\u062a \u062e\u0627\u062f\u0645 ToutWAF Backup {0}'
+        'b_prog' = '\u0627\u0644\u0628\u0631\u0646\u0627\u0645\u062c: {0}'
+        'b_state' = '\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a: {0}'
+        'b_listen' = '\u0627\u0644\u0639\u0646\u0648\u0627\u0646: {0}'
+        'b_guess' = '(\u0645\u0633\u062a\u0646\u062a\u062c \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632: \u0625\u0630\u0627 \u0643\u0627\u0646 \u0639\u0645\u0644\u0627\u0624\u0643 \u064a\u0633\u062a\u062e\u062f\u0645\u0648\u0646 \u0627\u0633\u0645 DNS \u0641\u0623\u0639\u062f \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0645\u0639 \u062e\u064a\u0627\u0631 \u0627\u0644\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u062e\u0627\u0631\u062c\u064a)'
+        'b_finish' = '\u0623\u0643\u0645\u0644 \u0627\u0644\u0625\u0639\u062f\u0627\u062f \u0641\u064a \u0627\u0644\u0645\u062a\u0635\u0641\u062d: \u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u0633\u0624\u0648\u0644 \u0648\u0627\u062d\u0635\u0644 \u0639\u0644\u0649 \u0631\u0645\u0632 \u0627\u0644\u0648\u0635\u0648\u0644 \u0648\u0647\u064a\u0651\u0626 \u0627\u0644\u062e\u0627\u062f\u0645. \u064a\u0628\u0642\u0649 \u0627\u0644\u062e\u0627\u062f\u0645 \u0645\u063a\u0644\u0642\u064b\u0627 \u062d\u062a\u0649 \u062a\u0641\u0639\u0644 \u0630\u0644\u0643.'
+        'b_valid' = '\u0644\u0645\u0631\u0629 \u0648\u0627\u062d\u062f\u0629\u060c \u0635\u0627\u0644\u062d \u062d\u062a\u0649 {0} (60 \u062f\u0642\u064a\u0642\u0629)\u060c \u0648\u0645\u0631\u062a\u0628\u0637 \u0628\u0634\u0647\u0627\u062f\u0629 \u0647\u0630\u0627 \u0627\u0644\u062e\u0627\u062f\u0645.'
+        'b_fp' = '\u0628\u0635\u0645\u0629 \u0627\u0644\u0634\u0647\u0627\u062f\u0629 (\u062a\u0639\u0631\u0636 \u0635\u0641\u062d\u0629 \u0627\u0644\u0625\u0639\u062f\u0627\u062f \u0627\u0644\u0628\u0635\u0645\u0629 \u0646\u0641\u0633\u0647\u0627: \u0625\u0646 \u0627\u062e\u062a\u0644\u0641\u062a\u0627 \u0641\u062a\u0648\u0642\u0641):'
+        'b_fw' = '\u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629: \u064a\u062c\u0628 \u0623\u0646 \u064a\u0643\u0648\u0646 \u0645\u0646\u0641\u0630 TCP \u0631\u0642\u0645 {0} \u0645\u062a\u0627\u062d\u064b\u0627 \u0645\u0646 \u0645\u062a\u0635\u0641\u062d\u0643 \u0648\u0645\u0646 \u0627\u0644\u0623\u062c\u0647\u0632\u0629 \u0627\u0644\u0645\u0631\u0627\u062f \u062d\u0645\u0627\u064a\u062a\u0647\u0627.'
+        'b_again' = '\u0636\u0627\u0639 \u0627\u0644\u0631\u0627\u0628\u0637 \u0623\u0648 \u0627\u0646\u062a\u0647\u062a \u0635\u0644\u0627\u062d\u064a\u062a\u0647\u061f \u0623\u0646\u0634\u0626 \u0631\u0627\u0628\u0637\u064b\u0627 \u062c\u062f\u064a\u062f\u064b\u0627 (\u064a\u062a\u0648\u0642\u0641 \u0627\u0644\u0642\u062f\u064a\u0645 \u0639\u0646 \u0627\u0644\u0639\u0645\u0644): {0}'
+        'b_uninst' = '\u0644\u0644\u0625\u0632\u0627\u0644\u0629: {0} (\u062a\u0628\u0642\u0649 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a\u061b \u0623\u0636\u0641 {1} \u0644\u062d\u0630\u0641\u0647\u0627 \u0623\u064a\u0636\u064b\u0627)'
+        'b_token_title' = '\u0631\u0645\u0632 \u0627\u0644\u0645\u0633\u0624\u0648\u0644 (\u064a\u064f\u0639\u0631\u0636 \u0645\u0631\u0629 \u0648\u0627\u062d\u062f\u0629 \u0641\u0642\u0637: \u062f\u0648\u0651\u0646\u0647 \u0627\u0644\u0622\u0646)'
+        'b_token_fp' = '\u0628\u0635\u0645\u0629 \u0627\u0644\u0634\u0647\u0627\u062f\u0629 (\u064a\u062b\u0628\u0651\u062a\u0647\u0627 \u0627\u0644\u0639\u0645\u0644\u0627\u0621):'
+        'b_pending' = '\u0644\u0645 \u064a\u0643\u062a\u0645\u0644 \u0627\u0644\u0625\u0639\u062f\u0627\u062f \u0627\u0644\u0623\u0648\u0644 \u0644\u0647\u0630\u0627 \u0627\u0644\u062e\u0627\u062f\u0645. \u0631\u0627\u0628\u0637 \u0625\u0639\u062f\u0627\u062f \u062c\u062f\u064a\u062f (\u064a\u062a\u0648\u0642\u0641 \u0627\u0644\u0642\u062f\u064a\u0645 \u0639\u0646 \u0627\u0644\u0639\u0645\u0644): {0}'
     }
 }
 # END CATALOG
 
 $script:UiLang = 'en'
+function Show-FinalBlock {
+  $rule = '=' * 80
+  $url = $init['setup_url']; $tok = $init['admin_token']; $fp = $init['fingerprint']
+  if (-not $url -and -not $tok) { return }
+  $fpPretty = if ($fp) { ($fp.ToUpper() -replace '(..)(?!$)', '$1:') } else { '' }
+  Say ''; Say $rule
+  Say ('  ' + (T 'b_title' @($want)))
+  Say $rule
+  Say ('  ' + (T 'b_prog' @($Exe)))
+  Say ('  ' + (T 'b_state' @($StateDir)))
+  if ($url) {
+    $base = $url -replace '/setup/.*$', ''
+    Say ('  ' + (T 'b_listen' @($base)))
+    if (-not $ExternalUrl) { Say ('      ' + (T 'b_guess')) }
+    Say ''; Say ('  ' + (T 'b_finish')); Say ''
+    Say $url
+    Say ''
+    $until = $init['setup_expires']
+    try { $until = ([DateTime]::Parse($until, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)).ToLocalTime().ToString('HH:mm') } catch { }
+    Say ('  ' + (T 'b_valid' @($until)))
+    Say ('  ' + (T 'b_fp')); Say ('      ' + $fpPretty)
+  } else {
+    Say ''; Say ('  ' + (T 'b_token_title')); Say $tok; Say ''
+    Say ('  ' + (T 'b_token_fp')); Say ('      ' + $fpPretty)
+    Say ''; Say ('  ' + (T 'ps_s_then' @($Port)))
+  }
+  Say ''
+  Say ('  ' + (T 'b_fw' @($Port)))
+  if ($url) { Say ('  ' + (T 'b_again' @('toutwaf-backup server setup-link --new'))) }
+  Say ('  ' + (T 'b_uninst' @('.\install.ps1 -Role server -Uninstall', '-Purge')))
+  Say $rule
+}
+
 function T([string]$Key, [object[]]$A = @()) {
   $s = $null
   $c = $script:Catalog[$script:UiLang]
@@ -744,6 +931,7 @@ try {
     [Environment]::SetEnvironmentVariable('Path', "$machinePath;$InstallDir", 'Machine')
     Say (T 'ps_s_path' @($InstallDir))
   }
+  Say (T 'ps_s_update')
 
   if ($Role -eq 'client') {
     Say ''
@@ -759,15 +947,29 @@ try {
   New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
   & icacls.exe $StateDir /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
   $first = $false
+  $init = @{}
   if (-not $NoInit -and -not (Test-Path (Join-Path $StateDir 'config.json'))) {
     $first = $true
-    $initArgs = @('server', 'init', '--state', $StateDir, '--listen', $Listen)
+    $initArgs = @('server', 'init', '--state', $StateDir, '--listen', $Listen, '--machine')
     if ($ExternalUrl) { $initArgs += @('--external-url', $ExternalUrl) }
     if ($Datastore) { $initArgs += @('--datastore', $Datastore) }
+    if ($NoSetupLink) { $initArgs += '--no-setup-link' }
+    if ($AdminUser) { $initArgs += @('--admin-user', $AdminUser) }
+    if ($AdminPasswordHashFile) {
+      if (-not (Test-Path $AdminPasswordHashFile)) { Fail (T 'ps_e_nofile' @($AdminPasswordHashFile)) }
+      $env:TWB_ADMIN_PASSWORD_HASH = (Get-Content -Raw $AdminPasswordHashFile).Trim()
+    }
+    if ($AdminTokenFile) {
+      if (-not (Test-Path $AdminTokenFile)) { Fail (T 'ps_e_nofile' @($AdminTokenFile)) }
+      $env:TWB_ADMIN_TOKEN = (Get-Content -Raw $AdminTokenFile).Trim()
+    }
     Say ''; Say (T 's_first')
-    & $Exe @initArgs
-    if ($LASTEXITCODE -ne 0) { Fail (T 'ps_e_init') }
-    Say ''; Say (T 's_writedown')
+    # what the command prints is kept in variables and shown once, in the final block: never in a log line, never written to a file
+    $initOut = & $Exe @initArgs
+    $initRc = $LASTEXITCODE
+    Remove-Item Env:TWB_ADMIN_PASSWORD_HASH, Env:TWB_ADMIN_TOKEN -ErrorAction SilentlyContinue
+    if ($initRc -ne 0) { Fail (T 'ps_e_init') }
+    foreach ($l in @($initOut)) { if ("$l" -match '^(\w+)=(.*)$') { $init[$Matches[1]] = $Matches[2] } }
   }
   if (-not (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
     & $Exe server service install --state $StateDir
@@ -780,7 +982,10 @@ try {
     }
   }
   if ($Start) { Start-Service -Name $ServiceName; Say (T 'ps_s_started') } else { Say (T 'ps_s_startit' @($ServiceName)) }
-  if ($first) { Say (T 'ps_s_then' @($Port)) }
+  if ($first) { Show-FinalBlock } else {
+    $sj = Join-Path $StateDir 'setup.json'
+    if ((Test-Path $sj) -and (Select-String -Path $sj -Pattern '"state": "pending"' -Quiet)) { Say ''; Say (T 'b_pending' @('toutwaf-backup server setup-link --new')) }
+  }
 }
 finally {
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
