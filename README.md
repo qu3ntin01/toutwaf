@@ -8,7 +8,7 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.5.3** · build `8af8cba2c20c` · canal **stable** · 2026-11-09
+**Version 0.5.4** · build `a9c3290889a7` · canal **stable** · 2026-11-10
 
 </div>
 
@@ -227,19 +227,20 @@ Cibles non compilées pour cette version :
 
 ## Versions et téléchargements
 
-**Version 0.5.3**
+**Version 0.5.4**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 68.2 MiB | `a91bc6d0c27396c1c67a7bb372e1d5b9ba4647666fb5369799fa0651ae2f3138` |
-| `toutwaf-extras.tar.gz` | any | any | 48.5 MiB | `c9c37c47f273e33f8c2596f6ac0e07d094a6479bd82b7bf0946cf8f3bdc60a1f` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 68.4 MiB | `acccbfaf8531c625a8829a6f6fda29ae0708b170ec6d8d5421cac3bce0cc2cbe` |
+| `toutwaf-extras.tar.gz` | any | any | 48.4 MiB | `92908be5743f7cfecdd46704edaddff043294e09e5755e5531698d3afa31c4f7` |
 
 Les fichiers `toutwaf-extras*.tar.gz` (système et architecture `any`) sont les extras de la version : l'agent hôte pour Windows et les programmes de l'antivirus, qu'une console remet aux autres machines. L'installateur les télécharge, les vérifie (SHA-256 et signature) et les installe avec l'archive de la plateforme ; une installation sans eux fonctionne et ne propose ni Windows ni l'antivirus.
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.5.3` | 2026-11-09T22:35:43Z | **actuelle** | `releases/0.5.3/` |
+| `0.5.4` | 2026-11-10T13:16:18Z | **actuelle** | `releases/0.5.4/` |
+| `0.5.3` | 2026-11-09T22:35:43Z | disponible | `releases/0.5.3/` |
 | `0.5.2` | 2026-11-08T14:22:15Z | disponible | `releases/0.5.2/` |
 | `0.5.1` | 2026-11-08T05:55:10Z | disponible | `releases/0.5.1/` |
 | `0.5.0` | 2026-11-07T23:29:58Z | disponible | `releases/0.5.0/` |
@@ -259,7 +260,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.5.3 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.5.4 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Vérifier une version
@@ -267,7 +268,7 @@ cd releases/0.5.3 && sha256sum -c SHA256SUMS --ignore-missing
 À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `f8fc98e4c6e364fa`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
 
 ```sh
-V=0.5.3; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+V=0.5.4; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
