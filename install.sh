@@ -77,7 +77,7 @@ LICENCE_API_URL="${TOUTWAF_LICENCE_API_URL:-}"; LICENCE_PINS=""; LICENCE_PIN_FIL
 DB_ENGINE="${TOUTWAF_DB:-}"; DB_DSN="${TOUTWAF_DB_DSN:-}"; DB_DSN_FILE="${TOUTWAF_DB_DSN_FILE:-}"; DB_LOCAL=""; case "${TOUTWAF_DB_INSTALL_LOCAL:-}" in 1|yes|true|on) DB_LOCAL=1;; esac
 DB_HOST=""; DB_PORT=""; DB_NAME="toutwaf"; DB_USER="toutwaf"; DB_PASSWORD_FILE="${TOUTWAF_DB_PASSWORD_FILE:-}"; DB_TLS_MODE=""; DB_CA=""
 DB_ADMIN_DSN_FILE=""; DB_BACKUP_TIMER=1; DB_SERVER_LOCAL=0; DB_RESULT=""; DB_SECRET_WRITTEN=0; DB_ASKED=0; DB_SCHEMA_LINE=""; DB_BACKUP_SCHEDULED=0
-OPEN_CP_PORT=0; NO_SELINUX=0; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
+OPEN_CP_PORT=0; NO_SELINUX=0; case "${TOUTWAF_NO_SELINUX:-}" in 1|yes|true|on) NO_SELINUX=1;; esac; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
 QUIET=0; NO_COLOR_FLAG=0; ACCEPT_DEFAULTS=0
 CHECK_COMPAT=0                                  # --check-compat: print the compatibility verdict, change nothing (exit 0 compatible, 3 not)
 # The extras of a release (deploy/RELEASE-LAYOUT.md, "Extras"): the host agent for Windows and the antivirus programs, a second asset next to the archive of the platform.
@@ -1900,6 +1900,56 @@ nl|sum_compat|Compatibiliteit
 ru|sum_compat|Совместимость
 zh|sum_compat|兼容性
 ar|sum_compat|التوافق
+en|sel_ok|SELinux %s: the services run in the unconfined_service_t domain with the right file labels (%s rule(s) and %s port label(s) added); labels verified.
+fr|sel_ok|SELinux %s : les services s'exécutent dans le domaine unconfined_service_t avec les bonnes étiquettes de fichiers (%s règle(s) et %s étiquette(s) de port ajoutée(s)) ; étiquettes vérifiées.
+es|sel_ok|SELinux %s: los servicios se ejecutan en el dominio unconfined_service_t con las etiquetas de archivo correctas (%s regla(s) y %s etiqueta(s) de puerto añadidas); etiquetas verificadas.
+de|sel_ok|SELinux %s: Die Dienste laufen in der Domäne unconfined_service_t mit den richtigen Datei-Labels (%s Regel(n) und %s Port-Label hinzugefügt); Labels geprüft.
+it|sel_ok|SELinux %s: i servizi girano nel dominio unconfined_service_t con le giuste etichette dei file (%s regola/e e %s etichetta/e di porta aggiunte); etichette verificate.
+pt|sel_ok|SELinux %s: os serviços correm no domínio unconfined_service_t com as etiquetas de ficheiro certas (%s regra(s) e %s etiqueta(s) de porta adicionadas); etiquetas verificadas.
+nl|sel_ok|SELinux %s: de diensten draaien in het domein unconfined_service_t met de juiste bestandslabels (%s regel(s) en %s poortlabel(s) toegevoegd); labels gecontroleerd.
+ru|sel_ok|SELinux %s: службы работают в домене unconfined_service_t с правильными метками файлов (добавлено правил: %s, меток портов: %s); метки проверены.
+zh|sel_ok|SELinux %s：服务运行在 unconfined_service_t 域，文件标签正确（新增 %s 条规则、%s 个端口标签）；标签已验证。
+ar|sel_ok|SELinux %s: تعمل الخدمات في النطاق unconfined_service_t بأوسمة الملفات الصحيحة (أُضيفت %s قاعدة و%s وسم منفذ)؛ تم التحقق من الأوسمة.
+en|sel_bad|SELinux %s: %s file(s) still carry a wrong label. As root: restorecon -RFv %s
+fr|sel_bad|SELinux %s : %s fichier(s) portent encore une mauvaise étiquette. En root : restorecon -RFv %s
+es|sel_bad|SELinux %s: %s archivo(s) aún llevan una etiqueta incorrecta. Como root: restorecon -RFv %s
+de|sel_bad|SELinux %s: %s Datei(en) tragen noch ein falsches Label. Als root: restorecon -RFv %s
+it|sel_bad|SELinux %s: %s file hanno ancora un'etichetta errata. Come root: restorecon -RFv %s
+pt|sel_bad|SELinux %s: %s ficheiro(s) ainda têm uma etiqueta errada. Como root: restorecon -RFv %s
+nl|sel_bad|SELinux %s: %s bestand(en) hebben nog een verkeerd label. Als root: restorecon -RFv %s
+ru|sel_bad|SELinux %s: у %s файл(ов) всё ещё неверная метка. От root: restorecon -RFv %s
+zh|sel_bad|SELinux %s：仍有 %s 个文件标签错误。以 root 执行：restorecon -RFv %s
+ar|sel_bad|SELinux %s: لا يزال %s ملفًا بوسم خاطئ. بصلاحيات root: restorecon -RFv %s
+en|sel_nosem|SELinux %s, but semanage is missing: file contexts and ports were not registered. Install policycoreutils-python-utils and run the installer again.
+fr|sel_nosem|SELinux %s, mais semanage est absent : contextes de fichiers et ports non enregistrés. Installez policycoreutils-python-utils et relancez l'installateur.
+es|sel_nosem|SELinux %s, pero falta semanage: no se registraron contextos de archivo ni puertos. Instale policycoreutils-python-utils y vuelva a ejecutar el instalador.
+de|sel_nosem|SELinux %s, aber semanage fehlt: Dateikontexte und Ports wurden nicht registriert. Installieren Sie policycoreutils-python-utils und starten Sie den Installer erneut.
+it|sel_nosem|SELinux %s, ma semanage manca: contesti dei file e porte non registrati. Installa policycoreutils-python-utils e rilancia l'installer.
+pt|sel_nosem|SELinux %s, mas falta o semanage: contextos de ficheiro e portas não registados. Instale policycoreutils-python-utils e execute o instalador de novo.
+nl|sel_nosem|SELinux %s, maar semanage ontbreekt: bestandscontexten en poorten zijn niet geregistreerd. Installeer policycoreutils-python-utils en voer het installatieprogramma opnieuw uit.
+ru|sel_nosem|SELinux %s, но semanage отсутствует: контексты файлов и порты не зарегистрированы. Установите policycoreutils-python-utils и запустите установщик снова.
+zh|sel_nosem|SELinux %s，但缺少 semanage：未登记文件上下文和端口。请安装 policycoreutils-python-utils 后重新运行安装程序。
+ar|sel_nosem|SELinux %s، لكن semanage غير موجود: لم تُسجَّل سياقات الملفات ولا المنافذ. ثبّت policycoreutils-python-utils وأعد تشغيل المثبّت.
+en|sel_skip|SELinux left untouched (--no-selinux). In enforcing mode the commands to run by hand are in docs/install/selinux.md.
+fr|sel_skip|SELinux laissé intact (--no-selinux). En mode enforcing, les commandes à lancer à la main figurent dans docs/install/selinux.md.
+es|sel_skip|SELinux sin tocar (--no-selinux). En modo enforcing, los comandos manuales están en docs/install/selinux.md.
+de|sel_skip|SELinux unverändert (--no-selinux). Im Modus enforcing stehen die manuellen Befehle in docs/install/selinux.md.
+it|sel_skip|SELinux lasciato intatto (--no-selinux). In modalità enforcing i comandi manuali sono in docs/install/selinux.md.
+pt|sel_skip|SELinux deixado intacto (--no-selinux). No modo enforcing, os comandos manuais estão em docs/install/selinux.md.
+nl|sel_skip|SELinux ongemoeid gelaten (--no-selinux). In enforcing-modus staan de handmatige commando's in docs/install/selinux.md.
+ru|sel_skip|SELinux не изменялся (--no-selinux). В режиме enforcing команды для ручного выполнения — в docs/install/selinux.md.
+zh|sel_skip|未改动 SELinux（--no-selinux）。在 enforcing 模式下，需手动执行的命令见 docs/install/selinux.md。
+ar|sel_skip|لم يُغيَّر SELinux (--no-selinux). في وضع enforcing توجد الأوامر اليدوية في docs/install/selinux.md.
+en|sel_removed|SELinux file contexts and port labels added by ToutWAF removed (the mode is untouched).
+fr|sel_removed|Contextes de fichiers et étiquettes de port SELinux ajoutés par ToutWAF supprimés (le mode n'est pas modifié).
+es|sel_removed|Contextos de archivo y etiquetas de puerto de SELinux añadidos por ToutWAF eliminados (el modo no se toca).
+de|sel_removed|Von ToutWAF hinzugefügte SELinux-Dateikontexte und Port-Labels entfernt (der Modus bleibt unverändert).
+it|sel_removed|Contesti dei file ed etichette di porta SELinux aggiunti da ToutWAF rimossi (la modalità non viene toccata).
+pt|sel_removed|Contextos de ficheiro e etiquetas de porta do SELinux adicionados pelo ToutWAF removidos (o modo não é alterado).
+nl|sel_removed|Door ToutWAF toegevoegde SELinux-bestandscontexten en poortlabels verwijderd (de modus blijft ongewijzigd).
+ru|sel_removed|Контексты файлов и метки портов SELinux, добавленные ToutWAF, удалены (режим не изменялся).
+zh|sel_removed|已移除 ToutWAF 添加的 SELinux 文件上下文和端口标签（模式未更改）。
+ar|sel_removed|أُزيلت سياقات ملفات SELinux وأوسمة المنافذ التي أضافها ToutWAF (لم يتغيّر الوضع).
 en|cp_prereq_arch|The package databases are not synchronised. Run 'pacman -Syu' first (a partial upgrade is not supported on Arch), then re-run the installer.
 fr|cp_prereq_arch|Les bases de paquets ne sont pas synchronisées. Lancez d'abord 'pacman -Syu' (une mise à jour partielle n'est pas prise en charge sur Arch), puis relancez l'installateur.
 es|cp_prereq_arch|Las bases de datos de paquetes no están sincronizadas. Ejecute primero 'pacman -Syu' (una actualización parcial no es compatible en Arch) y vuelva a ejecutar el instalador.
@@ -4094,7 +4144,8 @@ Options:
                              lacks a right, the exact GRANT statements to ask the administrator for are printed.
   --db-tls-mode MODE --db-ca FILE   disable|prefer|require|verify-ca|verify-full and the CA file of the server (TLS to the database)
   --no-db-backup             do not schedule the daily pg_dump of a PostgreSQL database
-  --no-selinux --no-sysctl --no-start --no-enable
+  --no-selinux               leave SELinux alone (file contexts, port labels; also TOUTWAF_NO_SELINUX=1); the SELinux mode is never changed
+  --no-sysctl --no-start --no-enable
   --check-compat             print whether this system is compatible (and the list of compatible distributions), change nothing;
                              exit 0 when compatible, 3 when not
   --skip-os-check            install although the system is unsupported / unrecognised (warns loudly; at your own risk)
@@ -4836,7 +4887,9 @@ install_backup_client() {
   pem="$(backup_client_pem)"
   if [ -z "$pem" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_nokey)"; return 0; fi
   mkdir -p "$TMP/bkc" || return 0
-  fetch "$base/channel.json" "$TMP/bkc/channel.json" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download $base/channel.json")"; return 0; }
+  # release 0.2.0 of ToutWAF Backup: one pointer per channel (channels/stable.json); the old channel.json stays for older installers (it points at 0.1.x, signed with the previous key)
+  fetch "$base/channels/stable.json" "$TMP/bkc/channel.json" 2>/dev/null \
+    || fetch "$base/channel.json" "$TMP/bkc/channel.json" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download $base/channels/stable.json or $base/channel.json")"; return 0; }
   ver="$BACKUP_CLIENT_VERSION"
   [ -n "$ver" ] || ver="$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]*)".*/\1/p' "$TMP/bkc/channel.json" | head -n1)"
   if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "no valid version in the channel")"; return 0; fi
@@ -4940,6 +4993,7 @@ render_summary() {
     fi
   fi
   if [ -n "$COMPAT_LINE" ]; then hdr "$(t sum_compat)"; row "$COMPAT_LINE"; endb; fi
+  if [ -n "$SELINUX_LINE" ]; then hdr "SELinux"; row "$SELINUX_LINE"; endb; fi
   build_ports
   hdr "$(t sum_ports)"
   while IFS='|' read -r pt pr pu; do if [ -n "$pt" ]; then row "$hb$pt/$pr$he  $pu"; fi; done <<<"$SUMMARY_PORTS"
@@ -5075,6 +5129,7 @@ cmd_uninstall() {
     run firewall-cmd --permanent --remove-port="$CP_PORT/tcp" >/dev/null 2>&1 || true
     run firewall-cmd --reload >/dev/null 2>&1 || true
   fi
+  selinux_remove
   if [ "$PURGE" = 1 ]; then
     run rm -rf "$(p "$CONF_DIR")" "$(p "$DATA_DIR")" "$(p "$LOG_DIR")" "$(p "${DATA_DIR}-upgrade")"   # the last one holds copies of the database kept by the update helper: only --purge removes it
     if [ "$LAYOUT" = home ]; then rmdir "$(p "$BIN_DIR")" "$(p "$HOME_DIR")" 2>/dev/null || true; fi
@@ -7417,10 +7472,13 @@ selinux_on() { have getenforce && have restorecon && [ "$(getenforce 2>/dev/null
 # (restorecon then agrees with it), else chcon.
 selinux_label_bin() {
   [ "${STAGING:-0}" = 0 ] && [ "${NO_SELINUX:-0}" = 0 ] && selinux_on || return 0
-  local pat="$BIN_DIR(/.*)?" persistent=0
-  case "$BIN_DIR" in /usr/*|/bin|/sbin) pat="$BIN_DIR/toutwaf.*";; esac   # a shared system directory: only our own files
-  if have semanage; then
-    { semanage fcontext -a -t bin_t "$pat" >/dev/null 2>&1 || semanage fcontext -m -t bin_t "$pat" >/dev/null 2>&1; } && persistent=1
+  local pat persistent=0
+  pat="$(selinux_bin_pattern)"
+  if [ "$(se_default_type "$BIN_DIR/toutwaf-cp")" = bin_t ]; then
+    persistent=1   # the policy already says bin_t here (/usr/local/bin, /usr/bin): no local rule needed
+  elif have semanage; then
+    if semanage fcontext -a -t bin_t "$pat" >/dev/null 2>&1; then persistent=1; se_state_add fcontext "bin_t|$pat"
+    elif semanage fcontext -m -t bin_t "$pat" >/dev/null 2>&1; then persistent=1; fi
   fi
   case "$BIN_DIR" in
     /usr/*|/bin|/sbin) restorecon -F "$BIN_DIR"/toutwaf* >/dev/null 2>&1 || true;;
@@ -7436,27 +7494,132 @@ selinux_restore() {
   return 0
 }
 
+# ---- SELinux (EL9 / EL10 enforcing is a supported mode: docs/install/selinux.md)
+# Design: no custom policy module. The programs carry bin_t, so systemd runs them in the domain unconfined_service_t (the stock domain of
+# a service that has no policy of its own): it may bind the ports, drive nftables / eBPF / ipset, read /proc. What can still be refused is a
+# wrong FILE label (a file copied in keeps the label of its directory; systemd cannot start a var_t program: status=203/EXEC) and, for a
+# CONFINED peer (a web server in front of the console), a port label or a boolean. This step registers exactly those, idempotently, and
+# remembers what it added (selinux.state in the configuration directory) so that --uninstall removes exactly that. It NEVER changes the mode
+# (no setenforce, no /etc/selinux/config) and --no-selinux / TOUTWAF_NO_SELINUX=1 skips all of it.
+SELINUX_LINE=""; SE_RULES=0; SE_PORTS=0; SE_BAD=0
+se_state_file() { printf '%s' "$(p "$CONF_DIR/selinux.state")"; }
+# se_state_add KEY VALUE: one "KEY=VALUE" line per thing this installer added (not twice)
+se_state_add() {
+  local f; f="$(se_state_file)"; [ -d "$(dirname "$f")" ] || return 0
+  grep -qxF "$1=$2" "$f" 2>/dev/null || printf '%s=%s\n' "$1" "$2" >>"$f" 2>/dev/null || true
+  return 0
+}
+# the type the policy gives PATH today (local rules included); "" when matchpathcon is not there
+se_default_type() { have matchpathcon || return 0; matchpathcon -n "$1" 2>/dev/null | awk -F: 'NR==1{print $3}'; }
+selinux_bin_pattern() {
+  case "$BIN_DIR" in /usr/*|/bin|/sbin) printf '%s' "$BIN_DIR/toutwaf.*";; *) printf '%s' "$BIN_DIR(/.*)?";; esac   # a shared system directory: only our own files
+}
+# the file contexts ToutWAF needs besides bin_t, "type|pattern"; install and uninstall read the same list
+selinux_rules() {
+  printf '%s|%s\n' etc_t "$CONF_DIR(/.*)?" var_lib_t "$DATA_DIR(/.*)?" var_lib_t "${DATA_DIR}-upgrade(/.*)?" var_log_t "$LOG_DIR(/.*)?"
+  if [ "$LAYOUT" = home ]; then printf '%s|%s\n' usr_t "$HOME_DIR"; fi
+}
+# se_fcontext TYPE PATTERN: adds the rule unless the policy already gives that type there; a failure is reported, never fatal
+se_fcontext() {
+  local ty="$1" pat="$2" base cur
+  base="${pat%'(/.*)?'}"; cur="$(se_default_type "$base/x")"; [ "$pat" = "$base" ] && cur="$(se_default_type "$base")"
+  if [ "$cur" = "$ty" ]; then return 0; fi
+  if semanage fcontext -a -t "$ty" "$pat" >/dev/null 2>&1; then SE_RULES=$((SE_RULES + 1)); se_state_add fcontext "$ty|$pat"
+  elif semanage fcontext -m -t "$ty" "$pat" >/dev/null 2>&1; then SE_RULES=$((SE_RULES + 1))
+  else SE_BAD=1; warn "SELinux: could not register the file context $ty for $pat (by hand: semanage fcontext -a -t $ty '$pat')"; fi
+  return 0
+}
+# the type of the policy that owns the TCP port ("" when none)
+se_port_type() {
+  semanage port -l 2>/dev/null | awk -v p="$1" '$2=="tcp" { for (i = 3; i <= NF; i++) { t = $i; gsub(/,/, "", t)
+    if (t ~ /^[0-9]+$/ && t + 0 == p + 0) { print $1; exit }
+    if (t ~ /^[0-9]+-[0-9]+$/) { split(t, r, "-"); if (p + 0 >= r[1] + 0 && p + 0 <= r[2] + 0) { print $1; exit } } } }'
+}
+# se_port N: labels a TCP port http_port_t (so that a confined web server may proxy to it); a port the policy gives another type is left alone
+se_port() {
+  local port="$1" cur
+  cur="$(se_port_type "$port")"
+  [ "$cur" = http_port_t ] && return 0
+  if [ -z "$cur" ] || [ "$cur" = unreserved_port_t ]; then
+    if semanage port -a -t http_port_t -p tcp "$port" >/dev/null 2>&1; then SE_PORTS=$((SE_PORTS + 1)); se_state_add port "http_port_t|tcp|$port"; return 0; fi
+  fi
+  log "SELinux: port $port keeps its type ${cur:-?} (ToutWAF runs unconfined and does not need http_port_t; a confined web server in front: setsebool -P httpd_can_network_connect on)"
+  return 0
+}
+se_httpd_present() { have nginx || have httpd || have apache2 || [ -x /usr/local/lsws/bin/lshttpd ] || [ -x /usr/local/lsws/bin/openlitespeed ]; }
+# se_mislabelled: how many files of ToutWAF carry another type than the policy says (restorecon dry run: nothing is changed)
+se_mislabelled() {
+  local d paths=()
+  for d in "$CONF_DIR" "$DATA_DIR" "$LOG_DIR"; do [ -e "$d" ] && paths+=("$d"); done
+  { [ ${#paths[@]} -gt 0 ] && restorecon -n -v -R "${paths[@]}" 2>/dev/null
+    restorecon -n -v "$BIN_DIR"/toutwaf* 2>/dev/null; } | awk '/^Would relabel / { split($(NF-2), a, ":"); split($NF, b, ":"); if (a[3] != b[3]) n++ } END { print n + 0 }'
+}
+
 setup_selinux() {
-  if [ "$STAGING" = 1 ] || [ "$NO_SELINUX" = 1 ]; then return 0; fi
+  if [ "$STAGING" = 1 ]; then return 0; fi
   # AppArmor (Debian / Ubuntu / SUSE): ToutWAF ships no profile, so nothing is confined by it; the systemd sandbox of the units applies
   if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true)" = Y ]; then info "AppArmor is active: ToutWAF ships no AppArmor profile, the services are confined by their systemd sandbox only"; fi
   have getenforce || return 0
-  [ "$(getenforce 2>/dev/null)" = "Disabled" ] && return 0
+  local mode; mode="$(getenforce 2>/dev/null)"; mode="$(printf '%s' "$mode" | tr 'A-Z' 'a-z')"
+  [ -n "$mode" ] && [ "$mode" != disabled ] || return 0
+  if [ "$NO_SELINUX" = 1 ]; then SELINUX_LINE="$(t sel_skip)"; log "SELinux ($mode): left untouched (--no-selinux)"; return 0; fi
   selinux_label_bin
-  have semanage || { warn "SELinux is enabled but semanage is missing; skipping file contexts. By hand, once the SELinux policy utilities are installed: semanage fcontext -a -t var_lib_t '$DATA_DIR(/.*)?' && semanage fcontext -a -t var_log_t '$LOG_DIR(/.*)?' && restorecon -RF '$DATA_DIR' '$LOG_DIR'"; return 0; }
-  log "Configuring SELinux contexts ($(getenforce))"
-  semanage fcontext -a -t etc_t "$CONF_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t etc_t "$CONF_DIR(/.*)?" || true
-  semanage fcontext -a -t var_lib_t "$DATA_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t var_lib_t "$DATA_DIR(/.*)?" || true
-  semanage fcontext -a -t var_log_t "$LOG_DIR(/.*)?" 2>/dev/null || semanage fcontext -m -t var_log_t "$LOG_DIR(/.*)?" || true
-  if [ "$LAYOUT" = home ]; then   # the HOME directory itself (bin/ conf/ data/ logs/ get their own types above)
-    semanage fcontext -a -t usr_t "$HOME_DIR" 2>/dev/null || semanage fcontext -m -t usr_t "$HOME_DIR" || true
-    restorecon -F "$HOME_DIR" 2>/dev/null || true
+  have semanage || { warn "SELinux is $mode but semanage is missing; skipping file contexts and port labels. Install policycoreutils-python-utils and run the installer again. By hand: semanage fcontext -a -t var_lib_t '$DATA_DIR(/.*)?' && semanage fcontext -a -t var_log_t '$LOG_DIR(/.*)?' && restorecon -RF '$DATA_DIR' '$LOG_DIR'"; SELINUX_LINE="$(t sel_nosem "$mode")"; return 0; }
+  log "Configuring SELinux contexts ($mode)"
+  local ty pat port
+  while IFS='|' read -r ty pat; do [ -n "$ty" ] && se_fcontext "$ty" "$pat"; done < <(selinux_rules)
+  if [ "$LAYOUT" = home ]; then restorecon -F "$HOME_DIR" 2>/dev/null || true; fi
+  restorecon -RF "$CONF_DIR" "$DATA_DIR" "$LOG_DIR" 2>/dev/null || true
+  # the files written outside the ToutWAF directories take the type of the policy for their directory (units, logrotate, sysctl, sysusers, tmpfiles, firewalld)
+  local sysf=() g
+  for g in "$(p /etc/systemd/system)"/toutwaf* "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"; do
+    if [ -e "$g" ]; then sysf+=("$g"); fi
+  done
+  if [ ${#sysf[@]} -gt 0 ]; then restorecon -F "${sysf[@]}" 2>/dev/null || true; fi
+  # ports: the console and the data-plane API (and a data-plane port other than 80 / 443) are labelled http_port_t for a confined peer
+  if want_cp; then for port in "$CP_PORT" 9444; do se_port "$port"; done; fi
+  if want_dp; then for port in "$HTTP_PORT" "$HTTPS_PORT"; do case "$port" in 80|443) ;; *) se_port "$port";; esac; done; fi
+  # a confined web server (nginx, httpd, LiteSpeed) that proxies to the console or to origins needs this boolean; it is not set on a host
+  # without such a server (it weakens the confinement of httpd for the whole machine), and --uninstall never turns it back off
+  if se_httpd_present && [ "$(getsebool httpd_can_network_connect 2>/dev/null | awk '{print $NF}')" != on ]; then
+    if setsebool -P httpd_can_network_connect on >/dev/null 2>&1; then se_state_add bool httpd_can_network_connect; log "SELinux: boolean httpd_can_network_connect set (a web server is installed)"; fi
+  fi
+  local n; n="$(se_mislabelled)"
+  if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
+    SELINUX_LINE="$(t sel_bad "$mode" "$n" "$CONF_DIR $DATA_DIR $LOG_DIR $BIN_DIR/toutwaf*")"
+    warn "SELinux: $n file(s) still carry a wrong label: restorecon -RFv $CONF_DIR $DATA_DIR $LOG_DIR $BIN_DIR/toutwaf*"
+  elif [ "$SE_BAD" = 1 ]; then
+    SELINUX_LINE="$(t sel_bad "$mode" 0 "$CONF_DIR $DATA_DIR $LOG_DIR $BIN_DIR/toutwaf*")"
+  else
+    SELINUX_LINE="$(t sel_ok "$mode" "$SE_RULES" "$SE_PORTS")"
+  fi
+  return 0
+}
+
+# --uninstall: removes exactly the rules this installer added (the state file), or, for an installation older than the state file, the rules
+# it always added; the boolean is left (another site of this machine may rely on it). The mode is never touched.
+selinux_remove() {
+  [ "$STAGING" = 0 ] && [ "$NO_SELINUX" = 0 ] && selinux_on && have semanage || return 0
+  local f ty pat kind v proto port cur; f="$(se_state_file)"
+  if [ -r "$f" ]; then
+    while IFS='=' read -r kind v; do
+      case "$kind" in
+        fcontext) ty="${v%%|*}"; pat="${v#*|}"; semanage fcontext -d "$pat" >/dev/null 2>&1 || true;;
+        port) IFS='|' read -r ty proto port <<<"$v"; semanage port -d -t "$ty" -p "$proto" "$port" >/dev/null 2>&1 || true;;
+        bool) log "SELinux: boolean $v was set by the installer and is left on (setsebool -P $v off if nothing else needs it)";;
+      esac
+    done <"$f"
+    rm -f "$f"
+  else
+    while IFS='|' read -r ty pat; do [ -n "$ty" ] && { semanage fcontext -d "$pat" >/dev/null 2>&1 || true; }; done < <(selinux_rules)
+    semanage fcontext -d "$(selinux_bin_pattern)" >/dev/null 2>&1 || true
+    for port in "$CP_PORT" 9444; do
+      cur="$(semanage port -l -C 2>/dev/null | awk -v p="$port" '$1=="http_port_t" && $2=="tcp" {for(i=3;i<=NF;i++){t=$i; gsub(/,/,"",t); if(t==p) print "y"}}')"
+      [ -n "$cur" ] && { semanage port -d -t http_port_t -p tcp "$port" >/dev/null 2>&1 || true; }
+    done
   fi
   restorecon -RF "$CONF_DIR" "$DATA_DIR" "$LOG_DIR" 2>/dev/null || true
-  # the console/DP-facing ports are labelled http_port_t so that confined admin tooling can reach them
-  if want_cp; then for port in "$CP_PORT" 9444; do semanage port -a -t http_port_t -p tcp "$port" 2>/dev/null || true; done; fi
-  # allow the proxy to connect to arbitrary origin ports when running confined by an httpd-like domain
-  setsebool -P httpd_can_network_connect on 2>/dev/null || true
+  say "  $(paint "$GRN" "$OKM") $(t sel_removed)"
   return 0
 }
 
@@ -7647,7 +7810,7 @@ rollback_cp() {
   systemctl stop toutwaf-cp 2>/dev/null || true
   if [ -x "$BIN_DIR/toutwaf-cp.prev" ]; then
     mv -f "$BIN_DIR/toutwaf-cp.prev" "$BIN_DIR/toutwaf-cp"
-    if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then cp -a "$DB_BACKUP_DIR"/. "$DATA_DIR"/ 2>/dev/null && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; selinux_restore "$DATA_DIR"; fi
+    if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then [ -e "$DB_BACKUP_DIR/toutwaf.db-wal" ] || rm -f "$DATA_DIR/toutwaf.db-wal" "$DATA_DIR/toutwaf.db-shm"; cp -a "$DB_BACKUP_DIR"/. "$DATA_DIR"/ 2>/dev/null && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; selinux_restore "$DATA_DIR"; fi
     selinux_label_bin   # before the start: a restored program without bin_t cannot be executed by systemd
     systemctl restart toutwaf-cp || true
     # (never handed over to the update assistant here: the verdict on the restored version is this one's)
@@ -7678,6 +7841,20 @@ backup_sqlite_before_update() {
       return 0
     fi
   fi
+  # The way back after a rollback is the CONFIGURATION: a slim copy leaves out the rows of the journal of the events and of the raw logs
+  # (most of a large database: 7 of 8.4 GB on a real site) and needs the disk of what it keeps, with the service running. The installed
+  # control plane may predate --slim: the whole copy below is then made, with its disk check.
+  local slimtmp="$DATA_DIR/backup/.pre-update-$$.db"
+  if [ -x "$(cp_exe)" ] && command -v runuser >/dev/null 2>&1 && [ "${TOUTWAF_UPDATE_FULL_DB_COPY:-0}" != 1 ]; then
+    if runuser -u "$SVC_USER" -- "$(cp_exe)" db-snapshot --db "$db" --out "$slimtmp" --slim >>"$LOG" 2>&1 && mv "$slimtmp" "$dir/db/toutwaf.db" 2>>"$LOG"; then
+      cp -a "$DATA_DIR"/master.key "$dir/db/" 2>/dev/null || true
+      DB_BACKUP_DIR="$dir/db"
+      info "database copy before the update: $(( $(db_size_bytes "$dir/db/toutwaf.db") / 1024 / 1024 )) MB without the events journal (TOUTWAF_UPDATE_FULL_DB_COPY=1 for a whole copy)"
+      return 0
+    fi
+    rm -f "$slimtmp" "$slimtmp.part"
+    info "the slim copy of the database could not be made (the installed control plane predates it?): the whole database is copied"
+  fi
   sz="$(db_size_bytes "$db")"; wal="$(db_size_bytes "$db-wal")"
   # MB: the database, what of the log can still hold pages the file does not have (the service's clean stop merges the rest; at most a tenth
   # of the database), and a tenth more for the way the copy lands
@@ -7696,6 +7873,26 @@ backup_sqlite_before_update() {
     die "the copy of the database before the update could not be completed (is the disk full? see $LOG). Nothing was replaced and the service was started again"
   fi
   DB_BACKUP_DIR="$dir/db"
+}
+
+# The update worked (every service restarted and answered): what was kept in case it went wrong is only taking disk from now on. The copy of
+# the database made before the update and the previous programs (*.prev) are deleted, and the space is said. TOUTWAF_UPDATE_KEEP_COPIES=1 keeps
+# them. (The root update helper does the same for its own snapshots, after its watch window.)
+update_confirmed_cleanup() {
+  [ "$ACTION" = update ] || return 0
+  [ "$DRY_RUN" = 0 ] || return 0
+  [ "${TOUTWAF_UPDATE_KEEP_COPIES:-0}" != 1 ] || { info "update confirmed; the copies made before it are kept (TOUTWAF_UPDATE_KEEP_COPIES=1)"; return 0; }
+  local kb=0 f n
+  if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then
+    n="$(du -sk "$DB_BACKUP_DIR" 2>/dev/null | awk '{print $1}')"; kb=$((kb + ${n:-0}))
+    rm -rf "$DB_BACKUP_DIR"; DB_BACKUP_DIR=""
+  fi
+  for f in "$BIN_DIR"/*.prev; do
+    [ -f "$f" ] || continue
+    n="$(du -sk "$f" 2>/dev/null | awk '{print $1}')"; kb=$((kb + ${n:-0}))
+    rm -f "$f"
+  done
+  info "update confirmed: the copy of the database and the previous programs made for a rollback were deleted ($((kb / 1024)) MB given back)"
 }
 
 # update: snapshot configuration, unit files and (for the control plane) the database before replacing anything
@@ -7719,9 +7916,11 @@ backup_before_update() {
     fi
   fi
   chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR/backup" 2>/dev/null || true
-  # keep the five most recent pre-update snapshots (configuration), and the copy of the database in the two newest only
+  # keep the five most recent pre-update snapshots (configuration), and the copy of the database in the newest only (a copy of a database
+  # of many gigabytes for every update is what fills a disk); the leftovers of copies that were never finished go too
+  rm -f "$DATA_DIR"/backup/.pre-update-*.db "$DATA_DIR"/backup/.pre-update-*.db.part 2>/dev/null || true
   ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -5 | while IFS= read -r old; do rm -rf "$old"; done || true
-  ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -2 | while IFS= read -r old; do [ ! -d "$old/db" ] || rm -rf "$old/db"; done || true
+  ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -1 | while IFS= read -r old; do [ ! -d "$old/db" ] || rm -rf "$old/db"; done || true
   info "backup written to $dir"
   return 0
 }
@@ -8420,6 +8619,7 @@ start_services() {
       wait_healthy || rollback_dp
     fi
   fi
+  update_confirmed_cleanup
   return 0
 }
 
