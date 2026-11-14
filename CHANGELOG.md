@@ -2,6 +2,13 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.5.6 - 2026-11-14
+
+- **Mail gateway** (Courrier): the generated Rspamd Lua file no longer starts with a `#` comment (Rspamd refused the whole configuration); Postfix is restarted when a reload left it listening on the loopback only, the SMTP port is checked on a reachable address, opened in firewalld/ufw by the application, and the optional `btree` TLS caches (absent on EL 10) are gone; a backup is put back as files only and the default SELinux types are restored (a copy of the backup folders had turned `/etc` and `/etc/postfix` into `var_lib_t`); the official Rspamd repository is added when EPEL does not carry Rspamd (EL 10); the DNS record proposed for the gateway name always uses a public address; the end-to-end test says why the real mail server refused the message (domain not hosted, mailbox unknown); the protected domains that a linked ToutPanel mail server does not host are listed and can be declared on it in one click.
+- **ToutWAF Backup deployment**: the address of ToutWAF given to the backup server is one address everywhere (the setting, then the host entered in the access settings, then the configuration file), with the secret path; the pairing probe is a POST; the deployment follows in the task window with a live journal and a "still running" line; the token and the setup link are made as the service user; a distinct cause when the server answers but its first-run setup is not finished; the job form is prefilled and proposes the datastore of the server.
+- **Nodes and web servers**: an address that points to the console port is refused for a node (nodes join on their own port); the network plan of a web server served by nodes does not probe the origin flows from the console and opens them for the nodes too; the address check explains NAT loopback instead of blaming a firewall; the sites list shows the certificate that ToutWAF itself holds when it terminates TLS; the host/WAF link page shows an error and a retry instead of loading forever.
+- **Installers**: the system update uses `--skip-broken` (dnf, yum); the OpenSSL Ed25519 probe uses a one-byte message (OpenSSL 3 refuses an empty one).
+
 ## 0.5.5 - 2026-11-11
 
 - Staging build for internal verification. It is not a release and has not been published.

@@ -3904,8 +3904,8 @@ sysupdate_do() {   # the update itself, run as a step (output goes to the log); 
   if [ -z "$pm" ]; then warn "$(t su_nopm)"; return 0; fi
   log "System update with $pm"
   case "$pm" in
-    dnf) "${to[@]+"${to[@]}"}" dnf -y update || rc=$?;;
-    yum) "${to[@]+"${to[@]}"}" yum -y update || rc=$?;;
+    dnf) "${to[@]+"${to[@]}"}" dnf -y update --skip-broken || rc=$?;;
+    yum) "${to[@]+"${to[@]}"}" yum -y update --skip-broken || rc=$?;;
     apt) export DEBIAN_FRONTEND=noninteractive
          { "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 update \
              && "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y upgrade; } || rc=$?;;
@@ -5306,14 +5306,14 @@ except Exception:
 sys.exit(0 if verify(pub, sig, msg) else 1)
 TW_ED25519_PY
 }
-# openssl_ed25519_ok: true when this openssl really verifies Ed25519 (probe: RFC 8032 test vector 1, empty message)
+# openssl_ed25519_ok: true when this openssl really verifies Ed25519 (probe: RFC 8032 test vector 2, one-byte message: OpenSSL 3.x refuses an empty one with "Could not allocate 0 bytes")
 openssl_ed25519_ok() {
   have openssl || return 1
-  local pk="d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
-  local sg="e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+  local pk="3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+  local sg="92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
   hx() { printf "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
   { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; hx "$pk"; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$TMP/probe.pem"
-  hx "$sg" >"$TMP/probe.sig"; : >"$TMP/probe.msg"
+  hx "$sg" >"$TMP/probe.sig"; printf '\x72' >"$TMP/probe.msg"
   openssl pkeyutl -verify -pubin -inkey "$TMP/probe.pem" -rawin -in "$TMP/probe.msg" -sigfile "$TMP/probe.sig" >>"$LOG" 2>&1
 }
 # python3_bin: prints a Python 3 interpreter (python3, el8's platform-python, or python when it is version 3), nothing when there is none
