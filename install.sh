@@ -1766,7 +1766,7 @@ sysupdate_run() { # the system packages first; a failure is a warning, never a s
     apt) export DEBIAN_FRONTEND=noninteractive
          { "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 update \
              && "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y upgrade; } >>"$log" 2>&1 </dev/null || rc=$? ;;
-    dnf|yum) "${to[@]+"${to[@]}"}" "$pm" -y update >>"$log" 2>&1 </dev/null || rc=$? ;;
+    dnf|yum) "${to[@]+"${to[@]}"}" "$pm" -y update --skip-broken >>"$log" 2>&1 </dev/null || rc=$? ;;
   esac
   if [ "$rc" -eq 0 ]; then
     { mkdir -p "$(dirname "$stamp")" && : >"$stamp"; } 2>/dev/null || true
@@ -2079,6 +2079,15 @@ fi
 FIRST=0
 if [ "$INIT" -eq 1 ] && [ ! -f "$D$STATE_DIR/config.json" ]; then
   FIRST=1
+  # the datastore folder is made here, as root, and given to the service user: the service user cannot create a folder in /srv or /mnt
+  if [ -n "$DATASTORE" ]; then
+    ds_path="${DATASTORE#*=}"
+    case "$ds_path" in
+      /*)
+        mkdir -p "$D$ds_path" || die "$(t sh_e_nofile "$ds_path")"
+        if [ -z "$D" ]; then chown "$SERVICE_USER:$SERVICE_USER" "$ds_path" && chmod 0750 "$ds_path" || die "$(t sh_e_nofile "$ds_path")"; fi ;;
+    esac
+  fi
   args=(server init --state "$D$STATE_DIR" --listen "$LISTEN" --machine)
   [ -z "$EXTERNAL_URL" ] || args+=(--external-url "$EXTERNAL_URL")
   [ -z "$DATASTORE" ] || args+=(--datastore "$DATASTORE")
@@ -2108,6 +2117,8 @@ fi
 
 if use_systemd; then
   systemctl daemon-reload
+  # a command run as root in the state folder (token, setup link) must never leave files the service user cannot read
+  if [ -z "$D" ] && [ -d "$STATE_DIR" ]; then chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR" 2>/dev/null || true; fi
   if [ "$START" -eq 1 ]; then
     systemctl enable --now toutwaf-backup-server.service
     say "$(t sh_s_enabled)"

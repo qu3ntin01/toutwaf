@@ -3,7 +3,18 @@
 Format: [Keep a Changelog](https://keepachangelog.com). Versions follow SemVer. The repository format version (see `docs/ARCHITECTURE.md`) and the
 API version (`/api/v1`) change independently of the program version and are never changed incompatibly within a major version.
 
-## [0.2.0] - unreleased
+## [0.2.1] - 2026-11-13
+
+### Fixed
+- **Installer, first installation**: the datastore folder given with `--datastore NAME=/path` is now created by the installer (as root, then given to the service user) before `server init`. Before, `/srv/...` could not be created by the service user and the installation stopped on "creating the server configuration" with the real cause hidden.
+- **Installer**: the state folder is given back to the service user before the service starts (a command run as root in it could leave `config.json` and `tokens.json` unreadable by the service: every request answered "setup pending").
+- **Installer**: the system update is run with `--skip-broken` (dnf, yum): a conflicting package no longer stops an installation.
+- **Web interface**: the Updates page no longer fails with "Invalid time value" (the release date is an ISO date, read as such); the date formatters show a dash for an invalid date instead of breaking the page.
+
+### Changed
+- **Aurora is the default style** of the web interface (Classic stays one choice away in the Style menu).
+
+## [0.2.0] - 2026-11-10
 
 ### Added
 - **First-run setup link** (`docs/i18n/*/SETUP.md`). The last screen of `install.sh` / `install.ps1` is one block: what was installed and where, a **single-use, 60-minute setup link** (`https://HOST:8007/setup/KEY`, 256-bit key, stored only as a SHA-256, tied to the fingerprint of the server certificate, never logged), the fingerprint to compare, the firewall reminder, how to get a new link, how to uninstall, and a text QR code when `qrencode` is installed. The link opens a wizard in ten languages: administrator (strength meter, 12 characters minimum, common-password list, optional TOTP with QR code and eight recovery codes), first admin token shown once (and a token for ToutWAF), server settings (external address with a reachability and certificate-name check from the server, listen address, first datastore on disk or S3 with write and free-space checks, default retention, e-mail and webhook notifications, update channel and automatic updates), summary and "Finish", which consumes the link. Until then the web interface and the API refuse everything except the wizard (`/health` and API calls with a token that root made on the machine still work, which keeps ToutWAF's remote deployment running); a wrong key is rate limited (5 per address, 40 in total).

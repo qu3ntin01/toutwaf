@@ -8,7 +8,7 @@ Deze branch bevat alleen **ondertekende programma's** van ToutWAF Backup (back-u
 
 | Versie | Kanaal | Build | Gepubliceerd |
 |---|---|---|---|
-| `0.2.0` | stable | `27f716a97b5e` | 2026-11-10 |
+| `0.2.1` | stable | `8071b9b0f40e` | 2026-11-13 |
 
 ## Installeren
 
@@ -36,7 +36,7 @@ Taal van het installatieprogramma: `--lang fr` (of `--es`, `--de` ...; `-Lang fr
 `releases/<versie>/SHA256SUMS` somt de SHA-256-waarden van de archieven op; `SHA256SUMS.sig` is de Ed25519-handtekening (base64) van dat bestand. De publieke sleutel is `release.pub` (dezelfde als die van het product ToutWAF: `3fc61b30f128ff14`). De installatieprogramma's controleren de handtekening en daarna de hash voordat ze iets installeren.
 
 ```sh
-V=0.2.0
+V=0.2.1
 cd releases/$V
 base64 -d SHA256SUMS.sig > sig.bin
 ( printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; base64 -d ../../release.pub ) > pub.der

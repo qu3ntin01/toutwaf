@@ -8,7 +8,7 @@
 
 | Версия | Канал | Сборка | Опубликована |
 |---|---|---|---|
-| `0.2.0` | stable | `27f716a97b5e` | 2026-11-10 |
+| `0.2.1` | stable | `8071b9b0f40e` | 2026-11-13 |
 
 ## Установка
 
@@ -36,7 +36,7 @@ irm https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup/install.ps1 -O
 `releases/<версия>/SHA256SUMS` перечисляет SHA-256 архивов; `SHA256SUMS.sig` — подпись Ed25519 (base64) этого файла. Открытый ключ — `release.pub` (тот же, что у продукта ToutWAF: `3fc61b30f128ff14`). Установщики проверяют подпись, затем хэш, прежде чем что-либо устанавливать.
 
 ```sh
-V=0.2.0
+V=0.2.1
 cd releases/$V
 base64 -d SHA256SUMS.sig > sig.bin
 ( printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; base64 -d ../../release.pub ) > pub.der
