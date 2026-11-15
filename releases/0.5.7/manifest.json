@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "version": "0.5.7",
+  "build": "f693b642978a",
+  "channel": "stable",
+  "released_at": "2026-11-15T20:47:03Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 73055225,
+      "sha256": "af4f9e564e2ab8027ceee7d73be0eed2497db002733d174cbfb1970a8fac5214"
+    },
+    {
+      "name": "toutwaf-extras.tar.gz",
+      "os": "any",
+      "arch": "any",
+      "size": 19721092,
+      "sha256": "55c5d2f661f94119fbf0b7d17e942427dff78d9766a6f6e766531228e8b1a1d5",
+      "kind": "extras",
+      "part": 1,
+      "parts": 1
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-arm64",
+      "reason": "disabled in settings"
+    }
+  ],
+  "notes": "- **Antivirus**: the antivirus (Horizon) is disabled in this release by one switch (not offered in the console, the API, the licence features or the extras); the installers no longer look for its programs.\n- **Mirror**: installs read the ToutWAF package mirror first (signed, pinned key) with the distribution repositories as fallback (`--mirror`, `--no-mirror`).\n- **Firewall**: network interfaces tab (VLAN, bridge, bond, address, MTU) with a trial and automatic rollback, persistence at boot and a protected management interface; ports can be opened on this server and on all nodes in one click; the public address has a Test button.\n- **Attack resilience** (new page): reserve nodes, load shedding by DNS, layer-7 escalation, volumetric help (Cloudflare only, needs network signals from the nodes), and optional overflow forwarding between nodes (off by default, two modes, signed forwarding); presets, a general kill switch and \"undo everything\"; an advantages/drawbacks table lets the user choose each solution.\n- **Node zones and relays**: a zone per node, the nodes x servers matrix, per-site inter-zone fallback, nodes with no reachable origin leave the DNS answer; the console reaches a server only a node can see through a bounded, audited relay (two switches, off by default).\n- **Backup and restore**: manual backup, restore points and a fresh-server restore (`install.sh --restore`), available only when ToutWAF Backup is activated.\n- **Mail gateway**: optional automatic updates with a stored, sealed SSH access (toggle, window, back-off, forget).\n- **Console**: free public certificate for the console with the same key (pins stay valid), renewal, back to self-signed; node updates from the console with live progress and failure reasons; new Architecture page (simple and advanced views of the installation and of how traffic flows); jobs interrupted by a restart get an `interrupted` state; the address picker layout and hints are fixed.\n- **Installers**: `LC_ALL=C` for `stat` (French-locale refusal of the upgrade helper), `--private-host`, `--restore`.\n- **API**: `GET /architecture`; the module list accepts `toutwaf-backup`."
+}
