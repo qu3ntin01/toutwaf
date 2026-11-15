@@ -2,13 +2,13 @@
 
 # ToutWAF
 
-**Self-hosted web application and API protection (WAAP): shields your sites and APIs, with a web console in 10 languages.**
+**Self-hosted security platform: network firewall, web application firewall (WAF) and web application and API protection (WAAP), with a web console in 10 languages.**
 
-WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encrypted backups
+Firewall · WAF · WAAP · API protection · anti-bot · anti-DDoS · multi-node resilience · reverse proxy · VPN · encrypted backups
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.5.6** · build `cc2cfe9689eb` · channel **stable** · 2026-11-14
+**Version 0.5.7** · build `f693b642978a` · channel **stable** · 2026-11-15
 
 </div>
 
@@ -19,6 +19,8 @@ WAF · API protection · anti-bot · layer-7 anti-DDoS · reverse proxy · encry
 ## What is ToutWAF?
 
 ToutWAF sits **in front of your websites and APIs** and inspects every request before it reaches your application: SQL injection, XSS, command execution, malicious bots, volumetric attacks, data leaks in responses... Clean requests go through, the others are blocked, and every decision is **explained** in the console with the rule that fired.
+
+ToutWAF combines three protections: a **network firewall** (interfaces, zones, NAT, routes, VPN) that filters traffic at machine level; a **WAF** that reads every web request; and a **WAAP** that adds API protection (Observation / Balanced / Strict profiles, OpenAPI import), bot management and resistance to volumetric attacks. It replaces neither a dedicated border firewall nor an upstream anti-DDoS service.
 
 It installs on **your own server** (Linux or Windows), with no cloud service: your traffic data stays with you.
 
@@ -53,8 +55,19 @@ It installs on **your own server** (Linux or Windows), with no cloud service: yo
 - **Product updates from the console**: pick the `stable` or `dev` channel, get an instant notice (top-bar pill, banner, toast) as soon as a version is published (checked about every 5 minutes), read the release notes and click **Update now** to follow a live progress; if the new version does not start, the previous one is restored automatically.
 - **First-run wizard** you can skip, with help next to the origin URL field and a **stack detection** that shows the layers found (web server, language, framework, CMS...), a confidence level and the evidence behind each guess.
 
+**Network firewall and VPN** (modules on by default)
+- Network interfaces (VLAN, bridge, bond, address, MTU) with a trial and automatic rollback, kept across reboots; zones, NAT, static routes, DHCP and DNS, captive portal, gateway groups, URL and country aliases; open ports on this server and on all nodes in one click.
+- IPsec, L2TP/IPsec and SSL VPN. What was tried on a real kernel and what was not is detailed in the documentation.
+
+**Attack resilience and cluster**
+- Five independent solutions, chosen by the administrator, with advantages and drawbacks written in the console: reserve nodes, load shedding through DNS, layer-7 escalation, volumetric help (Cloudflare only), overflow forwarding between nodes (optional, off by default). General kill switch and "undo everything".
+- Node zones, nodes x servers matrix, per-site fallback between zones; a bounded, audited relay to a server only a node can see.
+- **Architecture** page: the network and software stack of your installation, simple or detailed down to the site.
+
 **Operations**
 - **Encrypted backups** with off-site copies (S3-compatible, SFTP, WebDAV), retention and automatic restore tests.
+- **Backup and restore area** (manual backup, restore points, fresh-server restore with `install.sh --restore`): available only when ToutWAF Backup is activated.
+- **Mail gateway**: optional automatic updates with a stored, encrypted access; **free public certificate for the console** with the same key (pinned fingerprints stay valid); node updates from the console with live progress.
 - Alerts and integrations (SIEM, Slack, Teams, e-mail, PagerDuty...), Prometheus metrics, multi-organisation.
 - **Host firewall**: on Linux the installer opens the ports ToutWAF needs when firewalld or ufw is active, and **Settings → Firewall** shows the state of each port and opens the missing ones.
 
@@ -219,6 +232,7 @@ Let's be transparent about what is not (yet) covered:
 - **Detection**: measured with an independent tool (GoTestWAF: 673/673 attacks blocked, 0/141 false positives) and on a public payload set never seen during development (89.9 % raw; 99.95 % once non-attack fuzz fragments are removed, with the list of excluded fragments disclosed to our reviewers). No WAF catches everything: expect to tune exceptions for your applications. Known trade-offs: MongoDB-style operators (`$ne`, `$where`) in JSON/form fields and two or more `../` in a value are blocked.
 - **Performance**: measured on a shared test machine (a few thousand requests per second per instance). Measure on your own hardware before going to production.
 - Console and error-message translations were written with the help of automated tools and have not yet been reviewed by native speakers.
+- **Little tried on real hardware**: network interfaces (VLAN, bond, IPv6), resilience (tried on several simulated nodes, no real attack, no real Cloudflare account), TLS between nodes for overflow forwarding, restore on a real fresh server. Details in the documentation.
 - No certification (ANSSI, PCI DSS, ISO 27001) is claimed.
 
 Targets not built for this release:
@@ -228,19 +242,20 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.5.6**
+**Version 0.5.7**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 68.5 MiB | `d37154d95503aee81a635f4844d61025ad9a054ad62a443b6b1a1b956682da46` |
-| `toutwaf-extras.tar.gz` | any | any | 48.4 MiB | `ce568c60ca43dfe80fe7bd025fc6e1d6eb2b8d7be42578aa8ade04427b39a909` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 69.7 MiB | `af4f9e564e2ab8027ceee7d73be0eed2497db002733d174cbfb1970a8fac5214` |
+| `toutwaf-extras.tar.gz` | any | any | 18.8 MiB | `55c5d2f661f94119fbf0b7d17e942427dff78d9766a6f6e766531228e8b1a1d5` |
 
-The `toutwaf-extras*.tar.gz` files (OS and architecture `any`) are the extras of the release: the host agent for Windows and the antivirus programs, which a console hands to other machines. The installer downloads, checks (SHA-256 and signature) and installs them with the archive of the platform; an installation without them works and does not offer Windows nor the antivirus.
+The `toutwaf-extras*.tar.gz` files (OS and architecture `any`) are the extras of the release: the host agent for Windows, which a console hands to other machines. The installer downloads, checks (SHA-256 and signature) and installs them with the archive of the platform; an installation without them works and does not offer Windows.
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.5.6` | 2026-11-14T02:52:30Z | **current** | `releases/0.5.6/` |
+| `0.5.7` | 2026-11-15T20:47:03Z | **current** | `releases/0.5.7/` |
+| `0.5.6` | 2026-11-14T02:52:30Z | available | `releases/0.5.6/` |
 | `0.5.5` | 2026-11-11T16:11:16Z | available | `releases/0.5.5/` |
 | `0.5.4` | 2026-11-10T13:16:18Z | available | `releases/0.5.4/` |
 | `0.5.3` | 2026-11-09T22:35:43Z | available | `releases/0.5.3/` |
@@ -263,7 +278,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.5.6 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.5.7 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Verify a release
@@ -271,7 +286,7 @@ cd releases/0.5.6 && sha256sum -c SHA256SUMS --ignore-missing
 From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `f8fc98e4c6e364fa`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. To verify by hand (OpenSSL 3 or later):
 
 ```sh
-V=0.5.6; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+V=0.5.7; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin

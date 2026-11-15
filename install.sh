@@ -52,7 +52,7 @@ TARBALL=""                                      # local tarball instead of downl
 CP_URL=""; NODE_TOKEN=""; ENROLL_TOKEN=""; NODE_GROUP=""; CP_CA=""
 CLOUD_URL=""; CLOUD_PINS=""; CLOUD_CA=""; CLOUD_ENROL_TOKEN=""   # ToutWAF Cloud: the node connects OUTBOUND to the hosted control plane (toutwaf-cloudlink)
 CLOUDLINK_PORT=9544
-CP_PORT=9443; HTTP_PORT=80; HTTPS_PORT=443; PUBLIC_HOST=""; CHANNEL="${TOUTWAF_CHANNEL:-}"
+CP_PORT=9443; HTTP_PORT=80; HTTPS_PORT=443; PUBLIC_HOST=""; PRIVATE_HOST=""; CHANNEL="${TOUTWAF_CHANNEL:-}"
 HTTP3="${TOUTWAF_HTTP3:-}"                      # "" = keep what toutwaf-dp.yaml says (default OFF); 1 = --http3 (HTTP/3 over UDP, opens UDP on the HTTPS port); 0 = --no-http3
 case "$HTTP3" in 1|true|yes|on) HTTP3=1;; 0|false|no|off) HTTP3=0;; *) HTTP3="";; esac
 OPEN_FW=""                                      # "" = default: open what is needed when firewalld / ufw is active; 1 = same, explicit; 0 = never touch the firewall
@@ -80,7 +80,12 @@ DB_ADMIN_DSN_FILE=""; DB_BACKUP_TIMER=1; DB_SERVER_LOCAL=0; DB_RESULT=""; DB_SEC
 OPEN_CP_PORT=0; NO_SELINUX=0; case "${TOUTWAF_NO_SELINUX:-}" in 1|yes|true|on) NO_SELINUX=1;; esac; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
 QUIET=0; NO_COLOR_FLAG=0; ACCEPT_DEFAULTS=0
 CHECK_COMPAT=0                                  # --check-compat: print the compatibility verdict, change nothing (exit 0 compatible, 3 not)
-# The extras of a release (deploy/RELEASE-LAYOUT.md, "Extras"): the host agent for Windows and the antivirus programs, a second asset next to the archive of the platform.
+# THE ANTIVIRUS SWITCH (ToutWAF Antivirus, Horizon). 0 in version 0.5.7 (owner's decision of 2026-11-14: disabled everywhere, to be reworked): the installer does not look for the
+# antivirus programs (av-dist/toutwaf-av-*), does not create <data>/av-dist, ignores them when an extras file happens to carry them, and never fails without them. Set it to 1 (with
+# controlplane/internal/avoffer, publisher/internal/pipeline/avoffer.go, docs/ANTIVIRUS-RETRAIT.md "2026-11-14") to bring them back; nothing else has to change.
+AV_OFFERED=0
+extras_key() { if [ "$AV_OFFERED" = 1 ]; then printf '%s' "$1"; else printf '%s_noav' "$1"; fi; }   # the message of the extras: with the antivirus, or the Windows agent only
+# The extras of a release (deploy/RELEASE-LAYOUT.md, "Extras"): the host agent for Windows (and, while AV_OFFERED=1, the antivirus programs), a second asset next to the archive of the platform.
 # --no-extras (or TOUTWAF_NO_EXTRAS=1) leaves them out; --extras FILE (repeatable, or TOUTWAF_EXTRAS=FILE:FILE) installs them from local files (offline).
 NO_EXTRAS=0; case "${TOUTWAF_NO_EXTRAS:-}" in 1|yes|true|on) NO_EXTRAS=1;; esac
 EXTRAS_LOCAL="${TOUTWAF_EXTRAS:-}"; EXTRAS_DIR=""; EXTRAS_RESULT=""; EXTRAS_COUNT=0; EXTRAS_VERSION=""; EXTRAS_BUILD=""; SIG_OK_FOR=""
@@ -2340,6 +2345,56 @@ nl|su_reboot|Een herstart van deze server is nodig om de systeemupdate af te ron
 ru|su_reboot|Для завершения обновления системы нужно перезагрузить этот сервер (новое ядро или библиотеки). ToutWAF никогда не перезагружает его за вас: сделайте это, когда сможете.
 zh|su_reboot|需要重启此服务器才能完成系统更新（新内核或库）。ToutWAF 绝不会替您重启：请在方便时自行重启。
 ar|su_reboot|يلزم إعادة تشغيل هذا الخادم لإكمال تحديث النظام (نواة أو مكتبات جديدة). لا يعيد ToutWAF تشغيله نيابةً عنك أبداً: افعل ذلك عندما تستطيع.
+en|su_beat|… system update still running after %s (last step: %s)
+fr|su_beat|… mise à jour en cours depuis %s (dernière étape : %s)
+es|su_beat|… actualización en curso desde hace %s (último paso: %s)
+de|su_beat|… Aktualisierung läuft seit %s (letzter Schritt: %s)
+it|su_beat|… aggiornamento in corso da %s (ultimo passaggio: %s)
+pt|su_beat|… atualização em curso há %s (último passo: %s)
+nl|su_beat|… update loopt al %s (laatste stap: %s)
+ru|su_beat|… обновление идёт уже %s (последний шаг: %s)
+zh|su_beat|… 更新仍在进行（已 %s，最后一步：%s）
+ar|su_beat|… التحديث جارٍ منذ %s (آخر خطوة: %s)
+en|su_done|System packages: update finished in %s, %s package(s) installed or updated.
+fr|su_done|Paquets système : mise à jour terminée en %s, %s paquet(s) installé(s) ou mis à jour.
+es|su_done|Paquetes del sistema: actualización terminada en %s, %s paquete(s) instalado(s) o actualizado(s).
+de|su_done|Systempakete: Aktualisierung in %s abgeschlossen, %s Paket(e) installiert oder aktualisiert.
+it|su_done|Pacchetti di sistema: aggiornamento completato in %s, %s pacchetto/i installato/i o aggiornato/i.
+pt|su_done|Pacotes do sistema: atualização concluída em %s, %s pacote(s) instalado(s) ou atualizado(s).
+nl|su_done|Systeempakketten: update voltooid in %s, %s pakket(ten) geïnstalleerd of bijgewerkt.
+ru|su_done|Системные пакеты: обновление завершено за %s, установлено или обновлено пакетов: %s.
+zh|su_done|系统软件包：更新在 %s 内完成，共安装或更新 %s 个软件包。
+ar|su_done|حزم النظام: اكتمل التحديث خلال %s، عدد الحزم المثبتة أو المحدّثة: %s.
+en|diag_head|%s did not become healthy: what the system says (secrets are hidden)
+fr|diag_head|%s n'est pas devenu sain : ce que dit le système (les secrets sont masqués)
+es|diag_head|%s no llegó a estar sano: lo que dice el sistema (los secretos se ocultan)
+de|diag_head|%s wurde nicht gesund: was das System sagt (Geheimnisse sind ausgeblendet)
+it|diag_head|%s non è diventato sano: cosa dice il sistema (i segreti sono nascosti)
+pt|diag_head|%s não ficou saudável: o que o sistema diz (os segredos estão ocultos)
+nl|diag_head|%s werd niet gezond: wat het systeem zegt (geheimen zijn verborgen)
+ru|diag_head|%s не перешёл в рабочее состояние: что сообщает система (секреты скрыты)
+zh|diag_head|%s 未能恢复正常：系统给出的信息（密钥已隐藏）
+ar|diag_head|%s لم يصبح سليماً: ما يقوله النظام (الأسرار مخفية)
+en|diag_hint|Send this part of the log to the support, or the output of: journalctl -xeu %s --no-pager -n 50
+fr|diag_hint|Transmettez cette partie du journal au support, ou la sortie de : journalctl -xeu %s --no-pager -n 50
+es|diag_hint|Envíe esta parte del registro al soporte, o la salida de: journalctl -xeu %s --no-pager -n 50
+de|diag_hint|Senden Sie diesen Teil des Protokolls an den Support, oder die Ausgabe von: journalctl -xeu %s --no-pager -n 50
+it|diag_hint|Invia questa parte del registro al supporto, oppure l'output di: journalctl -xeu %s --no-pager -n 50
+pt|diag_hint|Envie esta parte do registo ao suporte, ou o resultado de: journalctl -xeu %s --no-pager -n 50
+nl|diag_hint|Stuur dit deel van het logboek naar de support, of de uitvoer van: journalctl -xeu %s --no-pager -n 50
+ru|diag_hint|Отправьте эту часть журнала в поддержку или вывод команды: journalctl -xeu %s --no-pager -n 50
+zh|diag_hint|请把这部分日志发给支持人员，或发送此命令的输出：journalctl -xeu %s --no-pager -n 50
+ar|diag_hint|أرسل هذا الجزء من السجل إلى الدعم، أو ناتج الأمر: journalctl -xeu %s --no-pager -n 50
+en|diag_sel|SELinux is enforcing: look for 'avc: denied' below (a wrong label on the program, the configuration or the data folder); restorecon -nvR lists the wrong labels, restorecon -RFv fixes them.
+fr|diag_sel|SELinux est en mode enforcing : cherchez 'avc: denied' ci-dessous (mauvaise étiquette sur le programme, la configuration ou le dossier de données) ; restorecon -nvR liste les mauvaises étiquettes, restorecon -RFv les corrige.
+es|diag_sel|SELinux está en modo enforcing: busque 'avc: denied' más abajo (etiqueta incorrecta en el programa, la configuración o la carpeta de datos); restorecon -nvR lista las etiquetas erróneas y restorecon -RFv las corrige.
+de|diag_sel|SELinux ist im Enforcing-Modus: Suchen Sie unten nach 'avc: denied' (falsches Label am Programm, an der Konfiguration oder am Datenordner); restorecon -nvR listet falsche Labels, restorecon -RFv korrigiert sie.
+it|diag_sel|SELinux è in modalità enforcing: cerca 'avc: denied' qui sotto (etichetta errata su programma, configurazione o cartella dati); restorecon -nvR elenca le etichette errate, restorecon -RFv le corregge.
+pt|diag_sel|O SELinux está em modo enforcing: procure 'avc: denied' abaixo (etiqueta errada no programa, na configuração ou na pasta de dados); restorecon -nvR lista as etiquetas erradas e restorecon -RFv corrige-as.
+nl|diag_sel|SELinux staat op enforcing: zoek hieronder naar 'avc: denied' (verkeerd label op het programma, de configuratie of de gegevensmap); restorecon -nvR toont de foute labels, restorecon -RFv herstelt ze.
+ru|diag_sel|SELinux в режиме enforcing: ищите ниже 'avc: denied' (неверная метка у программы, конфигурации или каталога данных); restorecon -nvR показывает неверные метки, restorecon -RFv исправляет их.
+zh|diag_sel|SELinux 处于 enforcing 模式：请在下方查找 'avc: denied'（程序、配置或数据目录的标签错误）；restorecon -nvR 列出错误标签，restorecon -RFv 修复。
+ar|diag_sel|SELinux في وضع enforcing: ابحث عن 'avc: denied' أدناه (وسم خاطئ على البرنامج أو الإعدادات أو مجلد البيانات)؛ restorecon -nvR يعرض الوسوم الخاطئة وrestorecon -RFv يصلحها.
 en|q_sysupdate|Update the system packages first (recommended)?
 fr|q_sysupdate|Mettre d'abord à jour les paquets système (recommandé) ?
 es|q_sysupdate|¿Actualizar primero los paquetes del sistema (recomendado)?
@@ -3060,6 +3115,56 @@ nl|st_extras_none|Extra's ontbreken: Windows en antivirus worden niet aangeboden
 ru|st_extras_none|Дополнения отсутствуют: Windows и антивирус не предлагаются. Выполните от root: %s
 zh|st_extras_none|缺少附加包：不提供 Windows 和杀毒功能。请以 root 运行：%s
 ar|st_extras_none|الإضافات مفقودة: لا يتم عرض Windows ولا مكافحة الفيروسات. شغّل بصلاحيات root: %s
+en|s_extras_noav|Extras: Windows agent
+fr|s_extras_noav|Extras : agent Windows
+es|s_extras_noav|Extras: agente de Windows
+de|s_extras_noav|Extras: Windows-Agent
+it|s_extras_noav|Extra: agente Windows
+pt|s_extras_noav|Extras: agente Windows
+nl|s_extras_noav|Extra's: Windows-agent
+ru|s_extras_noav|Дополнения: агент для Windows
+zh|s_extras_noav|附加包：Windows 代理
+ar|s_extras_noav|الإضافات: وكيل Windows
+en|w_extras_dl_noav|The extras could not be downloaded (%s). ToutWAF works without them, but this console will not offer Windows until they are installed.
+fr|w_extras_dl_noav|Les extras n'ont pas pu être téléchargés (%s). ToutWAF fonctionne sans eux, mais cette console ne proposera pas Windows tant qu'ils ne sont pas installés.
+es|w_extras_dl_noav|No se pudieron descargar los extras (%s). ToutWAF funciona sin ellos, pero esta consola no ofrecerá Windows hasta que se instalen.
+de|w_extras_dl_noav|Die Extras konnten nicht heruntergeladen werden (%s). ToutWAF läuft auch ohne sie, doch diese Konsole bietet Windows nicht an, bis sie installiert sind.
+it|w_extras_dl_noav|Impossibile scaricare gli extra (%s). ToutWAF funziona senza, ma questa console non proporrà Windows finché non saranno installati.
+pt|w_extras_dl_noav|Não foi possível transferir os extras (%s). O ToutWAF funciona sem eles, mas esta consola não oferecerá o Windows enquanto não estiverem instalados.
+nl|w_extras_dl_noav|De extra's konden niet worden gedownload (%s). ToutWAF werkt zonder, maar deze console biedt Windows niet aan zolang ze niet geïnstalleerd zijn.
+ru|w_extras_dl_noav|Не удалось загрузить дополнения (%s). ToutWAF работает без них, но эта консоль не предложит Windows, пока они не установлены.
+zh|w_extras_dl_noav|无法下载附加包（%s）。ToutWAF 没有它们也能运行，但在安装之前，此控制台不会提供 Windows。
+ar|w_extras_dl_noav|تعذر تنزيل الإضافات (%s). يعمل ToutWAF بدونها، لكن هذه اللوحة لن تعرض Windows حتى يتم تثبيتها.
+en|w_extras_none_noav|This release carries no extras: this console will not offer Windows.
+fr|w_extras_none_noav|Cette version ne contient pas d'extras : cette console ne proposera pas Windows.
+es|w_extras_none_noav|Esta versión no incluye extras: esta consola no ofrecerá Windows.
+de|w_extras_none_noav|Diese Version enthält keine Extras: diese Konsole bietet Windows nicht an.
+it|w_extras_none_noav|Questa versione non contiene extra: questa console non proporrà Windows.
+pt|w_extras_none_noav|Esta versão não inclui extras: esta consola não oferecerá o Windows.
+nl|w_extras_none_noav|Deze versie bevat geen extra's: deze console biedt Windows niet aan.
+ru|w_extras_none_noav|В этом релизе нет дополнений: эта консоль не предложит Windows.
+zh|w_extras_none_noav|此版本不含附加包：此控制台不会提供 Windows。
+ar|w_extras_none_noav|لا يحتوي هذا الإصدار على إضافات: لن تعرض هذه اللوحة Windows.
+en|st_extras_ok_noav|Extras: installed (Windows agent)
+fr|st_extras_ok_noav|Extras : installés (agent Windows)
+es|st_extras_ok_noav|Extras: instalados (agente de Windows)
+de|st_extras_ok_noav|Extras: installiert (Windows-Agent)
+it|st_extras_ok_noav|Extra: installati (agente Windows)
+pt|st_extras_ok_noav|Extras: instalados (agente Windows)
+nl|st_extras_ok_noav|Extra's: geïnstalleerd (Windows-agent)
+ru|st_extras_ok_noav|Дополнения: установлены (агент для Windows)
+zh|st_extras_ok_noav|附加包：已安装（Windows 代理）
+ar|st_extras_ok_noav|الإضافات: مثبتة (وكيل Windows)
+en|st_extras_none_noav|Extras missing: Windows is not offered. Run as root: %s
+fr|st_extras_none_noav|Extras absents : Windows n'est pas proposé. Lancez en root : %s
+es|st_extras_none_noav|Extras ausentes: Windows no se ofrece. Ejecute como root: %s
+de|st_extras_none_noav|Extras fehlen: Windows wird nicht angeboten. Als root ausführen: %s
+it|st_extras_none_noav|Extra mancanti: Windows non è proposto. Eseguire come root: %s
+pt|st_extras_none_noav|Extras em falta: o Windows não é oferecido. Execute como root: %s
+nl|st_extras_none_noav|Extra's ontbreken: Windows wordt niet aangeboden. Voer uit als root: %s
+ru|st_extras_none_noav|Дополнения отсутствуют: Windows не предлагается. Выполните от root: %s
+zh|st_extras_none_noav|缺少附加包：不提供 Windows。请以 root 运行：%s
+ar|st_extras_none_noav|الإضافات مفقودة: لا يتم عرض Windows. شغّل بصلاحيات root: %s
 # END CATALOG
 TW_CATALOG
 }
@@ -3376,7 +3481,7 @@ trap on_err ERR
 step() {
   CUR_STEP="$1"; shift; progress "$CUR_STEP"
   if [ "$DRY_RUN" = 1 ]; then printf '  %s %s\n' "$BUL" "$CUR_STEP"; "$@"; return 0; fi
-  if [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ]; then
+  if [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ] && [ "${STEP_NOSPIN:-0}" != 1 ]; then
     printf '\033[?25l'
     ( trap - EXIT ERR; i=0; while :; do printf '\r  %s%s%s %s\033[K' "$ACC" "${SPIN_FRAMES[$((i % ${#SPIN_FRAMES[@]}))]}" "$R" "$CUR_STEP"; i=$((i + 1)); sleep 0.1; done ) >&3 &
     SPIN_PID=$!
@@ -3384,7 +3489,7 @@ step() {
   printf '== %s\n' "$CUR_STEP" >>"$LOG"
   "$@" >>"$LOG" 2>&1 </dev/null
   if [ "$SPIN_PID" != "" ]; then spin_kill; printf '\033[?25h'; fi
-  if [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ]; then printf '  %s%s%s %s\n' "$GRN" "$OKM" "$R" "$CUR_STEP"; fi
+  if [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ] && [ "${STEP_NOSPIN:-0}" != 1 ]; then printf '  %s%s%s %s\n' "$GRN" "$OKM" "$R" "$CUR_STEP"; fi
   CUR_STEP=""
   return 0
 }
@@ -3890,8 +3995,86 @@ prereq_gate() {   # before an installation or an update; exits 4 only for a full
 }
 # shellcheck disable=SC2034  # the outcome of the update: read by deploy/tests/prereq-test.sh, which sources this block
 SYSUPD=skipped
-sysupdate_do() {   # the update itself, run as a step (output goes to the log); never fails
-  local pm="" rc=0 to=() fam="${FAMILY:-${FAMILY_GUESS:-}}" stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}"
+# su_stream KIND CMD...: runs CMD in the background with its whole output in a private file and follows that file: every line goes to the
+# log as it comes (tail -f /var/log/toutwaf-install.log shows the update live), the lines that tell what the package manager does are repeated on
+# the console (su_show), and when nothing was printed for TOUTWAF_HEARTBEAT_SECS (20) a heartbeat line says how long it has been running and the
+# last line seen. Nothing ever waits on a pipe: the command writes to a file, a slow or silent package manager only makes the loop sleep.
+# KIND (dnf, apt, zypper, none) says how the packages are counted (SU_PKGS). Returns the status of CMD.
+SU_PKGS=0
+su_now() { date +%s; }
+su_dur() { local s="${1:-0}"; if [ "$s" -ge 60 ]; then printf '%s min %s s' $((s / 60)) $((s % 60)); else printf '%s s' "$s"; fi; }
+su_emit() {   # a progress line on the console (standard error, kept apart from the log) and for the console's progress file
+  local IFS=' '
+  progress "$*"
+  if [ "${QUIET:-0}" = 0 ]; then { printf '    %s %s\n' "${BUL:--}" "$*" >&3; } 2>/dev/null || true; fi
+  return 0
+}
+su_show() {   # true for the lines worth repeating (what is downloaded, unpacked, installed, the counts and the errors), not the noise
+  local l="${1#"${1%%[![:space:]]*}"}"
+  case "$l" in
+    "Hit:"*|"Ign:"*|"Verifying"*|"Cleanup"*|"Running scriptlet"*) return 1;;
+    "Get:"*|"Err:"*|"Fetched "*|"Reading package"*|"Unpacking "*|"Setting up "*|"Preparing to unpack"*|"Processing triggers"*|"Retrieving"*) return 0;;
+    "E: "*|"W: "*|"Error"*|"Failed"*|"Running transaction"*|"Transaction "*|"Downloading Packages"*|"Dependencies resolved"*|"Complete!"*) return 0;;
+    "Nothing to do"*|"Last metadata"*|"Upgrade "*|"Install "*|"Remove "*|"Upgrading:"*|"Installing:"*|"The following"*|"Overall download"*) return 0;;
+    "Checking for file conflicts"*|*" upgraded, "*|*" newly installed"*) return 0;;
+  esac
+  # dnf: "Upgrading : pkg 12/250", dnf5: "[ 12/250] Upgrading pkg", downloads "(3/54): pkg.rpm", zypper "(12/50) Installing: pkg"
+  [[ "$l" =~ ^(\[[[:space:]]*[0-9]+/[0-9]+\][[:space:]]*)?(Upgrading|Installing|Updating|Removing|Erasing|Downgrading|Reinstalling|Obsoleting)([[:space:]]|:) ]] && return 0
+  [[ "$l" =~ ^\([0-9]+/[0-9]+\)[[:space:]:] ]] && return 0
+  return 1
+}
+su_count() {   # su_count KIND FILE: the number of packages the output says were installed or updated
+  local n=0
+  case "$1" in
+    dnf) n="$(grep -cE '^[[:space:]]*(\[[[:space:]]*[0-9]+/[0-9]+\][[:space:]]*)?(Upgrading|Installing|Updating)([[:space:]]|:)' "$2" 2>/dev/null || true)";;
+    apt) n="$(grep -c '^Unpacking ' "$2" 2>/dev/null || true)";;
+    zypper) n="$(grep -cE '^\([0-9]+/[0-9]+\) (Installing|Updating)' "$2" 2>/dev/null || true)";;
+  esac
+  printf '%s' "${n:-0}"
+}
+su_stream() {
+  local kind="$1" out pid rc=0 sfd l pend="" now start last hb poll alive lastraw="" n rdrc IFS=' '
+  su_line() {   # one line of the output: into the log, and on the console when it is worth it
+    local x="${1//$'\r'/}"
+    printf '%s\n' "$x" >>"${LOG:-/dev/null}" 2>/dev/null || true
+    [ -n "${x//[[:space:]]/}" ] || return 0
+    lastraw="${x:0:100}"
+    if su_show "$x"; then su_emit "${x:0:160}"; last="$(su_now)"; fi
+    return 0
+  }
+  shift
+  hb="${TOUTWAF_HEARTBEAT_SECS:-20}"; poll="${TOUTWAF_POLL_SECS:-1}"
+  [[ "$hb" =~ ^[0-9]+$ ]] && [ "$hb" -ge 1 ] || hb=20
+  out="$(mktemp "${TMPDIR:-/tmp}/toutwaf-sysupdate.XXXXXX" 2>/dev/null || true)"
+  if [ -z "$out" ]; then "$@" >>"${LOG:-/dev/null}" 2>&1 </dev/null || rc=$?; return "$rc"; fi
+  log "+ $*"
+  "$@" >"$out" 2>&1 </dev/null 3>&- &   # (fd 3, the console's stream, is not inherited: a service started by a scriptlet must not hold the session open)
+  pid=$!
+  exec {sfd}<"$out"
+  start="$(su_now)"; last="$start"
+  while :; do
+    alive=1; kill -0 "$pid" 2>/dev/null || alive=0       # looked at BEFORE reading: what the command wrote up to its end is still read
+    while :; do
+      rdrc=0; IFS= read -r l <&"$sfd" || rdrc=$?
+      if [ "$rdrc" != 0 ]; then pend="${pend}${l}"; break; fi   # end of what is written so far: a line without its newline is finished by the next read
+      su_line "${pend}${l}"; pend=""
+    done
+    if [ "$alive" = 0 ] && [ -n "$pend" ]; then su_line "$pend"; pend=""; fi
+    now="$(su_now)"
+    if [ "$alive" = 0 ]; then break; fi
+    if [ $((now - last)) -ge "$hb" ]; then
+      su_emit "$(t su_beat "$(su_dur $((now - start)))" "${lastraw:--}")"; last="$now"
+    fi
+    sleep "$poll"
+  done
+  wait "$pid" || rc=$?
+  exec {sfd}<&-
+  n="$(su_count "$kind" "$out")"; SU_PKGS=$((SU_PKGS + ${n:-0}))
+  rm -f "$out"
+  return "$rc"
+}
+sysupdate_do() {   # the update itself, run as a step (output goes to the log, the progress to the console); never fails
+  local pm="" rc=0 to=() fam="${FAMILY:-${FAMILY_GUESS:-}}" stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}" t0
   have timeout && to=(timeout "${TOUTWAF_UPDATE_TIMEOUT:-1800}")
   case "$(pf_fam "$fam" 3)" in
     dnf) if have dnf; then pm=dnf; elif have yum; then pm=yum; fi;;
@@ -3903,16 +4086,18 @@ sysupdate_do() {   # the update itself, run as a step (output goes to the log); 
   fi
   if [ -z "$pm" ]; then warn "$(t su_nopm)"; return 0; fi
   log "System update with $pm"
+  SU_PKGS=0; t0="$(su_now)"
   case "$pm" in
-    dnf) "${to[@]+"${to[@]}"}" dnf -y update --skip-broken || rc=$?;;
-    yum) "${to[@]+"${to[@]}"}" yum -y update --skip-broken || rc=$?;;
+    dnf) su_stream dnf "${to[@]+"${to[@]}"}" dnf -y update --skip-broken || rc=$?;;
+    yum) su_stream dnf "${to[@]+"${to[@]}"}" yum -y update --skip-broken || rc=$?;;
     apt) export DEBIAN_FRONTEND=noninteractive
-         { "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 update \
-             && "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y upgrade; } || rc=$?;;
-    zypper) "${to[@]+"${to[@]}"}" zypper --non-interactive update || rc=$?;;
+         { su_stream none "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 update \
+             && su_stream apt "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y upgrade; } || rc=$?;;
+    zypper) su_stream zypper "${to[@]+"${to[@]}"}" zypper --non-interactive update || rc=$?;;
   esac
   if [ "$rc" = 0 ]; then
     SYSUPD=ok; { mkdir -p "$(dirname "$stamp")" && : >"$stamp"; } 2>/dev/null || true
+    su_emit "$(t su_done "$(su_dur $(($(su_now) - t0)))" "$SU_PKGS")"
   else
     SYSUPD=failed; warn "$(t su_failed "$rc" "$LOG")"
   fi
@@ -3927,7 +4112,7 @@ sysupdate_run() {   # before the prerequisites are installed: a failed or skippe
   if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) $(t su_dry)"; return 0; fi
   local stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}"
   if [ "${TOUTWAF_FORCE_SYSTEM_UPDATE:-}" != 1 ] && [ -n "$(find "$stamp" -mmin -360 2>/dev/null || true)" ]; then say "  $BUL $(t su_recent)"; return 0; fi
-  step "$(t s_sysupdate)" sysupdate_do
+  STEP_NOSPIN=1 step "$(t s_sysupdate)" sysupdate_do   # no spinner: the progress lines of the update are printed in its place
   return 0
 }
 # END prereq
@@ -3976,7 +4161,7 @@ ask_yn() {  # VAR label default(1|0)
 # installation. See tools/repo/README.md.
 VIA_REPO="${TOUTWAF_VIA_REPO:-0}"
 REPO_LINUX="${TOUTWAF_REPO_LINUX_URL:-https://repo.qu3ntin.com/include/toutwaf/linux/-/raw}"   # + /main (stable) or /dev
-REPO_KEY_FPR=""                               # 40-hex fingerprint of the repository key, frozen here at release time (no environment override); empty = --via-repo refused
+REPO_KEY_FPR="7A816F4DD2C6953E25517531DCB7102BD9AE62F1"   # 40-hex fingerprint of the repository key, frozen here at release time (no environment override); empty = --via-repo refused
 VIA_REPO_EL="9 10"                            # Enterprise Linux majors the repository serves
 VIA_PAYLOAD="${TOUTWAF_VIA_PAYLOAD:-/usr/share/toutwaf/release}"
 via_repo_fail() { local IFS=' '; warn "--via-repo: $*; using the direct download instead (GitLab, then GitHub)"; return 1; }
@@ -4063,6 +4248,193 @@ via_repo_try() {
 }
 # END via-repo
 
+# BEGIN pkg-mirror (extracted by deploy/tests/pkg-mirror-test.sh: keep the markers)
+# ToutWAF's package mirror (vendor/ tree of the same repository as --via-repo): every package the installer needs from the distribution (curl, tar,
+# openssl, PostgreSQL...) is looked for at ToutWAF FIRST and at the distribution's own repositories as a FALLBACK. Before the first package manager call
+# the installer adds the mirror (apt: a signed-by source; dnf: a repo with cost=500 so that, for the SAME version, it is chosen before the vendor's
+# repositories at cost 1000, and skip_if_unavailable so that a dead repository never stops the run). A newer version at the vendor is still taken:
+# the mirror holds a snapshot, never a reason to stay behind on a security fix. The key is checked against the frozen REPO_KEY_FPR (the key file
+# comes from the mirror, its fingerprint does not). The mirror is skipped, with one clear line in the log, when: --no-mirror, an unsupported system,
+# an unreachable mirror (5 s to connect, 20 s in all), a key that is not the frozen one. It NEVER blocks the installation.
+NO_MIRROR=0; case "${TOUTWAF_NO_MIRROR:-}" in 1|yes|true|on) NO_MIRROR=1;; esac
+MIRROR_DONE=0; MIRROR_DNF_OPTS=(); MIRROR_SOURCE="not used"
+mirror_skip() { local IFS=' '; MIRROR_DONE=1; MIRROR_SOURCE="not used ($*)"; info "package mirror: $*; the distribution's own repositories are used"; return 1; }
+mirror_setup() {
+  [ "$MIRROR_DONE" = 0 ] || return 0
+  MIRROR_DONE=1
+  [ "$STAGING" = 0 ] || return 1
+  [ "$NO_MIRROR" = 0 ] || { MIRROR_SOURCE="disabled (--no-mirror)"; log "package mirror: disabled (--no-mirror)"; return 1; }
+  local pm="" maj="" suite="" base probe keyurl key="$TMP/toutwaf-mirror.key" fpr keydst cfg rarch
+  if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) package mirror: would add ${REPO_LINUX%/}/main/vendor first, the distribution's repositories stay as fallback (--no-mirror to skip)"; return 1; fi
+  [[ "$REPO_KEY_FPR" =~ ^[0-9A-Fa-f]{40}$ ]] || { mirror_skip "this installer carries no pinned repository key fingerprint"; return 1; }
+  have curl && have gpg || { mirror_skip "curl and gpg are needed to check the mirror key"; return 1; }
+  case "$ARCH" in amd64) rarch=x86_64;; arm64) rarch=aarch64;; *) mirror_skip "no packages for architecture $ARCH"; return 1;; esac
+  if have apt-get && [ "$(pf_fam "${FAMILY:-${FAMILY_GUESS:-}}" 3)" = apt ]; then
+    pm=apt
+    # shellcheck disable=SC1090
+    suite="$( . "$(p /etc/os-release)" 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")"
+    case "$suite" in bookworm|trixie|jammy|noble) ;; *) mirror_skip "no mirror for this release (${suite:-unknown codename}); the mirror covers Debian 12/13 and Ubuntu 22.04/24.04"; return 1;; esac
+  elif have dnf || have yum; then
+    case "$OS_ID" in almalinux|rocky|rhel|centos|ol) maj="${OS_VER%%.*}";; esac
+    case "$maj" in 9|10) pm=dnf;; *) mirror_skip "no mirror for this system (the mirror covers AlmaLinux / Rocky / RHEL 9 and 10)"; return 1;; esac
+  else mirror_skip "no supported package manager"; return 1; fi
+  base="${REPO_LINUX%/}/main"
+  if [ "$pm" = apt ]; then probe="$base/vendor/deb/dists/$suite/InRelease"; keyurl="$base/toutwaf.gpg"; keydst=/usr/share/keyrings/toutwaf.gpg; cfg=/etc/apt/sources.list.d/toutwaf-mirror.list
+  else probe="$base/vendor/rpm/el$maj/$rarch/repodata/repomd.xml"; keyurl="$base/toutwaf.asc"; keydst=/etc/pki/rpm-gpg/RPM-GPG-KEY-toutwaf; cfg=/etc/yum.repos.d/toutwaf-mirror.repo; fi
+  curl -fsSL --connect-timeout 5 --max-time 20 -o "$TMP/mirror-probe" "$probe" 2>>"$LOG" || { mirror_skip "the ToutWAF mirror is not reachable ($probe)"; return 1; }
+  curl -fsSL --connect-timeout 5 --max-time 20 -o "$key" "$keyurl" 2>>"$LOG" || { mirror_skip "cannot download the mirror key ($keyurl)"; return 1; }
+  fpr="$(gpg --batch --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+  [ "$(printf '%s' "$fpr" | tr 'a-f' 'A-F')" = "$(printf '%s' "$REPO_KEY_FPR" | tr -d ' ' | tr 'a-f' 'A-F')" ] || { mirror_skip "the mirror key fingerprint (${fpr:-unreadable}) is not the expected one"; return 1; }
+  run install -d -m 0755 "$(p "$(dirname "$keydst")")" "$(p "$(dirname "$cfg")")" || { mirror_skip "cannot create $(dirname "$cfg")"; return 1; }
+  run install -m 0644 "$key" "$(p "$keydst")" || { mirror_skip "cannot write $keydst"; return 1; }
+  if [ "$pm" = apt ]; then
+    printf '# ToutWAF package mirror (snapshot of the packages the ToutWAF installers need), written by install.sh; remove with --no-mirror or by deleting this file\ndeb [signed-by=%s] %s/vendor/deb %s main\n' "$keydst" "$base" "$suite" >"$(p "$cfg")" || { mirror_skip "cannot write $cfg"; return 1; }
+  else
+    # packages are signed by their vendors and were verified when the mirror was built; clients check the mirror's own signature on the metadata (repo_gpgcheck),
+    # which carries the checksum of every package
+    printf '# ToutWAF package mirror (snapshot of the packages the ToutWAF installers need), written by install.sh; remove with --no-mirror or by deleting this file\n[toutwaf-mirror]\nname=ToutWAF mirror (EL%s)\nbaseurl=%s/vendor/rpm/el%s/$basearch/\nenabled=1\ngpgcheck=0\nrepo_gpgcheck=1\ngpgkey=file://%s\ncost=500\nskip_if_unavailable=1\ntimeout=15\nretries=1\nmetadata_expire=1h\n' \
+      "$maj" "$base" "$maj" "$keydst" >"$(p "$cfg")" || { mirror_skip "cannot write $cfg"; return 1; }
+    MIRROR_DNF_OPTS=(--setopt=skip_if_unavailable=1 --setopt=timeout=30)
+  fi
+  MIRROR_SOURCE="ToutWAF mirror ($pm), vendor repositories as fallback"
+  say "  $BUL package source: $MIRROR_SOURCE"
+  log "package mirror: $cfg written ($base/vendor, key $fpr)"
+  return 0
+}
+# END pkg-mirror
+
+# BEGIN restore-fresh (extracted by tests/restore-fresh-test.sh: keep the markers)
+# install.sh --restore: a NEW, EMPTY machine with only the address of the ToutWAF Backup server and a restore token + key. It installs ToutWAF
+# as usual (and the backup client), then puts the latest (or the chosen) restore point in place of the fresh state: the client restores the
+# snapshot into a private folder, `toutwaf-cp restore-dir --apply` checks and applies it (the fresh state is kept in pre-restore-*), the
+# service is started again and checked. It NEVER asks a question: a missing value is an error that names it. docs/design/sauvegarde-restauration.md.
+# The restore token is the READ-ONLY token of the job and, like the key, never goes to the log or to the screen.
+# Tested offline with fakes (tests/restore-fresh-test.sh); NOT proven on a real machine. The client commands used here that this repository
+# cannot check (`client key import`) are those of the contract of the toutwaf-backup product: to be confirmed against it.
+RESTORE=0; RESTORE_FORCE=0
+RESTORE_URL=""; RESTORE_FP=""; RESTORE_JOB=""; RESTORE_DS="toutwaf"; RESTORE_NS=""; RESTORE_TOKEN="${TWB_RESTORE_TOKEN:-}"; RESTORE_TOKEN_FILE=""
+RESTORE_PASS=""; RESTORE_CLIENT=""
+RESTORE_KEYFILE="${TWB_RESTORE_KEY_FILE:-}"; RESTORE_SNAPSHOT=""; RESTORE_ERR=""; RESTORE_NAME=""
+
+# restore_validate: the values given on the command line, checked BEFORE anything is changed. Sets RESTORE_ERR (one line, no secret) and
+# returns 1 on the first problem.
+restore_validate() {
+  local missing="" v
+  [ -z "$RESTORE_TOKEN" ] && [ -n "$RESTORE_TOKEN_FILE" ] && [ -r "$RESTORE_TOKEN_FILE" ] && RESTORE_TOKEN="$(head -c 512 "$RESTORE_TOKEN_FILE" | tr -d '\r\n')"
+  [ -n "$RESTORE_URL" ] || missing="$missing --backup-url"
+  [ -n "$RESTORE_FP" ] || missing="$missing --backup-fingerprint"
+  [ -n "$RESTORE_JOB" ] || missing="$missing --restore-job"
+  [ -n "$RESTORE_TOKEN" ] || missing="$missing --restore-token"
+  [ -n "$RESTORE_KEYFILE" ] || missing="$missing --key-file"
+  if [ -n "$missing" ]; then RESTORE_ERR="--restore needs:$missing (it never asks a question)"; return 1; fi
+  case "$RESTORE_URL" in https://*) ;; *) RESTORE_ERR="--backup-url must start with https://"; return 1;; esac
+  v="${RESTORE_URL#https://}"
+  case "$v" in *[!A-Za-z0-9.:_\[\]-]*) RESTORE_ERR="--backup-url must be https://HOST[:PORT] only (no path, no credentials)"; return 1;; esac
+  [ -n "$v" ] || { RESTORE_ERR="--backup-url has no host"; return 1; }
+  v="$(printf '%s' "$RESTORE_FP" | tr -d ': -' | tr 'A-F' 'a-f')"
+  case "$v" in *[!0-9a-f]*|"") RESTORE_ERR="--backup-fingerprint must be the SHA-256 of the certificate of the backup server (64 hexadecimal digits)"; return 1;; esac
+  [ "${#v}" = 64 ] || { RESTORE_ERR="--backup-fingerprint must be the SHA-256 of the certificate of the backup server (64 hexadecimal digits)"; return 1; }
+  RESTORE_FP="$v"
+  [ -n "$RESTORE_NS" ] || RESTORE_NS="$RESTORE_JOB"
+  for v in "$RESTORE_JOB" "$RESTORE_DS" "$RESTORE_NS"; do
+    case "$v" in [a-z0-9]*) ;; *) RESTORE_ERR="--restore-job, --restore-datastore and --restore-namespace are lower-case names (letters, digits, . _ -)"; return 1;; esac
+    case "$v" in *[!a-z0-9._-]*) RESTORE_ERR="--restore-job, --restore-datastore and --restore-namespace are lower-case names (letters, digits, . _ -)"; return 1;; esac
+  done
+  case "$RESTORE_TOKEN" in *[!A-Za-z0-9._~+/=-]*) RESTORE_ERR="the restore token has characters a token never has"; return 1;; esac
+  [ "${#RESTORE_TOKEN}" -ge 8 ] || { RESTORE_ERR="the restore token is too short"; return 1; }
+  [ -f "$RESTORE_KEYFILE" ] && [ -r "$RESTORE_KEYFILE" ] && [ -s "$RESTORE_KEYFILE" ] || { RESTORE_ERR="--key-file does not name a readable, non-empty file: $RESTORE_KEYFILE"; return 1; }
+  if [ -n "$RESTORE_SNAPSHOT" ]; then
+    case "$RESTORE_SNAPSHOT" in toutwaf/"$RESTORE_JOB"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) ;;
+      *) RESTORE_ERR="--restore-snapshot must look like toutwaf/$RESTORE_JOB/YYYYMMDDTHHMMSSZ"; return 1;; esac
+  fi
+  return 0
+}
+
+# restore_redact: text on its way to the log or the screen, without the token and the key material.
+restore_redact() { local s="$1"; [ -z "$RESTORE_TOKEN" ] || s="${s//"$RESTORE_TOKEN"/***}"; printf '%s' "$s"; }
+
+# restore_profile DIR: client.json of the ToutWAF Backup client. The token travels in the environment, never in this file.
+restore_profile() {
+  local d="$1"
+  mkdir -p "$d/cache" && chmod 700 "$d" "$d/cache" || return 1
+  ( umask 077; printf '{"profiles":{"toutwaf":{"server":"%s","fingerprint":"%s","datastore":"%s","namespace":"%s","keyfile":"%s","cache_dir":"%s"}}}\n' \
+      "$RESTORE_URL" "$RESTORE_FP" "$RESTORE_DS" "$RESTORE_NS" "$d/key.json" "$d/cache" >"$d/client.json" )
+}
+
+# restore_run_client DIR ARGS...: the client with its secrets in the environment only.
+restore_run_client() {
+  local d="$1"; shift
+  TWB_TOKEN="$RESTORE_TOKEN" TWB_PASSPHRASE="$RESTORE_PASS" TWB_CONFIG="$d/client.json" TWB_CACHE_DIR="$d/cache" "$RESTORE_CLIENT" "$@"
+}
+
+restore_systemctl() { ${TOUTWAF_RESTORE_SYSTEMCTL:-systemctl} "$@"; }
+
+# restore_steps: the work, in a private folder. Returns 0, or 1 with RESTORE_ERR set.
+restore_steps() {
+  local w="$1" cpx names snap out
+  restore_profile "$w" || { RESTORE_ERR="could not write the client profile"; return 1; }
+  # the key: a key file the client can open as it is, or the paper key (a text) to import under a passphrase made here, for this run only
+  RESTORE_PASS="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  if head -n 1 "$RESTORE_KEYFILE" | grep -q 'PAPER KEY'; then
+    restore_run_client "$w" client key import --paper-file "$RESTORE_KEYFILE" --keyfile "$w/key.json" >"$w/out" 2>&1 \
+      || { RESTORE_ERR="the paper key was refused by the client: $(restore_redact "$(tail -n 2 "$w/out" | tr '\n' ' ')")"; return 1; }
+  else
+    cp "$RESTORE_KEYFILE" "$w/key.json" && chmod 600 "$w/key.json" || { RESTORE_ERR="could not read the key file"; return 1; }
+    RESTORE_PASS="${TWB_RESTORE_PASSPHRASE:-$RESTORE_PASS}"
+  fi
+  snap="$RESTORE_SNAPSHOT"
+  if [ -z "$snap" ]; then
+    restore_run_client "$w" engine snapshots --config "$w/client.json" --profile toutwaf --type toutwaf --id "$RESTORE_JOB" >"$w/snaps" 2>"$w/err" \
+      || { RESTORE_ERR="the backup server did not list the restore points: $(restore_redact "$(tail -n 2 "$w/err" | tr '\n' ' ')")"; return 1; }
+    names="$(grep -o '"name": *"toutwaf/[^"]*"' "$w/snaps" | sed 's/.*"\(toutwaf\/[^"]*\)"$/\1/' | sort)"
+    snap="$(printf '%s\n' "$names" | tail -n 1)"
+    [ -n "$snap" ] || { RESTORE_ERR="the backup server holds no restore point for $RESTORE_JOB"; return 1; }
+  fi
+  RESTORE_NAME="$snap"
+  say "  restore point: $snap"
+  mkdir -p "$w/files" && chmod 700 "$w/files"
+  restore_run_client "$w" engine restore "$snap" --config "$w/client.json" --profile toutwaf --target "$w/files" --verify >"$w/out" 2>&1 \
+    || { RESTORE_ERR="the restore point could not be read: $(restore_redact "$(tail -n 2 "$w/out" | tr '\n' ' ')")"; return 1; }
+  # the folder the client wrote holds the files under the path they had on the machine that made the backup: find manifest.json
+  out="$(find "$w/files" -name manifest.json -type f 2>/dev/null | head -n 1)"
+  [ -n "$out" ] || { RESTORE_ERR="the restore point does not hold a ToutWAF backup (no manifest.json)"; return 1; }
+  cpx="$(cp_exe)"
+  restore_systemctl stop toutwaf-cp >>"$LOG" 2>&1 || true
+  if ! "$cpx" restore-dir --from "$(dirname "$out")" --apply >"$w/out" 2>&1; then
+    RESTORE_ERR="the restore was refused (the fresh state is untouched): $(tail -n 2 "$w/out" | tr '\n' ' ')"
+    restore_systemctl start toutwaf-cp >>"$LOG" 2>&1 || true
+    return 1
+  fi
+  restore_systemctl start toutwaf-cp >>"$LOG" 2>&1 || { RESTORE_ERR="the control plane did not start after the restore"; return 1; }
+  return 0
+}
+
+# restore_fresh: after the normal installation (the service is running, the backup client is installed).
+restore_fresh() {
+  local w rc=0
+  if [ "$STAGING" != 0 ] || [ "$DRY_RUN" != 0 ]; then say "  --restore: nothing is restored in a staging or dry run"; return 0; fi
+  RESTORE_CLIENT="${TOUTWAF_RESTORE_CLIENT:-$(p "$BIN_DIR/toutwaf-backup")}"
+  [ -x "$RESTORE_CLIENT" ] || { RESTORE_ERR="the ToutWAF Backup client is not installed ($RESTORE_CLIENT): see the lines above, or install it with --with-backup-client"; restore_fail; return $?; }
+  say "  ${D}restoring from $RESTORE_URL (job $RESTORE_JOB)$R"
+  w="$(mktemp -d "${TMPDIR:-/tmp}/toutwaf-restore.XXXXXX")" || { RESTORE_ERR="could not make a private folder"; restore_fail; return $?; }
+  chmod 700 "$w"
+  restore_steps "$w" || rc=1
+  rm -rf "$w"; RESTORE_PASS=""
+  [ "$rc" = 0 ] || { restore_fail; return $?; }
+  if ! ${TOUTWAF_RESTORE_WAIT:-wait_cp_healthy}; then RESTORE_ERR="the control plane does not answer after the restore (its previous data is in pre-restore-* in the data folder; see journalctl -u toutwaf-cp)"; restore_fail; return $?; fi
+  say "  $(paint "$GRN" "$OKM") restored from $RESTORE_NAME and the control plane answers"
+  say "  $BUL nodes and agents: they reconnect by themselves when they reach this control plane at its old address; if the address changed, create their commands again in the console (Fleet)."
+  say "  $BUL check in the console: applications, certificates and users are those of the restore point; renew the restore token of the job (Backup & restore > Restore a whole server)."
+  return 0
+}
+restore_fail() {
+  local _m; _m="$(restore_redact "restore failed: $RESTORE_ERR")"
+  [ -z "$LOG" ] || printf '%s\n' "$_m" >>"$LOG" 2>/dev/null || true
+  printf '%s\n' "$_m" >&2
+  exit 12
+}
+# END restore-fresh
+
 usage() {
   cat <<EOF
 ToutWAF installer v$INSTALLER_VERSION
@@ -4087,6 +4459,10 @@ Options:
   --base-url URL             mirror of the release tree (expects <URL>/channel.json and <URL>/releases/<version>/..., see deploy/RELEASE-LAYOUT.md)
   --via-repo                 install from ToutWAF's own package repository (adds a signed dnf .repo / apt .list, installs the package \`toutwaf\`);
                              when it is unreachable or the system is not covered, falls back to the direct download (GitLab, then GitHub)
+  --mirror URL               raw base of the ToutWAF package repository whose vendor/ tree is the package MIRROR (default: the ToutWAF GitLab project; also
+                             TOUTWAF_REPO_LINUX_URL). The mirror is added to dnf / apt BEFORE the first package is installed and the distribution's
+                             repositories stay as fallback (skipped with a clear line in the log when unreachable, never blocking)
+  --no-mirror                do not use the package mirror: packages come from the distribution's repositories only (also TOUTWAF_NO_MIRROR=1)
   --licence-api-url URL      address of the licence site of the common licence (license.common.api_url), written to the configuration before the
                              first start (also TOUTWAF_LICENCE_API_URL). The default, and the ONLY licence server, is https://licences.toutwaf.com:
                              give this option for a self-test only (a local test site); another host is flagged with a warning, here and in the console.
@@ -4108,6 +4484,9 @@ Options:
   --group NAME               node group (default: default)
   --cp-port N                console port (default 9443)        --http-port N / --https-port N   data-plane ports (80 / 443)
   --public-host HOST         public host name or IP shown in the panel links (default: auto-detected)
+  --private-host HOST        address of this machine on the local network (a private IP such as 192.168.3.2, one of this machine's own addresses,
+                             or a local name), shown beside the public one in the panel links; for an installation whose ports are not open on
+                             the Internet (default: chosen automatically among the addresses of the interfaces)
   --open-firewall            open the needed firewall ports (default when firewalld or ufw is active): 80/443 for the data plane and the
                              console port. The data-plane API port (9444) is never opened by the installer.
   --console-from CIDR        only allow this address / network to reach the console port (e.g. 203.0.113.0/24); default: anywhere
@@ -4123,6 +4502,12 @@ Options:
                              later change runs as a trial with automatic rollback and an anti-lockout guard (SSH and the console stay reachable).
                              Not the same as the options above, which only decide whether the installer opens the ports ToutWAF needs.
   --no-firewall-module       do not enable the Firewall module (the default; skips the question of the interactive mode)
+  --restore                  NEW, EMPTY machine: install ToutWAF, then put the latest (or the chosen) restore point of a ToutWAF Backup server in place of
+                             the fresh state, start the services again and check them. It never asks a question: give --backup-url, --backup-fingerprint,
+                             --restore-job, --restore-token (or --restore-token-file, or TWB_RESTORE_TOKEN) and --key-file (the paper key, a text file);
+                             optional: --restore-datastore (toutwaf), --restore-namespace (the job), --restore-snapshot toutwaf/JOB/YYYYMMDDTHHMMSSZ,
+                             --force-restore (restore over an existing installation: its data is kept in pre-restore-*). The console writes this command
+                             (Backup & restore > Restore a whole server). Exit 2: a value is missing or wrong (nothing was changed); 12: the restore failed.
   --with-backup-client       ALSO install the ToutWAF Backup client (toutwaf-backup) next to the control plane, so that this machine can back itself up to a
                              ToutWAF Backup server (console: Backups > Backup servers). Downloaded from the release channel of that product; the Ed25519
                              signature of SHA256SUMS and the SHA-256 of the archive are verified BEFORE anything is installed (fail closed). Needs the public key
@@ -4197,6 +4582,57 @@ db_check_options() {
   return 0
 }
 # END db-options
+
+# BEGIN address-options (extracted by tests/private-host-test.sh: keep the markers)
+# --private-host: the address of this machine on the local network, stored beside the public one (toutwaf-cp bootstrap --private-host). The
+# control plane validates it again (access.NormalizePrivateHost); this check is there to fail before anything is installed.
+# A private address (RFC 1918, fc00::/7, 100.64.0.0/10) or a name is accepted; a public address only when it belongs to this machine.
+ph_local_addrs() {   # addresses of this machine, one per line (TOUTWAF_TEST_LOCAL_ADDRS replaces the lookup in tests)
+  if [ -n "${TOUTWAF_TEST_LOCAL_ADDRS+x}" ]; then local IFS=' '; printf '%s\n' $TOUTWAF_TEST_LOCAL_ADDRS; return 0; fi
+  if command -v ip >/dev/null 2>&1; then ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+  elif command -v hostname >/dev/null 2>&1; then hostname -I 2>/dev/null | tr ' ' '\n'; fi
+}
+ph_is_local() { local a; while IFS= read -r a; do [ "$a" = "$1" ] && return 0; done < <(ph_local_addrs); return 1; }
+# private_host_check VALUE -> prints the normalised value, or a reason on stdout and returns 1
+private_host_check() {
+  local h="${1:-}" a b c d
+  h="${h#http://}"; h="${h#https://}"; h="${h%/}"
+  case "$h" in *[[:space:]]*|*/*|*\?*|*\#*|*@*) printf 'it must be an address or a name, without path or spaces'; return 1;; esac
+  case "$h" in \[*\]) h="${h#\[}"; h="${h%\]}";; esac
+  [ -n "$h" ] || { printf 'it is empty'; return 1; }
+  if [[ "$h" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    a="${BASH_REMATCH[1]}"; b="${BASH_REMATCH[2]}"; c="${BASH_REMATCH[3]}"; d="${BASH_REMATCH[4]}"
+    local o; for o in "$a" "$b" "$c" "$d"; do [ $((10#$o)) -le 255 ] || { printf '%s is not an IPv4 address' "$h"; return 1; }; done
+    a=$((10#$a)); b=$((10#$b)); c=$((10#$c)); d=$((10#$d))
+    if [ "$a" = 127 ] || [ "$a" = 0 ]; then printf '%s is a loopback or unspecified address: nothing else can reach it' "$h"; return 1; fi
+    if [ "$a" = 169 ] && [ "$b" = 254 ]; then printf '%s is a link-local address' "$h"; return 1; fi
+    h="$a.$b.$c.$d"
+    if [ "$a" = 10 ] || { [ "$a" = 172 ] && [ "$b" -ge 16 ] && [ "$b" -le 31 ]; } || { [ "$a" = 192 ] && [ "$b" = 168 ]; } || { [ "$a" = 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ]; }; then
+      printf '%s' "$h"; return 0
+    fi
+    ph_is_local "$h" && { printf '%s' "$h"; return 0; }
+    printf '%s is a public address that is not on this machine: --private-host is the address on the local network (use --public-host for a public one)' "$h"; return 1
+  fi
+  if [[ "$h" == *:* ]]; then
+    [[ "$h" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$h" == *:*:* ]] || { printf '%s is not an IPv6 address' "$h"; return 1; }
+    h="$(printf '%s' "$h" | tr 'A-F' 'a-f')"
+    case "$h" in ::1|::) printf '%s is a loopback or unspecified address: nothing else can reach it' "$h"; return 1;; fe8*|fe9*|fea*|feb*) printf '%s is a link-local address' "$h"; return 1;; fc*|fd*) printf '%s' "$h"; return 0;; esac
+    ph_is_local "$h" && { printf '%s' "$h"; return 0; }
+    printf '%s is a public address that is not on this machine: --private-host is the address on the local network (use --public-host for a public one)' "$h"; return 1
+  fi
+  if [[ "$h" =~ ^[0-9.]+$ ]]; then printf '%s is not an IPv4 address' "$h"; return 1; fi
+  if [ "${#h}" -gt 253 ] || ! [[ "$h" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]]; then printf '%s is not a valid host name' "$h"; return 1; fi
+  case "$(printf '%s' "$h" | tr 'A-Z' 'a-z')" in localhost) printf 'localhost is the loopback name: nothing else can reach it'; return 1;; esac
+  printf '%s' "$h" | tr 'A-Z' 'a-z'
+}
+# private_host_options: validates and normalises PRIVATE_HOST (called once, after the command line is read)
+private_host_options() {
+  [ -n "${PRIVATE_HOST:-}" ] || return 0
+  local v
+  v="$(private_host_check "$PRIVATE_HOST")" || die "--private-host: $v"
+  PRIVATE_HOST="$v"
+}
+# END address-options
 
 # BEGIN licence-options
 # the common licence, non interactive: the address of the licence site and its public key(s), checked here and written to toutwaf-cp.yaml
@@ -4286,6 +4722,8 @@ while [ $# -gt 0 ]; do
     --extras-only) ACTION=extras; shift;;
     --base-url) BASE_URL="$2"; shift 2;;
     --via-repo) VIA_REPO=1; shift;;
+    --mirror) REPO_LINUX="$2"; shift 2;;
+    --no-mirror) NO_MIRROR=1; shift;;
     --licence-api-url|--license-api-url) LICENCE_API_URL="$2"; shift 2;;
     --licence-pin|--license-pin) LICENCE_PINS="${LICENCE_PINS:+$LICENCE_PINS
 }$2"; shift 2;;
@@ -4302,6 +4740,7 @@ while [ $# -gt 0 ]; do
     --http-port) HTTP_PORT="$2"; shift 2;;
     --https-port) HTTPS_PORT="$2"; shift 2;;
     --public-host) PUBLIC_HOST="$2"; shift 2;;
+    --private-host) PRIVATE_HOST="$2"; shift 2;;
     --open-firewall) OPEN_FW=1; shift;;
     --open-cp-port) OPEN_CP_PORT=1; shift;;
     --console-from) CONSOLE_FROM="$2"; shift 2;;
@@ -4311,6 +4750,17 @@ while [ $# -gt 0 ]; do
     --no-telemetry) NO_TELEMETRY=1; shift;;
     --with-firewall|--with-firewall-module) FW_MODULE=1; shift;;
     --no-firewall-module) FW_MODULE=0; shift;;
+    --restore) RESTORE=1; shift;;
+    --force-restore) RESTORE_FORCE=1; shift;;
+    --backup-url) RESTORE_URL="$2"; shift 2;;
+    --backup-fingerprint) RESTORE_FP="$2"; shift 2;;
+    --restore-job) RESTORE_JOB="$2"; shift 2;;
+    --restore-datastore) RESTORE_DS="$2"; shift 2;;
+    --restore-namespace) RESTORE_NS="$2"; shift 2;;
+    --restore-token) RESTORE_TOKEN="$2"; shift 2;;
+    --restore-token-file) RESTORE_TOKEN_FILE="$2"; shift 2;;
+    --key-file) RESTORE_KEYFILE="$2"; shift 2;;
+    --restore-snapshot) RESTORE_SNAPSHOT="$2"; shift 2;;
     --with-backup-client) BACKUP_CLIENT=1; shift;;
     --backup-client-pubkey) BACKUP_CLIENT_PUBKEY="$2"; shift 2;;
     --backup-client-version) BACKUP_CLIENT_VERSION="$2"; shift 2;;
@@ -4357,6 +4807,7 @@ done
 detect_lang; detect_ui
 db_check_options
 licence_check_options
+private_host_options
 case "$COMPONENT" in dp|cp|all) ;; *) die "--component must be dp, cp or all";; esac
 case "$CHANNEL" in beta) CHANNEL=dev;; esac
 case "$CHANNEL" in ""|stable|dev) ;; *) die "--channel must be stable or dev";; esac
@@ -4723,7 +5174,7 @@ cp_offline() {   # args... ; stdout = the command's output, stderr -> installer 
   "$exe" "$1" "${@:2}" --data "$(p "$DATA_DIR")" "${cfgargs[@]}" 2>>"$LOG" </dev/null
 }
 # Contract (docs/panel-access.md):
-#   toutwaf-cp bootstrap --data DIR [--public-host H] [--listen-port N] [--keep-token] --json
+#   toutwaf-cp bootstrap --data DIR [--public-host H] [--private-host H] [--listen-port N] [--keep-token] --json
 #   toutwaf-cp bootstrap --print-links --data DIR [--setup-token T] --json
 # $1 = bootstrap | print-links ; sets JSON and BS_* ; returns 1 when the control plane has no usable `bootstrap` command.
 cp_bootstrap() {
@@ -4733,6 +5184,7 @@ cp_bootstrap() {
   else
     local args=(--listen-port "$CP_PORT" --json)
     [ -n "$PUBLIC_HOST" ] && args+=(--public-host "$PUBLIC_HOST")
+    [ -n "$PRIVATE_HOST" ] && args+=(--private-host "$PRIVATE_HOST")
     [ "$BS_KEEP_TOKEN" = 1 ] && args+=(--keep-token)
     out="$(cp_offline bootstrap "${args[@]}")" || rc=$?
   fi
@@ -5040,8 +5492,8 @@ cmd_status() {
   [ "$INST_CP" = 1 ] && box_line "toutwaf-cp $(installed_label "$(p "$BIN_DIR/toutwaf-cp")")"
   box_line "$(t st_channel "$CHANNEL") ($(channel_branch))"
   if [ "$INST_CP" = 1 ]; then
-    if ls "$(p "$DATA_DIR")"/agent-dist/toutwaf-agent-windows-*.exe >/dev/null 2>&1 || ls "$(p "$DATA_DIR")"/av-dist/toutwaf-av-* >/dev/null 2>&1; then box_line "$(t st_extras_ok)"
-    else box_line "$(paint "$YLW" "$WRM $(t st_extras_none "sudo bash install.sh --extras-only")")"; fi
+    if ls "$(p "$DATA_DIR")"/agent-dist/toutwaf-agent-windows-*.exe >/dev/null 2>&1 || { [ "$AV_OFFERED" = 1 ] && ls "$(p "$DATA_DIR")"/av-dist/toutwaf-av-* >/dev/null 2>&1; }; then box_line "$(t "$(extras_key st_extras_ok)")"
+    else box_line "$(paint "$YLW" "$WRM $(t "$(extras_key st_extras_none)" "sudo bash install.sh --extras-only")")"; fi
   fi
   if [ "$DRY_RUN" = 0 ]; then
     local frc=0; fetch_channel 2>/dev/null || frc=$?
@@ -5109,7 +5561,7 @@ cmd_uninstall() {
   # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
-  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-time.path toutwaf-time.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-netif-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-time.path toutwaf-time.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
     if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
     run rm -f "$(p /etc/systemd/system/$s)"
   done
@@ -5147,9 +5599,10 @@ cmd_uninstall() {
 # pkg_install PM pkg...: non-interactive install with the native package manager (never a partial system upgrade)
 pkg_install() {
   local pm="$1" out; shift
+  mirror_setup || true   # ToutWAF's mirror first, the distribution's repositories as fallback (once per run)
   case "$pm" in
-    dnf) run dnf install -y "$@";;
-    yum) run yum install -y "$@";;
+    dnf) run dnf "${MIRROR_DNF_OPTS[@]+"${MIRROR_DNF_OPTS[@]}"}" install -y "$@";;
+    yum) run yum "${MIRROR_DNF_OPTS[@]+"${MIRROR_DNF_OPTS[@]}"}" install -y "$@";;
     apt)   # another apt / dpkg (unattended-upgrades, cloud-init) may hold the lock for a while: wait for it, and try once more after a failure
       local try=1 rc
       while :; do
@@ -5483,7 +5936,7 @@ extras_wanted() {
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
   case "$(basename "$(dirname "$1")")/$(basename "$1")" in
     agent-dist/toutwaf-agent-windows-amd64.exe|agent-dist/toutwaf-agent-windows-arm64.exe) return 0;;
-    av-dist/toutwaf-av-linux-amd64|av-dist/toutwaf-av-linux-arm64|av-dist/toutwaf-av-darwin-amd64|av-dist/toutwaf-av-darwin-arm64|av-dist/toutwaf-av-windows-amd64.exe|av-dist/toutwaf-av-windows-arm64.exe) return 0;;
+    av-dist/toutwaf-av-linux-amd64|av-dist/toutwaf-av-linux-arm64|av-dist/toutwaf-av-darwin-amd64|av-dist/toutwaf-av-darwin-arm64|av-dist/toutwaf-av-windows-amd64.exe|av-dist/toutwaf-av-windows-arm64.exe) [ "$AV_OFFERED" = 1 ]; return;;
   esac
   return 1
 }
@@ -5536,7 +5989,7 @@ obtain_extras() {
   # ---- download: the signed SHA256SUMS of the release says which files are the extras
   rel="$(repo_base)/releases/$RESOLVED_VERSION"; q="$(release_q "$(release_build)")"
   if [ ! -f "$TMP/SHA256SUMS" ] || [ "$SIG_OK_FOR" != "$RESOLVED_VERSION|$(release_build)" ]; then
-    if ! fetch "$rel/SHA256SUMS$q" "$TMP/SHA256SUMS" 2>>"$LOG"; then extras_fail w_extras_dl "SHA256SUMS"; return 0; fi
+    if ! fetch "$rel/SHA256SUMS$q" "$TMP/SHA256SUMS" 2>>"$LOG"; then extras_fail "$(extras_key w_extras_dl)" "SHA256SUMS"; return 0; fi
     verify_signature "$rel" "$q"      # a bad signature aborts, as for the archive
   fi
   names="$(extras_names)"
@@ -5550,7 +6003,7 @@ obtain_extras() {
       if fetch "$rel/$n$q" "$f" 2>>"$LOG"; then break; fi
       rm -f "$f"
     done
-    [ -f "$f" ] || { extras_fail w_extras_dl "$n"; return 0; }
+    [ -f "$f" ] || { extras_fail "$(extras_key w_extras_dl)" "$n"; return 0; }
     want="$(grep " $n\$" "$TMP/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"
     got="$(sha256sum "$f" | awk '{print $1}')"
     if [ -z "$want" ] || [ "$want" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
@@ -5569,7 +6022,7 @@ install_extras() {
   [ -n "$EXTRAS_DIR" ] || return 0
   local f dst own grp n=0 recorded="" sub
   own="$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")"; grp="$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")"
-  for sub in agent-dist av-dist; do
+  for sub in agent-dist $([ "$AV_OFFERED" = 1 ] && echo av-dist); do
     run install -d -m 0750 -o "$own" -g "$grp" "$(p "$DATA_DIR/$sub")" || return 0
   done
   for f in "$EXTRAS_DIR"/agent-dist/* "$EXTRAS_DIR"/av-dist/*; do
@@ -5599,7 +6052,7 @@ extras_current() {
   # every program extras.json lists is still there
   local f d
   for f in $(grep -o '"toutwaf-[^"]*"' "$j" | tr -d '"'); do
-    case "$f" in toutwaf-agent-*) d=agent-dist;; *) d=av-dist;; esac
+    case "$f" in toutwaf-agent-*) d=agent-dist;; *) [ "$AV_OFFERED" = 1 ] || continue; d=av-dist;; esac
     [ -s "$(p "$DATA_DIR/$d/$f")" ] || return 1
   done
   return 0
@@ -5611,7 +6064,7 @@ extras_maintain() {
   [ "$DRY_RUN" = 0 ] || return 0
   if extras_current "$1" "${2:-}"; then return 0; fi
   ARCHIVE_VERSION="$1"; ARCHIVE_BUILD="$(clean_build "${2:-}")"
-  step "$(t s_extras)" extras_step
+  step "$(t "$(extras_key s_extras)")" extras_step
   extras_report
   return 0
 }
@@ -5619,7 +6072,7 @@ extras_maintain() {
 extras_report() {
   case "$EXTRAS_RESULT" in
     ok) say "  $BUL $(t s_extras_ok "$EXTRAS_COUNT" "$DATA_DIR")";;
-    none) say "  $BUL $(t w_extras_none)";;
+    none) say "  $BUL $(t "$(extras_key w_extras_none)")";;
     failed) say "  $BUL $(t w_extras_todo "sudo bash install.sh --extras-only")";;
   esac
   return 0
@@ -5638,7 +6091,7 @@ cmd_extras() {
     fi
   else RESOLVED_VERSION=local; fi
   NO_EXTRAS=0
-  step "$(t s_extras)" extras_step
+  step "$(t "$(extras_key s_extras)")" extras_step
   extras_report
   [ "$EXTRAS_RESULT" = ok ]
 }
@@ -6062,7 +6515,7 @@ copy_safe() {
   local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
   [ -e "$src" ] || [ -L "$src" ] || return 1
   dir="$(dirname -- "$src")"
-  m1="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
   IFS='|' read -r type uid nlink mode size _ <<<"$m1"
   case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
   [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
@@ -6072,7 +6525,7 @@ copy_safe() {
   else
     _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
   fi
-  m2="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
   if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
   return 0
 }
@@ -6188,7 +6641,7 @@ case "${1:-request}" in
     # from here on the console is waiting for an outcome: whatever stops this script, on_exit writes it
     TOOK=1; S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"
     if [ "$trc" -eq 0 ]; then S_JOB="$(req_get JOB)"; valid_job "$S_JOB" || S_JOB=""; fi
-    if [ "$trc" -ne 0 ]; then S_JOB=""; fail "invalid update request"; fi
+    if [ "$trc" -ne 0 ]; then S_JOB=""; fail "invalid update request: the file was refused (it must be a plain file owned by the owner of the data directory, not writable by anyone else, 4 KiB at most)"; fi
     # legacy request (protocol 1): one line holding the version
     if grep -q '=' "$priv"; then
       comp="$(req_get COMPONENT)"; chan="$(req_get CHANNEL)"; ver="$(req_get VERSION)"; dg="$(req_get ALLOW_DOWNGRADE)"; job="$(req_get JOB)"
@@ -6264,7 +6717,8 @@ TW_UPGRADE_TPL
 #                                               open ports (installer, root). --dp-udp is HTTP/3 (QUIC): the UDP port of the HTTPS listener, only
 #                                               when firewall.conf records it (DP_UDP_PORTS, written only when HTTP/3 is on); `none` closes the
 #                                               UDP rules this helper added
-# toutwaf-firewall apply                        (root; toutwaf-firewall.service) perform @DATA_DIR@/firewall-request
+# toutwaf-firewall apply                        (root; toutwaf-firewall.service) perform @DATA_DIR@/firewall-request (ACTION open, status or
+#                                               revoke: take back one data-plane API rule this helper added, from one source)
 # toutwaf-firewall close                        remove every rule this helper added (uninstall)
 # toutwaf-firewall print                        print the exact commands for this host
 #
@@ -6314,7 +6768,7 @@ copy_safe() {
   local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
   [ -e "$src" ] || [ -L "$src" ] || return 1
   dir="$(dirname -- "$src")"
-  m1="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
   IFS='|' read -r type uid nlink mode size _ <<<"$m1"
   case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
   [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
@@ -6324,7 +6778,7 @@ copy_safe() {
   else
     _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
   fi
-  m2="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
   if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
   return 0
 }
@@ -6542,6 +6996,31 @@ do_open() {   # dp-ports console cfrom agent afrom dp-udp-ports   (already synta
 
 do_status() { detect; scan_open; write_status ok "${1:-scan}"; }
 
+# revoke: take back ONE rule this helper added (data-plane API port, one source), the console's "remove" of a server opened automatically.
+# Only a rule remembered in $MANAGED is removed: a rule the owner added by hand is never touched.
+do_revoke() {   # agent afrom
+  local ag="$1" afrom="$2" rule key
+  load_conf
+  [ -n "$ag" ] && [ "$ag" = "$CONF_AGENT" ] || { write_status error "port $ag is not the data-plane API port recorded in firewall.conf"; return 1; }
+  [ -n "$afrom" ] || { write_status error "a source network is required"; return 1; }
+  detect
+  case "$BACKEND" in
+    firewalld)
+      rule="$(fwd_rich "$ag" "$afrom")"
+      if managed_has "firewalld rich $rule"; then
+        firewall-cmd --permanent --remove-rich-rule="$rule" >/dev/null 2>&1
+        firewall-cmd --reload >/dev/null || { scan_open; write_status error "firewalld refused to reload"; return 1; }
+        managed_del "firewalld rich $rule"
+      fi;;
+    ufw)
+      key="allow proto tcp from $afrom to any port $ag"
+      if managed_has "ufw $key"; then ufw --force delete allow proto tcp from "$afrom" to any port "$ag" >/dev/null 2>&1; managed_del "ufw $key"; fi;;
+    nftables|iptables) scan_open; write_status unmanaged "$BACKEND is not managed by ToutWAF: remove the rule by hand"; return 2;;
+  esac
+  scan_open
+  write_status ok "rule removed"
+}
+
 parse_open_args() {   # sets A_DP A_DPU A_CON A_CFROM A_AG A_AFROM from "$@"; returns 1 on invalid input
   A_DP=""; A_DPU=""; A_CON=""; A_CFROM=""; A_AG=""; A_AFROM=""
   while [ $# -gt 0 ]; do
@@ -6596,6 +7075,10 @@ case "${1:-}" in
         [ -z "$ag" ] || args+=(--agent "$ag"); [ -z "$af" ] || args+=(--agent-from "$af")
         if ! parse_open_args "${args[@]}"; then detect; scan_open; write_status error "invalid firewall request"; exit 1; fi
         do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM" "$A_DPU"; rc=$?; [ "$rc" -eq 2 ] && rc=0; exit "$rc";;
+      revoke)
+        ag="$(rq AGENT_PORT)"; af="$(rq AGENT_FROM)"
+        { valid_port "$ag" && valid_src "$af"; } || { scan_open; write_status error "invalid firewall request"; exit 1; }
+        do_revoke "$ag" "$af"; rc=$?; [ "$rc" -eq 2 ] && rc=0; exit "$rc";;
       *) detect; scan_open; write_status error "unknown action"; exit 1;;
     esac;;
   close)
@@ -6679,7 +7162,7 @@ copy_safe() {
   local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
   [ -e "$src" ] || [ -L "$src" ] || return 1
   dir="$(dirname -- "$src")"
-  m1="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
   IFS='|' read -r type uid nlink mode size _ <<<"$m1"
   case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
   [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
@@ -6689,7 +7172,7 @@ copy_safe() {
   else
     _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
   fi
-  m2="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
   if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
   return 0
 }
@@ -7012,7 +7495,7 @@ copy_safe() {
   local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
   [ -e "$src" ] || [ -L "$src" ] || return 1
   dir="$(dirname -- "$src")"
-  m1="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
   IFS='|' read -r type uid nlink mode size _ <<<"$m1"
   case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
   [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
@@ -7022,7 +7505,7 @@ copy_safe() {
   else
     _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
   fi
-  m2="$(stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
   if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
   return 0
 }
@@ -7387,6 +7870,32 @@ Type=oneshot
 RemainAfterExit=yes
 # a failed load never stops the machine from booting or the control plane from starting
 ExecStart=-$BIN_DIR/toutwaf-fw boot
+TimeoutStartSec=1min
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    # builds again the network interfaces (VLAN, bridge, bond, addresses) a confirmed change recorded; installed, NOT enabled by the installer:
+    # the root helper enables it itself the first time a change of interfaces is confirmed (a machine that never used it is never touched at boot)
+    cat >"$sd/toutwaf-netif-boot.service" <<EOF
+[Unit]
+Description=ToutWAF firewall: build again the network interfaces (VLAN, bridge, bond, addresses) a confirmed change recorded
+ConditionPathExists=/var/lib/toutwaf-fw/netif-boot.json
+Before=network-pre.target
+Wants=network-pre.target
+DefaultDependencies=no
+After=local-fs.target systemd-udevd.service
+Conflicts=shutdown.target
+StartLimitIntervalSec=2min
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# a failed restore never stops the machine from booting; it is tried again when a card was not there yet
+ExecStart=-$BIN_DIR/toutwaf-fw netif-boot
+Restart=on-failure
+RestartSec=10
 TimeoutStartSec=1min
 
 [Install]
@@ -7792,7 +8301,76 @@ cp_wait_fail() {
 }
 # END cp-wait
 
+# BEGIN svc-diag (extracted by tests/svc-diag-test.sh: keep the markers)
+# svc_diag UNIT: a service did not become healthy after its (re)start. Prints (to the console AND the log, which the console shows the owner) what
+# the system says: the state, `systemctl status`, the journal, and, when the unit has an ExecStartPre (the data plane runs `check-config` first: the
+# "control process" of "Job for toutwaf-dp.service failed because the control process exited with error code"), that very command run by hand as the
+# service user with the unit's environment, with its output and status (and, for check-config only, the same as root: told apart a refused
+# configuration from a permission / SELinux / sandbox problem), the exact paths with their owners, modes and SELinux contexts, and the AVC
+# denials when SELinux enforces. Everything printed goes through diag_redact (tokens, passwords, keys). Never fails, never changes anything.
+diag_redact() {
+  sed -E \
+    -e 's/(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{8,}/\1 [redacted]/Ig' \
+    -e 's/([A-Za-z0-9_.-]*(token|secret|passw|apikey|api_key|api-key|enrol|signing_key|private_key|credential|authoriz)[A-Za-z0-9_.-]*"?[[:space:]]*[:=][[:space:]]*)("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:],;]+)/\1[redacted]/Ig' \
+    -e 's/(--?[a-z-]*(token|secret|password|passwd|key)[a-z-]*[= ])[^[:space:]]+/\1[redacted]/Ig' \
+    -e 's/\btw[a-z]{0,8}_[A-Za-z0-9_-]{12,}/[redacted]/g'
+}
+diag_line() { local IFS=' '; printf '%s\n' "$*" >>"${LOG:-/dev/null}" 2>/dev/null || true; { printf '    %s\n' "$*" >&3; } 2>/dev/null || true; return 0; }
+diag_out() { local l; diag_redact | cut -c1-300 | while IFS= read -r l; do diag_line "$l"; done; return 0; }
+# diag_cmd CMD...: the command, its output (the last DIAG_TAIL lines, 60 by default) and its exit status, secrets hidden
+diag_cmd() {
+  local rc=0 out IFS=' '
+  printf '$ %s\n' "$*" | diag_out
+  if have timeout; then out="$(timeout "${DIAG_TIMEOUT:-30}" "$@" 2>&1 </dev/null)" || rc=$?; else out="$("$@" 2>&1 </dev/null)" || rc=$?; fi
+  [ -z "$out" ] || printf '%s\n' "$out" | tail -n "${DIAG_TAIL:-60}" | diag_out
+  printf '(exit status %s)\n' "$rc" | diag_out
+  return 0
+}
+svc_diag() {
+  local unit="$1" user="" pre="" bin="" cfg="" w ev="" envs=() argv=() f
+  [ "${DRY_RUN:-0}" = 0 ] && [ "${HAS_SYSTEMD:-0}" = 1 ] || return 0
+  diag_line "---- $(t diag_head "$unit") ----"
+  diag_cmd systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainStatus -p NRestarts
+  DIAG_TAIL=25 diag_cmd systemctl status "$unit" --no-pager -l
+  diag_cmd journalctl -u "$unit" -n 40 --no-pager
+  user="$(systemctl show "$unit" -p User --value 2>/dev/null || true)"; [ -n "$user" ] || user="$SVC_USER"
+  pre="$(systemctl cat "$unit" 2>/dev/null | sed -n 's/^ExecStartPre=//p' | head -n1 || true)"
+  pre="${pre#"${pre%%[!-@+!:]*}"}"
+  ev="$(systemctl show "$unit" -p Environment --value 2>/dev/null || true)"
+  [ -z "$ev" ] || IFS=' ' read -r -a envs <<<"$ev"
+  if [ -n "$pre" ]; then
+    IFS=' ' read -r -a argv <<<"$pre"
+    bin="${argv[0]}"
+    for ((w = 1; w < ${#argv[@]}; w++)); do [ "${argv[w-1]}" != --config ] || cfg="${argv[w]}"; done
+    diag_line "ExecStartPre of the unit: $pre"
+    if have runuser; then diag_cmd runuser -u "$user" -- env "${envs[@]+"${envs[@]}"}" "${argv[@]}"
+    elif have sudo; then diag_cmd sudo -n -u "$user" env "${envs[@]+"${envs[@]}"}" "${argv[@]}"; fi
+    if [ "${argv[${#argv[@]} - 1]}" = check-config ]; then   # read-only: run once more as root, to tell a refused configuration from a permission / SELinux problem
+      diag_line "the same check-config as root (read-only): exit 0 here and an error above means permissions, SELinux or the unit's sandbox, not the configuration"
+      diag_cmd env "${envs[@]+"${envs[@]}"}" "${argv[@]}"
+    fi
+  fi
+  [ -n "$cfg" ] || cfg="$CONF_DIR/toutwaf-dp.yaml"
+  diag_line "files and permissions:"
+  [ -z "$bin" ] || diag_cmd ls -lZ "$bin"
+  diag_cmd ls -ldZ "$CONF_DIR" "$DATA_DIR" "$LOG_DIR"
+  diag_cmd ls -lZ "$cfg"
+  have namei && diag_cmd namei -l "$cfg"
+  if [ -r "$cfg" ] && [ "$unit" = toutwaf-dp ]; then diag_line "$cfg (secrets hidden):"; head -n 80 "$cfg" | diag_out; fi
+  if have getenforce && [ "$(getenforce 2>/dev/null)" = Enforcing ]; then
+    diag_line "$(t diag_sel)"
+    diag_cmd getenforce
+    if have ausearch; then DIAG_TAIL=15 diag_cmd ausearch -m avc,user_avc,selinux_err -ts recent
+    else diag_line "ausearch is missing (audit package): grep AVC /var/log/audit/audit.log | tail"; fi
+    if have restorecon; then f="$bin"; diag_cmd restorecon -nvR "$CONF_DIR" "$DATA_DIR" ${f:+"$f"}; fi
+  fi
+  diag_line "$(t diag_hint "$unit")"
+  return 0
+}
+# END svc-diag
+
 rollback_dp() {
+  svc_diag toutwaf-dp   # before anything is restarted: the journal and the status still say why the new version did not start
   warn "$(t w_rollback)"
   if [ -x "$BIN_DIR/toutwaf-dp.prev" ]; then
     mv -f "$BIN_DIR/toutwaf-dp.prev" "$BIN_DIR/toutwaf-dp"
@@ -7806,6 +8384,7 @@ rollback_dp() {
 }
 DB_BACKUP_DIR=""
 rollback_cp() {
+  svc_diag toutwaf-cp
   warn "$(t w_rollback)"
   systemctl stop toutwaf-cp 2>/dev/null || true
   if [ -x "$BIN_DIR/toutwaf-cp.prev" ]; then
@@ -8602,6 +9181,7 @@ start_services() {
       systemctl restart toutwaf-cp >>"$LOG" 2>&1 || true
       if ! wait_cp_healthy; then
         if [ "$ACTION" = update ]; then rollback_cp; fi
+        svc_diag toutwaf-cp
         warn "toutwaf-cp does not answer on :$CP_PORT yet (journalctl -u toutwaf-cp)"
       fi
     fi
@@ -8665,7 +9245,7 @@ do_install_flow() {
   fi
   step "$(t s_fetch "${RESOLVED_VERSION:-?}" "$ARCH")" obtain_binaries
   [ -z "$ARCHIVE_BUILD" ] || NEW_BUILD="$ARCHIVE_BUILD"
-  if want_cp && [ "$NO_EXTRAS" = 0 ]; then step "$(t s_extras)" obtain_extras; fi   # downloaded and checked now, installed with the programs (never fatal)
+  if want_cp && [ "$NO_EXTRAS" = 0 ]; then step "$(t "$(extras_key s_extras)")" obtain_extras; fi   # downloaded and checked now, installed with the programs (never fatal)
   if [ "$ACTION" = update ]; then
     local cur="" curb="" same=1 b
     if want_dp && [ "$INST_DP" = 1 ]; then cur="$(installed_version "$(p "$BIN_DIR/toutwaf-dp")")"; curb="$(inst_build "$(p "$BIN_DIR/toutwaf-dp")" "$cur")"; fi
@@ -8803,6 +9383,12 @@ if [ -z "$ACTION" ]; then
   if [ "$NARGS" -eq 0 ] && interactive; then menu; else ACTION=install; fi
 fi
 
+if [ "$RESTORE" = 1 ]; then   # a restore on a new machine: everything is checked now, before anything is changed, and nothing is ever asked
+  case "$ACTION" in install) ;; *) echo "error: --restore is an option of --install (a new, empty machine)" >&2; exit 2;; esac
+  case "$COMPONENT" in dp) echo "error: --restore needs the control plane (--component cp or all)" >&2; exit 2;; esac
+  BACKUP_CLIENT=1; ASSUME_YES=1
+  restore_validate || { printf 'error: %s\n' "$RESTORE_ERR" >&2; exit 2; }
+fi
 case "$ACTION" in
   checkenv) detect_installed; if [ "$INST_CP" = 1 ] || [ "$INST_DP" = 1 ]; then load_existing_ports; fi; rc=0; env_run_check || rc=$?; exit "$rc";;
   checkprereq) rc=0; prereq_run_check || rc=$?; exit "$rc";;
@@ -8816,6 +9402,9 @@ compat_gate          # unsupported system: stops here (exit 3) before anything i
 persist_log
 
 detect_installed
+if [ "$RESTORE" = 1 ] && [ "$INST_CP" = 1 ] && [ "$RESTORE_FORCE" = 0 ]; then
+  die "--restore is for a new, empty machine: ToutWAF is already installed here (--force-restore restores over it; the current data is kept in pre-restore-*)"
+fi
 if [ "$ACTION" = update ]; then
   [ "$INST_DP$INST_CP" != 00 ] || die "$(t not_installed)"
   component_from_installed          # an update refreshes what is installed, nothing else
@@ -8841,6 +9430,7 @@ prereq_gate          # disk space, DNS and clock, with the fix of each problem (
 sysupdate_run        # then the system packages (an installation or an update; TOUTWAF_SKIP_SYSUPDATE=1 skips it; a failure is a warning)
 if want_cp && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; then detect_public_ip; fi
 do_install_flow
+if [ "$RESTORE" = 1 ]; then restore_fresh; fi
 
 new_dp="$(installed_label "$(p "$BIN_DIR/toutwaf-dp")" 2>/dev/null || true)"; [ "$new_dp" != "?" ] || new_dp=""
 echo

@@ -89,6 +89,11 @@ Set-StrictMode -Version Latest
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 } catch { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 }
 
 $script:InstallerVersion = '2'
+# THE ANTIVIRUS SWITCH (ToutWAF Antivirus, Horizon). $false in version 0.5.7 (owner's decision of 2026-11-14: disabled everywhere, to be reworked): the installer does not look for the
+# antivirus programs (av-dist\toutwaf-av-*), does not create av-dist, ignores them when an extras file happens to carry them, and never fails without them. Set it to $true (with
+# controlplane/internal/avoffer, publisher/internal/pipeline/avoffer.go, docs/ANTIVIRUS-RETRAIT.md "2026-11-14") to bring them back; nothing else has to change.
+$script:AvOffered = $false
+function Get-ExtrasKey([string]$key) { if ($script:AvOffered) { return $key } else { return ($key + '_noav') } }   # the message of the extras: with the antivirus, or the Windows agent only
 $DefaultChannel = 'stable'   # the copy of this script published on the dev branch has: $DefaultChannel = 'dev'
 $script:Bound = $PSBoundParameters
 if (-not $InstallDir) { $InstallDir = if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'ToutWAF' } else { 'C:\Program Files\ToutWAF' } }
@@ -352,6 +357,11 @@ $script:Catalog = @{
         'su_nopm' = 'No supported package manager to update the system packages: skipped, the installation goes on.'
         'su_failed' = 'The update of the system packages failed (exit {0}); the installation goes on without it. Details: {1}. Fix: run the update yourself and read its error (broken repository? another package manager running?), or run this command again with TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = 'A restart of this server is needed to finish the system update (new kernel or libraries). ToutWAF never restarts it for you: do it when you can.'
+        'su_beat' = '\u2026 system update still running after {0} (last step: {1})'
+        'su_done' = 'System packages: update finished in {0}, {1} package(s) installed or updated.'
+        'diag_head' = '{0} did not become healthy: what the system says (secrets are hidden)'
+        'diag_hint' = 'Send this part of the log to the support, or the output of: journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux is enforcing: look for ''avc: denied'' below (a wrong label on the program, the configuration or the data folder); restorecon -nvR lists the wrong labels, restorecon -RFv fixes them.'
         'q_sysupdate' = 'Update the system packages first (recommended)?'
         'pr_disk_full' = 'Only {0} MB are free on {1} (at least {2} MB are needed): the installation could not finish.'
         'pr_disk_full_a' = 'Free some space (package cache: apt-get clean or dnf clean all; old logs: journalctl --vacuum-size=100M), then run this command again. To go on anyway: TOUTWAF_SKIP_PREREQ=1.'
@@ -424,6 +434,11 @@ $script:Catalog = @{
         'extras_other_release' = 'The published release ({0}) is not the installed one ({1}): the extras come with it. Run --update.'
         'st_extras_ok' = 'Extras: installed (Windows agent, antivirus programs)'
         'st_extras_none' = 'Extras missing: Windows and the antivirus are not offered. Run as root: {0}'
+        's_extras_noav' = 'Extras: Windows agent'
+        'w_extras_dl_noav' = 'The extras could not be downloaded ({0}). ToutWAF works without them, but this console will not offer Windows until they are installed.'
+        'w_extras_none_noav' = 'This release carries no extras: this console will not offer Windows.'
+        'st_extras_ok_noav' = 'Extras: installed (Windows agent)'
+        'st_extras_none_noav' = 'Extras missing: Windows is not offered. Run as root: {0}'
     }
     'fr' = @{
         'tagline' = 'Protection des applications web et des API'
@@ -651,6 +666,11 @@ $script:Catalog = @{
         'su_nopm' = 'Aucun gestionnaire de paquets pris en charge pour mettre le syst\u00e8me \u00e0 jour : \u00e9tape ignor\u00e9e, l''installation continue.'
         'su_failed' = 'La mise \u00e0 jour des paquets syst\u00e8me a \u00e9chou\u00e9 (code {0}) ; l''installation continue sans elle. D\u00e9tails : {1}. Correction : lancez la mise \u00e0 jour vous-m\u00eame et lisez son erreur (d\u00e9p\u00f4t cass\u00e9 ? un autre gestionnaire de paquets en cours ?), ou relancez cette commande avec TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = 'Un red\u00e9marrage de ce serveur est n\u00e9cessaire pour terminer la mise \u00e0 jour du syst\u00e8me (nouveau noyau ou nouvelles biblioth\u00e8ques). ToutWAF ne le red\u00e9marre jamais \u00e0 votre place : faites-le d\u00e8s que possible.'
+        'su_beat' = '\u2026 mise \u00e0 jour en cours depuis {0} (derni\u00e8re \u00e9tape : {1})'
+        'su_done' = 'Paquets syst\u00e8me : mise \u00e0 jour termin\u00e9e en {0}, {1} paquet(s) install\u00e9(s) ou mis \u00e0 jour.'
+        'diag_head' = '{0} n''est pas devenu sain : ce que dit le syst\u00e8me (les secrets sont masqu\u00e9s)'
+        'diag_hint' = 'Transmettez cette partie du journal au support, ou la sortie de : journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux est en mode enforcing : cherchez ''avc: denied'' ci-dessous (mauvaise \u00e9tiquette sur le programme, la configuration ou le dossier de donn\u00e9es) ; restorecon -nvR liste les mauvaises \u00e9tiquettes, restorecon -RFv les corrige.'
         'q_sysupdate' = 'Mettre d''abord \u00e0 jour les paquets syst\u00e8me (recommand\u00e9) ?'
         'pr_disk_full' = 'Seulement {0} Mo sont libres sur {1} (il en faut au moins {2} Mo) : l''installation ne pourrait pas se terminer.'
         'pr_disk_full_a' = 'Lib\u00e9rez de la place (cache des paquets : apt-get clean ou dnf clean all ; anciens journaux : journalctl --vacuum-size=100M), puis relancez cette commande. Pour continuer malgr\u00e9 tout : TOUTWAF_SKIP_PREREQ=1.'
@@ -723,6 +743,11 @@ $script:Catalog = @{
         'extras_other_release' = 'La version publi\u00e9e ({0}) n''est pas celle qui est install\u00e9e ({1}) : les extras viennent avec elle. Lancez --update.'
         'st_extras_ok' = 'Extras : install\u00e9s (agent Windows, programmes de l''antivirus)'
         'st_extras_none' = 'Extras absents : Windows et l''antivirus ne sont pas propos\u00e9s. Lancez en root : {0}'
+        's_extras_noav' = 'Extras : agent Windows'
+        'w_extras_dl_noav' = 'Les extras n''ont pas pu \u00eatre t\u00e9l\u00e9charg\u00e9s ({0}). ToutWAF fonctionne sans eux, mais cette console ne proposera pas Windows tant qu''ils ne sont pas install\u00e9s.'
+        'w_extras_none_noav' = 'Cette version ne contient pas d''extras : cette console ne proposera pas Windows.'
+        'st_extras_ok_noav' = 'Extras : install\u00e9s (agent Windows)'
+        'st_extras_none_noav' = 'Extras absents : Windows n''est pas propos\u00e9. Lancez en root : {0}'
     }
     'es' = @{
         'tagline' = 'Protecci\u00f3n de aplicaciones web y API'
@@ -950,6 +975,11 @@ $script:Catalog = @{
         'su_nopm' = 'No hay un gestor de paquetes compatible para actualizar el sistema: se omite y la instalaci\u00f3n contin\u00faa.'
         'su_failed' = 'La actualizaci\u00f3n de los paquetes del sistema ha fallado (c\u00f3digo {0}); la instalaci\u00f3n contin\u00faa sin ella. Detalles: {1}. Soluci\u00f3n: ejecute usted mismo la actualizaci\u00f3n y lea su error (\u00bfrepositorio roto? \u00bfotro gestor de paquetes en ejecuci\u00f3n?), o vuelva a ejecutar este comando con TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = 'Hace falta reiniciar este servidor para terminar la actualizaci\u00f3n del sistema (nuevo kernel o bibliotecas). ToutWAF nunca lo reinicia por usted: h\u00e1galo cuando pueda.'
+        'su_beat' = '\u2026 actualizaci\u00f3n en curso desde hace {0} (\u00faltimo paso: {1})'
+        'su_done' = 'Paquetes del sistema: actualizaci\u00f3n terminada en {0}, {1} paquete(s) instalado(s) o actualizado(s).'
+        'diag_head' = '{0} no lleg\u00f3 a estar sano: lo que dice el sistema (los secretos se ocultan)'
+        'diag_hint' = 'Env\u00ede esta parte del registro al soporte, o la salida de: journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux est\u00e1 en modo enforcing: busque ''avc: denied'' m\u00e1s abajo (etiqueta incorrecta en el programa, la configuraci\u00f3n o la carpeta de datos); restorecon -nvR lista las etiquetas err\u00f3neas y restorecon -RFv las corrige.'
         'q_sysupdate' = '\u00bfActualizar primero los paquetes del sistema (recomendado)?'
         'pr_disk_full' = 'Solo quedan {0} MB libres en {1} (se necesitan al menos {2} MB): la instalaci\u00f3n no podr\u00eda terminar.'
         'pr_disk_full_a' = 'Libere espacio (cach\u00e9 de paquetes: apt-get clean o dnf clean all; registros antiguos: journalctl --vacuum-size=100M) y vuelva a ejecutar este comando. Para continuar de todos modos: TOUTWAF_SKIP_PREREQ=1.'
@@ -1022,6 +1052,11 @@ $script:Catalog = @{
         'extras_other_release' = 'La versi\u00f3n publicada ({0}) no es la instalada ({1}): los extras vienen con ella. Ejecute --update.'
         'st_extras_ok' = 'Extras: instalados (agente de Windows, programas del antivirus)'
         'st_extras_none' = 'Extras ausentes: Windows y el antivirus no se ofrecen. Ejecute como root: {0}'
+        's_extras_noav' = 'Extras: agente de Windows'
+        'w_extras_dl_noav' = 'No se pudieron descargar los extras ({0}). ToutWAF funciona sin ellos, pero esta consola no ofrecer\u00e1 Windows hasta que se instalen.'
+        'w_extras_none_noav' = 'Esta versi\u00f3n no incluye extras: esta consola no ofrecer\u00e1 Windows.'
+        'st_extras_ok_noav' = 'Extras: instalados (agente de Windows)'
+        'st_extras_none_noav' = 'Extras ausentes: Windows no se ofrece. Ejecute como root: {0}'
     }
     'de' = @{
         'tagline' = 'Schutz f\u00fcr Webanwendungen und APIs'
@@ -1249,6 +1284,11 @@ $script:Catalog = @{
         'su_nopm' = 'Kein unterst\u00fctzter Paketmanager f\u00fcr die Systemaktualisierung: \u00fcbersprungen, die Installation l\u00e4uft weiter.'
         'su_failed' = 'Die Aktualisierung der Systempakete ist fehlgeschlagen (Code {0}); die Installation l\u00e4uft ohne sie weiter. Details: {1}. Abhilfe: F\u00fchren Sie die Aktualisierung selbst aus und lesen Sie die Fehlermeldung (defektes Repository? l\u00e4uft ein anderer Paketmanager?), oder starten Sie diesen Befehl erneut mit TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = 'Zum Abschluss der Systemaktualisierung ist ein Neustart dieses Servers n\u00f6tig (neuer Kernel oder neue Bibliotheken). ToutWAF startet ihn nie f\u00fcr Sie neu: Tun Sie es, wenn es passt.'
+        'su_beat' = '\u2026 Aktualisierung l\u00e4uft seit {0} (letzter Schritt: {1})'
+        'su_done' = 'Systempakete: Aktualisierung in {0} abgeschlossen, {1} Paket(e) installiert oder aktualisiert.'
+        'diag_head' = '{0} wurde nicht gesund: was das System sagt (Geheimnisse sind ausgeblendet)'
+        'diag_hint' = 'Senden Sie diesen Teil des Protokolls an den Support, oder die Ausgabe von: journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux ist im Enforcing-Modus: Suchen Sie unten nach ''avc: denied'' (falsches Label am Programm, an der Konfiguration oder am Datenordner); restorecon -nvR listet falsche Labels, restorecon -RFv korrigiert sie.'
         'q_sysupdate' = 'Zuerst die Systempakete aktualisieren (empfohlen)?'
         'pr_disk_full' = 'Nur {0} MB sind frei auf {1} (mindestens {2} MB werden ben\u00f6tigt): Die Installation k\u00f6nnte nicht abgeschlossen werden.'
         'pr_disk_full_a' = 'Schaffen Sie Platz (Paket-Cache: apt-get clean oder dnf clean all; alte Logs: journalctl --vacuum-size=100M) und f\u00fchren Sie diesen Befehl erneut aus. Trotzdem fortfahren: TOUTWAF_SKIP_PREREQ=1.'
@@ -1321,6 +1361,11 @@ $script:Catalog = @{
         'extras_other_release' = 'Die ver\u00f6ffentlichte Version ({0}) ist nicht die installierte ({1}): die Extras kommen mit ihr. --update ausf\u00fchren.'
         'st_extras_ok' = 'Extras: installiert (Windows-Agent, Antivirus-Programme)'
         'st_extras_none' = 'Extras fehlen: Windows und der Virenschutz werden nicht angeboten. Als root ausf\u00fchren: {0}'
+        's_extras_noav' = 'Extras: Windows-Agent'
+        'w_extras_dl_noav' = 'Die Extras konnten nicht heruntergeladen werden ({0}). ToutWAF l\u00e4uft auch ohne sie, doch diese Konsole bietet Windows nicht an, bis sie installiert sind.'
+        'w_extras_none_noav' = 'Diese Version enth\u00e4lt keine Extras: diese Konsole bietet Windows nicht an.'
+        'st_extras_ok_noav' = 'Extras: installiert (Windows-Agent)'
+        'st_extras_none_noav' = 'Extras fehlen: Windows wird nicht angeboten. Als root ausf\u00fchren: {0}'
     }
     'it' = @{
         'tagline' = 'Protezione di applicazioni web e API'
@@ -1548,6 +1593,11 @@ $script:Catalog = @{
         'su_nopm' = 'Nessun gestore di pacchetti supportato per aggiornare il sistema: saltato, l''installazione continua.'
         'su_failed' = 'L''aggiornamento dei pacchetti di sistema non \u00e8 riuscito (codice {0}); l''installazione continua senza. Dettagli: {1}. Soluzione: esegui tu l''aggiornamento e leggi l''errore (repository guasto? un altro gestore di pacchetti in esecuzione?), oppure rilancia questo comando con TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = 'Serve riavviare questo server per completare l''aggiornamento del sistema (nuovo kernel o librerie). ToutWAF non lo riavvia mai al posto tuo: fallo quando puoi.'
+        'su_beat' = '\u2026 aggiornamento in corso da {0} (ultimo passaggio: {1})'
+        'su_done' = 'Pacchetti di sistema: aggiornamento completato in {0}, {1} pacchetto/i installato/i o aggiornato/i.'
+        'diag_head' = '{0} non \u00e8 diventato sano: cosa dice il sistema (i segreti sono nascosti)'
+        'diag_hint' = 'Invia questa parte del registro al supporto, oppure l''output di: journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux \u00e8 in modalit\u00e0 enforcing: cerca ''avc: denied'' qui sotto (etichetta errata su programma, configurazione o cartella dati); restorecon -nvR elenca le etichette errate, restorecon -RFv le corregge.'
         'q_sysupdate' = 'Aggiornare prima i pacchetti di sistema (consigliato)?'
         'pr_disk_full' = 'Solo {0} MB liberi su {1} (ne servono almeno {2} MB): l''installazione non potrebbe concludersi.'
         'pr_disk_full_a' = 'Libera spazio (cache dei pacchetti: apt-get clean o dnf clean all; vecchi log: journalctl --vacuum-size=100M), poi rilancia questo comando. Per proseguire comunque: TOUTWAF_SKIP_PREREQ=1.'
@@ -1620,6 +1670,11 @@ $script:Catalog = @{
         'extras_other_release' = 'La versione pubblicata ({0}) non \u00e8 quella installata ({1}): gli extra arrivano con essa. Eseguire --update.'
         'st_extras_ok' = 'Extra: installati (agente Windows, programmi dell''antivirus)'
         'st_extras_none' = 'Extra mancanti: Windows e l''antivirus non sono proposti. Eseguire come root: {0}'
+        's_extras_noav' = 'Extra: agente Windows'
+        'w_extras_dl_noav' = 'Impossibile scaricare gli extra ({0}). ToutWAF funziona senza, ma questa console non proporr\u00e0 Windows finch\u00e9 non saranno installati.'
+        'w_extras_none_noav' = 'Questa versione non contiene extra: questa console non proporr\u00e0 Windows.'
+        'st_extras_ok_noav' = 'Extra: installati (agente Windows)'
+        'st_extras_none_noav' = 'Extra mancanti: Windows non \u00e8 proposto. Eseguire come root: {0}'
     }
     'pt' = @{
         'tagline' = 'Prote\u00e7\u00e3o de aplica\u00e7\u00f5es web e APIs'
@@ -1847,6 +1902,11 @@ $script:Catalog = @{
         'su_nopm' = 'Nenhum gestor de pacotes suportado para atualizar o sistema: ignorado, a instala\u00e7\u00e3o continua.'
         'su_failed' = 'A atualiza\u00e7\u00e3o dos pacotes do sistema falhou (c\u00f3digo {0}); a instala\u00e7\u00e3o continua sem ela. Detalhes: {1}. Solu\u00e7\u00e3o: execute a atualiza\u00e7\u00e3o e leia o erro (reposit\u00f3rio danificado? outro gestor de pacotes em execu\u00e7\u00e3o?), ou volte a executar este comando com TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = '\u00c9 preciso reiniciar este servidor para concluir a atualiza\u00e7\u00e3o do sistema (novo kernel ou bibliotecas). O ToutWAF nunca o reinicia por si: fa\u00e7a-o quando puder.'
+        'su_beat' = '\u2026 atualiza\u00e7\u00e3o em curso h\u00e1 {0} (\u00faltimo passo: {1})'
+        'su_done' = 'Pacotes do sistema: atualiza\u00e7\u00e3o conclu\u00edda em {0}, {1} pacote(s) instalado(s) ou atualizado(s).'
+        'diag_head' = '{0} n\u00e3o ficou saud\u00e1vel: o que o sistema diz (os segredos est\u00e3o ocultos)'
+        'diag_hint' = 'Envie esta parte do registo ao suporte, ou o resultado de: journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'O SELinux est\u00e1 em modo enforcing: procure ''avc: denied'' abaixo (etiqueta errada no programa, na configura\u00e7\u00e3o ou na pasta de dados); restorecon -nvR lista as etiquetas erradas e restorecon -RFv corrige-as.'
         'q_sysupdate' = 'Atualizar primeiro os pacotes do sistema (recomendado)?'
         'pr_disk_full' = 'Apenas {0} MB livres em {1} (s\u00e3o precisos pelo menos {2} MB): a instala\u00e7\u00e3o n\u00e3o poderia terminar.'
         'pr_disk_full_a' = 'Liberte espa\u00e7o (cache de pacotes: apt-get clean ou dnf clean all; registos antigos: journalctl --vacuum-size=100M) e volte a executar este comando. Para continuar mesmo assim: TOUTWAF_SKIP_PREREQ=1.'
@@ -1919,6 +1979,11 @@ $script:Catalog = @{
         'extras_other_release' = 'A vers\u00e3o publicada ({0}) n\u00e3o \u00e9 a instalada ({1}): os extras v\u00eam com ela. Execute --update.'
         'st_extras_ok' = 'Extras: instalados (agente Windows, programas do antiv\u00edrus)'
         'st_extras_none' = 'Extras em falta: o Windows e o antiv\u00edrus n\u00e3o s\u00e3o oferecidos. Execute como root: {0}'
+        's_extras_noav' = 'Extras: agente Windows'
+        'w_extras_dl_noav' = 'N\u00e3o foi poss\u00edvel transferir os extras ({0}). O ToutWAF funciona sem eles, mas esta consola n\u00e3o oferecer\u00e1 o Windows enquanto n\u00e3o estiverem instalados.'
+        'w_extras_none_noav' = 'Esta vers\u00e3o n\u00e3o inclui extras: esta consola n\u00e3o oferecer\u00e1 o Windows.'
+        'st_extras_ok_noav' = 'Extras: instalados (agente Windows)'
+        'st_extras_none_noav' = 'Extras em falta: o Windows n\u00e3o \u00e9 oferecido. Execute como root: {0}'
     }
     'nl' = @{
         'tagline' = 'Bescherming van webapplicaties en API''s'
@@ -2146,6 +2211,11 @@ $script:Catalog = @{
         'su_nopm' = 'Geen ondersteunde pakketbeheerder om het systeem bij te werken: overgeslagen, de installatie gaat door.'
         'su_failed' = 'Het bijwerken van de systeempakketten is mislukt (code {0}); de installatie gaat zonder verder. Details: {1}. Oplossing: voer de update zelf uit en lees de foutmelding (kapotte repository? draait er een andere pakketbeheerder?), of voer dit commando opnieuw uit met TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = 'Een herstart van deze server is nodig om de systeemupdate af te ronden (nieuwe kernel of bibliotheken). ToutWAF herstart hem nooit voor u: doe het wanneer het kan.'
+        'su_beat' = '\u2026 update loopt al {0} (laatste stap: {1})'
+        'su_done' = 'Systeempakketten: update voltooid in {0}, {1} pakket(ten) ge\u00efnstalleerd of bijgewerkt.'
+        'diag_head' = '{0} werd niet gezond: wat het systeem zegt (geheimen zijn verborgen)'
+        'diag_hint' = 'Stuur dit deel van het logboek naar de support, of de uitvoer van: journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux staat op enforcing: zoek hieronder naar ''avc: denied'' (verkeerd label op het programma, de configuratie of de gegevensmap); restorecon -nvR toont de foute labels, restorecon -RFv herstelt ze.'
         'q_sysupdate' = 'Eerst de systeempakketten bijwerken (aanbevolen)?'
         'pr_disk_full' = 'Slechts {0} MB vrij op {1} (minstens {2} MB nodig): de installatie zou niet kunnen worden voltooid.'
         'pr_disk_full_a' = 'Maak ruimte vrij (pakketcache: apt-get clean of dnf clean all; oude logs: journalctl --vacuum-size=100M) en voer dit commando opnieuw uit. Toch doorgaan: TOUTWAF_SKIP_PREREQ=1.'
@@ -2218,6 +2288,11 @@ $script:Catalog = @{
         'extras_other_release' = 'De gepubliceerde versie ({0}) is niet de ge\u00efnstalleerde ({1}): de extra''s komen daarmee mee. Voer --update uit.'
         'st_extras_ok' = 'Extra''s: ge\u00efnstalleerd (Windows-agent, antivirusprogramma''s)'
         'st_extras_none' = 'Extra''s ontbreken: Windows en antivirus worden niet aangeboden. Voer uit als root: {0}'
+        's_extras_noav' = 'Extra''s: Windows-agent'
+        'w_extras_dl_noav' = 'De extra''s konden niet worden gedownload ({0}). ToutWAF werkt zonder, maar deze console biedt Windows niet aan zolang ze niet ge\u00efnstalleerd zijn.'
+        'w_extras_none_noav' = 'Deze versie bevat geen extra''s: deze console biedt Windows niet aan.'
+        'st_extras_ok_noav' = 'Extra''s: ge\u00efnstalleerd (Windows-agent)'
+        'st_extras_none_noav' = 'Extra''s ontbreken: Windows wordt niet aangeboden. Voer uit als root: {0}'
     }
     'ru' = @{
         'tagline' = '\u0417\u0430\u0449\u0438\u0442\u0430 \u0432\u0435\u0431-\u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0439 \u0438 API'
@@ -2445,6 +2520,11 @@ $script:Catalog = @{
         'su_nopm' = '\u041d\u0435\u0442 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043c\u043e\u0433\u043e \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u0430 \u043f\u0430\u043a\u0435\u0442\u043e\u0432 \u0434\u043b\u044f \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u044b: \u0448\u0430\u0433 \u043f\u0440\u043e\u043f\u0443\u0449\u0435\u043d, \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0435\u0442\u0441\u044f.'
         'su_failed' = '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043f\u0430\u043a\u0435\u0442\u044b (\u043a\u043e\u0434 {0}); \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0435\u0442\u0441\u044f \u0431\u0435\u0437 \u044d\u0442\u043e\u0433\u043e. \u041f\u043e\u0434\u0440\u043e\u0431\u043d\u043e\u0441\u0442\u0438: {1}. \u0427\u0442\u043e \u0434\u0435\u043b\u0430\u0442\u044c: \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0432\u0440\u0443\u0447\u043d\u0443\u044e \u0438 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0439\u0442\u0435 \u043e\u0448\u0438\u0431\u043a\u0443 (\u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0451\u043d \u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u0439? \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u0434\u0440\u0443\u0433\u043e\u0439 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440 \u043f\u0430\u043a\u0435\u0442\u043e\u0432?) \u043b\u0438\u0431\u043e \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443 \u0441 TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = '\u0414\u043b\u044f \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0438\u044f \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u044b \u043d\u0443\u0436\u043d\u043e \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u0441\u0435\u0440\u0432\u0435\u0440 (\u043d\u043e\u0432\u043e\u0435 \u044f\u0434\u0440\u043e \u0438\u043b\u0438 \u0431\u0438\u0431\u043b\u0438\u043e\u0442\u0435\u043a\u0438). ToutWAF \u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u0442 \u0435\u0433\u043e \u0437\u0430 \u0432\u0430\u0441: \u0441\u0434\u0435\u043b\u0430\u0439\u0442\u0435 \u044d\u0442\u043e, \u043a\u043e\u0433\u0434\u0430 \u0441\u043c\u043e\u0436\u0435\u0442\u0435.'
+        'su_beat' = '\u2026 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0438\u0434\u0451\u0442 \u0443\u0436\u0435 {0} (\u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 \u0448\u0430\u0433: {1})'
+        'su_done' = '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043f\u0430\u043a\u0435\u0442\u044b: \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u043e \u0437\u0430 {0}, \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u0438\u043b\u0438 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u0430\u043a\u0435\u0442\u043e\u0432: {1}.'
+        'diag_head' = '{0} \u043d\u0435 \u043f\u0435\u0440\u0435\u0448\u0451\u043b \u0432 \u0440\u0430\u0431\u043e\u0447\u0435\u0435 \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u0435: \u0447\u0442\u043e \u0441\u043e\u043e\u0431\u0449\u0430\u0435\u0442 \u0441\u0438\u0441\u0442\u0435\u043c\u0430 (\u0441\u0435\u043a\u0440\u0435\u0442\u044b \u0441\u043a\u0440\u044b\u0442\u044b)'
+        'diag_hint' = '\u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u044d\u0442\u0443 \u0447\u0430\u0441\u0442\u044c \u0436\u0443\u0440\u043d\u0430\u043b\u0430 \u0432 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0443 \u0438\u043b\u0438 \u0432\u044b\u0432\u043e\u0434 \u043a\u043e\u043c\u0430\u043d\u0434\u044b: journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux \u0432 \u0440\u0435\u0436\u0438\u043c\u0435 enforcing: \u0438\u0449\u0438\u0442\u0435 \u043d\u0438\u0436\u0435 ''avc: denied'' (\u043d\u0435\u0432\u0435\u0440\u043d\u0430\u044f \u043c\u0435\u0442\u043a\u0430 \u0443 \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b, \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 \u0438\u043b\u0438 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430 \u0434\u0430\u043d\u043d\u044b\u0445); restorecon -nvR \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u043d\u0435\u0432\u0435\u0440\u043d\u044b\u0435 \u043c\u0435\u0442\u043a\u0438, restorecon -RFv \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u0442 \u0438\u0445.'
         'q_sysupdate' = '\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043f\u0430\u043a\u0435\u0442\u044b (\u0440\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u0435\u0442\u0441\u044f)?'
         'pr_disk_full' = '\u0421\u0432\u043e\u0431\u043e\u0434\u043d\u043e \u0442\u043e\u043b\u044c\u043a\u043e {0} \u041c\u0411 \u043d\u0430 {1} (\u043d\u0443\u0436\u043d\u043e \u043d\u0435 \u043c\u0435\u043d\u0435\u0435 {2} \u041c\u0411): \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043d\u0435 \u0441\u043c\u043e\u0436\u0435\u0442 \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044c\u0441\u044f.'
         'pr_disk_full_a' = '\u041e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u043c\u0435\u0441\u0442\u043e (\u043a\u044d\u0448 \u043f\u0430\u043a\u0435\u0442\u043e\u0432: apt-get clean \u0438\u043b\u0438 dnf clean all; \u0441\u0442\u0430\u0440\u044b\u0435 \u0436\u0443\u0440\u043d\u0430\u043b\u044b: journalctl --vacuum-size=100M) \u0438 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u044d\u0442\u0443 \u043a\u043e\u043c\u0430\u043d\u0434\u0443. \u0427\u0442\u043e\u0431\u044b \u0432\u0441\u0451 \u0440\u0430\u0432\u043d\u043e \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c: TOUTWAF_SKIP_PREREQ=1.'
@@ -2517,6 +2597,11 @@ $script:Catalog = @{
         'extras_other_release' = '\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u0440\u0435\u043b\u0438\u0437 ({0}) \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442 \u0441 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u044b\u043c ({1}): \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u0438\u0434\u0443\u0442 \u0432\u043c\u0435\u0441\u0442\u0435 \u0441 \u043d\u0438\u043c. \u0412\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 --update.'
         'st_extras_ok' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f: \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b (\u0430\u0433\u0435\u043d\u0442 \u0434\u043b\u044f Windows, \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b \u0430\u043d\u0442\u0438\u0432\u0438\u0440\u0443\u0441\u0430)'
         'st_extras_none' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044e\u0442: Windows \u0438 \u0430\u043d\u0442\u0438\u0432\u0438\u0440\u0443\u0441 \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u0430\u0433\u0430\u044e\u0442\u0441\u044f. \u0412\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u043e\u0442 root: {0}'
+        's_extras_noav' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f: \u0430\u0433\u0435\u043d\u0442 \u0434\u043b\u044f Windows'
+        'w_extras_dl_noav' = '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f ({0}). ToutWAF \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u0431\u0435\u0437 \u043d\u0438\u0445, \u043d\u043e \u044d\u0442\u0430 \u043a\u043e\u043d\u0441\u043e\u043b\u044c \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0438\u0442 Windows, \u043f\u043e\u043a\u0430 \u043e\u043d\u0438 \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b.'
+        'w_extras_none_noav' = '\u0412 \u044d\u0442\u043e\u043c \u0440\u0435\u043b\u0438\u0437\u0435 \u043d\u0435\u0442 \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0439: \u044d\u0442\u0430 \u043a\u043e\u043d\u0441\u043e\u043b\u044c \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0438\u0442 Windows.'
+        'st_extras_ok_noav' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f: \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b (\u0430\u0433\u0435\u043d\u0442 \u0434\u043b\u044f Windows)'
+        'st_extras_none_noav' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044e\u0442: Windows \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u0430\u0433\u0430\u0435\u0442\u0441\u044f. \u0412\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u043e\u0442 root: {0}'
     }
     'zh' = @{
         'tagline' = 'Web \u5e94\u7528\u4e0e API \u9632\u62a4'
@@ -2744,6 +2829,11 @@ $script:Catalog = @{
         'su_nopm' = '\u6ca1\u6709\u53d7\u652f\u6301\u7684\u5305\u7ba1\u7406\u5668\u53ef\u7528\u4e8e\u66f4\u65b0\u7cfb\u7edf\uff1a\u5df2\u8df3\u8fc7\uff0c\u5b89\u88c5\u7ee7\u7eed\u3002'
         'su_failed' = '\u7cfb\u7edf\u8f6f\u4ef6\u5305\u66f4\u65b0\u5931\u8d25\uff08\u9000\u51fa\u7801 {0}\uff09\uff1b\u5b89\u88c5\u5c06\u5728\u4e0d\u66f4\u65b0\u7684\u60c5\u51b5\u4e0b\u7ee7\u7eed\u3002\u8be6\u60c5\uff1a{1}\u3002\u5904\u7406\u65b9\u6cd5\uff1a\u8bf7\u81ea\u884c\u8fd0\u884c\u66f4\u65b0\u5e76\u67e5\u770b\u9519\u8bef\uff08\u8f6f\u4ef6\u6e90\u635f\u574f\uff1f\u53e6\u4e00\u4e2a\u5305\u7ba1\u7406\u5668\u6b63\u5728\u8fd0\u884c\uff1f\uff09\uff0c\u6216\u52a0\u4e0a TOUTWAF_SKIP_SYSUPDATE=1 \u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002'
         'su_reboot' = '\u9700\u8981\u91cd\u542f\u6b64\u670d\u52a1\u5668\u624d\u80fd\u5b8c\u6210\u7cfb\u7edf\u66f4\u65b0\uff08\u65b0\u5185\u6838\u6216\u5e93\uff09\u3002ToutWAF \u7edd\u4e0d\u4f1a\u66ff\u60a8\u91cd\u542f\uff1a\u8bf7\u5728\u65b9\u4fbf\u65f6\u81ea\u884c\u91cd\u542f\u3002'
+        'su_beat' = '\u2026 \u66f4\u65b0\u4ecd\u5728\u8fdb\u884c\uff08\u5df2 {0}\uff0c\u6700\u540e\u4e00\u6b65\uff1a{1}\uff09'
+        'su_done' = '\u7cfb\u7edf\u8f6f\u4ef6\u5305\uff1a\u66f4\u65b0\u5728 {0} \u5185\u5b8c\u6210\uff0c\u5171\u5b89\u88c5\u6216\u66f4\u65b0 {1} \u4e2a\u8f6f\u4ef6\u5305\u3002'
+        'diag_head' = '{0} \u672a\u80fd\u6062\u590d\u6b63\u5e38\uff1a\u7cfb\u7edf\u7ed9\u51fa\u7684\u4fe1\u606f\uff08\u5bc6\u94a5\u5df2\u9690\u85cf\uff09'
+        'diag_hint' = '\u8bf7\u628a\u8fd9\u90e8\u5206\u65e5\u5fd7\u53d1\u7ed9\u652f\u6301\u4eba\u5458\uff0c\u6216\u53d1\u9001\u6b64\u547d\u4ee4\u7684\u8f93\u51fa\uff1ajournalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux \u5904\u4e8e enforcing \u6a21\u5f0f\uff1a\u8bf7\u5728\u4e0b\u65b9\u67e5\u627e ''avc: denied''\uff08\u7a0b\u5e8f\u3001\u914d\u7f6e\u6216\u6570\u636e\u76ee\u5f55\u7684\u6807\u7b7e\u9519\u8bef\uff09\uff1brestorecon -nvR \u5217\u51fa\u9519\u8bef\u6807\u7b7e\uff0crestorecon -RFv \u4fee\u590d\u3002'
         'q_sysupdate' = '\u5148\u66f4\u65b0\u7cfb\u7edf\u8f6f\u4ef6\u5305\uff08\u63a8\u8350\uff09\uff1f'
         'pr_disk_full' = '\u4ec5\u5269 {0} MB \u53ef\u7528\u7a7a\u95f4\uff0c\u4f4d\u4e8e {1}\uff08\u81f3\u5c11\u9700\u8981 {2} MB\uff09\uff1a\u5b89\u88c5\u65e0\u6cd5\u5b8c\u6210\u3002'
         'pr_disk_full_a' = '\u8bf7\u91ca\u653e\u4e00\u4e9b\u7a7a\u95f4\uff08\u8f6f\u4ef6\u5305\u7f13\u5b58\uff1aapt-get clean \u6216 dnf clean all\uff1b\u65e7\u65e5\u5fd7\uff1ajournalctl --vacuum-size=100M\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u6b64\u547d\u4ee4\u3002\u5982\u8981\u5f3a\u884c\u7ee7\u7eed\uff1aTOUTWAF_SKIP_PREREQ=1\u3002'
@@ -2816,6 +2906,11 @@ $script:Catalog = @{
         'extras_other_release' = '\u5df2\u53d1\u5e03\u7684\u7248\u672c\uff08{0}\uff09\u4e0d\u662f\u5df2\u5b89\u88c5\u7684\u7248\u672c\uff08{1}\uff09\uff1a\u9644\u52a0\u5305\u968f\u5b83\u4e00\u8d77\u63d0\u4f9b\u3002\u8bf7\u8fd0\u884c --update\u3002'
         'st_extras_ok' = '\u9644\u52a0\u5305\uff1a\u5df2\u5b89\u88c5\uff08Windows \u4ee3\u7406\u3001\u6740\u6bd2\u7a0b\u5e8f\uff09'
         'st_extras_none' = '\u7f3a\u5c11\u9644\u52a0\u5305\uff1a\u4e0d\u63d0\u4f9b Windows \u548c\u6740\u6bd2\u529f\u80fd\u3002\u8bf7\u4ee5 root \u8fd0\u884c\uff1a{0}'
+        's_extras_noav' = '\u9644\u52a0\u5305\uff1aWindows \u4ee3\u7406'
+        'w_extras_dl_noav' = '\u65e0\u6cd5\u4e0b\u8f7d\u9644\u52a0\u5305\uff08{0}\uff09\u3002ToutWAF \u6ca1\u6709\u5b83\u4eec\u4e5f\u80fd\u8fd0\u884c\uff0c\u4f46\u5728\u5b89\u88c5\u4e4b\u524d\uff0c\u6b64\u63a7\u5236\u53f0\u4e0d\u4f1a\u63d0\u4f9b Windows\u3002'
+        'w_extras_none_noav' = '\u6b64\u7248\u672c\u4e0d\u542b\u9644\u52a0\u5305\uff1a\u6b64\u63a7\u5236\u53f0\u4e0d\u4f1a\u63d0\u4f9b Windows\u3002'
+        'st_extras_ok_noav' = '\u9644\u52a0\u5305\uff1a\u5df2\u5b89\u88c5\uff08Windows \u4ee3\u7406\uff09'
+        'st_extras_none_noav' = '\u7f3a\u5c11\u9644\u52a0\u5305\uff1a\u4e0d\u63d0\u4f9b Windows\u3002\u8bf7\u4ee5 root \u8fd0\u884c\uff1a{0}'
     }
     'ar' = @{
         'tagline' = '\u062d\u0645\u0627\u064a\u0629 \u062a\u0637\u0628\u064a\u0642\u0627\u062a \u0627\u0644\u0648\u064a\u0628 \u0648\u0648\u0627\u062c\u0647\u0627\u062a API'
@@ -3043,6 +3138,11 @@ $script:Catalog = @{
         'su_nopm' = '\u0644\u0627 \u064a\u0648\u062c\u062f \u0645\u062f\u064a\u0631 \u062d\u0632\u0645 \u0645\u062f\u0639\u0648\u0645 \u0644\u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0646\u0638\u0627\u0645: \u062a\u0645 \u0627\u0644\u062a\u062e\u0637\u064a \u0648\u062a\u0633\u062a\u0645\u0631 \u0639\u0645\u0644\u064a\u0629 \u0627\u0644\u062a\u062b\u0628\u064a\u062a.'
         'su_failed' = '\u0641\u0634\u0644 \u062a\u062d\u062f\u064a\u062b \u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645 (\u0627\u0644\u0631\u0645\u0632 {0})\u061b \u0633\u062a\u0633\u062a\u0645\u0631 \u0639\u0645\u0644\u064a\u0629 \u0627\u0644\u062a\u062b\u0628\u064a\u062a \u0628\u062f\u0648\u0646\u0647. \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644: {1}. \u0627\u0644\u062d\u0644: \u0634\u063a\u0651\u0644 \u0627\u0644\u062a\u062d\u062f\u064a\u062b \u0628\u0646\u0641\u0633\u0643 \u0648\u0627\u0642\u0631\u0623 \u0631\u0633\u0627\u0644\u0629 \u0627\u0644\u062e\u0637\u0623 (\u0645\u0633\u062a\u0648\u062f\u0639 \u0645\u0639\u0637\u0651\u0644\u061f \u0645\u062f\u064a\u0631 \u062d\u0632\u0645 \u0622\u062e\u0631 \u0642\u064a\u062f \u0627\u0644\u062a\u0634\u063a\u064a\u0644\u061f) \u0623\u0648 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631 \u0645\u0639 TOUTWAF_SKIP_SYSUPDATE=1.'
         'su_reboot' = '\u064a\u0644\u0632\u0645 \u0625\u0639\u0627\u062f\u0629 \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u062e\u0627\u062f\u0645 \u0644\u0625\u0643\u0645\u0627\u0644 \u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0646\u0638\u0627\u0645 (\u0646\u0648\u0627\u0629 \u0623\u0648 \u0645\u0643\u062a\u0628\u0627\u062a \u062c\u062f\u064a\u062f\u0629). \u0644\u0627 \u064a\u0639\u064a\u062f ToutWAF \u062a\u0634\u063a\u064a\u0644\u0647 \u0646\u064a\u0627\u0628\u0629\u064b \u0639\u0646\u0643 \u0623\u0628\u062f\u0627\u064b: \u0627\u0641\u0639\u0644 \u0630\u0644\u0643 \u0639\u0646\u062f\u0645\u0627 \u062a\u0633\u062a\u0637\u064a\u0639.'
+        'su_beat' = '\u2026 \u0627\u0644\u062a\u062d\u062f\u064a\u062b \u062c\u0627\u0631\u064d \u0645\u0646\u0630 {0} (\u0622\u062e\u0631 \u062e\u0637\u0648\u0629: {1})'
+        'su_done' = '\u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645: \u0627\u0643\u062a\u0645\u0644 \u0627\u0644\u062a\u062d\u062f\u064a\u062b \u062e\u0644\u0627\u0644 {0}\u060c \u0639\u062f\u062f \u0627\u0644\u062d\u0632\u0645 \u0627\u0644\u0645\u062b\u0628\u062a\u0629 \u0623\u0648 \u0627\u0644\u0645\u062d\u062f\u0651\u062b\u0629: {1}.'
+        'diag_head' = '{0} \u0644\u0645 \u064a\u0635\u0628\u062d \u0633\u0644\u064a\u0645\u0627\u064b: \u0645\u0627 \u064a\u0642\u0648\u0644\u0647 \u0627\u0644\u0646\u0638\u0627\u0645 (\u0627\u0644\u0623\u0633\u0631\u0627\u0631 \u0645\u062e\u0641\u064a\u0629)'
+        'diag_hint' = '\u0623\u0631\u0633\u0644 \u0647\u0630\u0627 \u0627\u0644\u062c\u0632\u0621 \u0645\u0646 \u0627\u0644\u0633\u062c\u0644 \u0625\u0644\u0649 \u0627\u0644\u062f\u0639\u0645\u060c \u0623\u0648 \u0646\u0627\u062a\u062c \u0627\u0644\u0623\u0645\u0631: journalctl -xeu {0} --no-pager -n 50'
+        'diag_sel' = 'SELinux \u0641\u064a \u0648\u0636\u0639 enforcing: \u0627\u0628\u062d\u062b \u0639\u0646 ''avc: denied'' \u0623\u062f\u0646\u0627\u0647 (\u0648\u0633\u0645 \u062e\u0627\u0637\u0626 \u0639\u0644\u0649 \u0627\u0644\u0628\u0631\u0646\u0627\u0645\u062c \u0623\u0648 \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0623\u0648 \u0645\u062c\u0644\u062f \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a)\u061b restorecon -nvR \u064a\u0639\u0631\u0636 \u0627\u0644\u0648\u0633\u0648\u0645 \u0627\u0644\u062e\u0627\u0637\u0626\u0629 \u0648restorecon -RFv \u064a\u0635\u0644\u062d\u0647\u0627.'
         'q_sysupdate' = '\u0647\u0644 \u062a\u0631\u064a\u062f \u062a\u062d\u062f\u064a\u062b \u062d\u0632\u0645 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648\u0644\u0627\u064b (\u0645\u0648\u0635\u0649 \u0628\u0647)\u061f'
         'pr_disk_full' = '\u0627\u0644\u0645\u0633\u0627\u062d\u0629 \u0627\u0644\u062d\u0631\u0629 {0} \u0645\u064a\u063a\u0627\u0628\u0627\u064a\u062a \u0641\u0642\u0637 \u0639\u0644\u0649 {1} (\u0627\u0644\u0645\u0637\u0644\u0648\u0628 {2} \u0645\u064a\u063a\u0627\u0628\u0627\u064a\u062a \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644): \u0644\u0627 \u064a\u0645\u0643\u0646 \u0625\u0643\u0645\u0627\u0644 \u0627\u0644\u062a\u062b\u0628\u064a\u062a.'
         'pr_disk_full_a' = '\u062d\u0631\u0651\u0631 \u0628\u0639\u0636 \u0627\u0644\u0645\u0633\u0627\u062d\u0629 (\u0630\u0627\u0643\u0631\u0629 \u0627\u0644\u062d\u0632\u0645 \u0627\u0644\u0645\u0624\u0642\u062a\u0629: apt-get clean \u0623\u0648 dnf clean all\u061b \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0627\u0644\u0642\u062f\u064a\u0645\u0629: journalctl --vacuum-size=100M) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631. \u0644\u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0631\u063a\u0645 \u0630\u0644\u0643: TOUTWAF_SKIP_PREREQ=1.'
@@ -3115,6 +3215,11 @@ $script:Catalog = @{
         'extras_other_release' = '\u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0627\u0644\u0645\u0646\u0634\u0648\u0631 ({0}) \u0644\u064a\u0633 \u0627\u0644\u0645\u062b\u0628\u062a ({1}): \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u062a\u0623\u062a\u064a \u0645\u0639\u0647. \u0634\u063a\u0651\u0644 --update.'
         'st_extras_ok' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a: \u0645\u062b\u0628\u062a\u0629 (\u0648\u0643\u064a\u0644 Windows \u0648\u0628\u0631\u0627\u0645\u062c \u0645\u0643\u0627\u0641\u062d\u0629 \u0627\u0644\u0641\u064a\u0631\u0648\u0633\u0627\u062a)'
         'st_extras_none' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u0645\u0641\u0642\u0648\u062f\u0629: \u0644\u0627 \u064a\u062a\u0645 \u0639\u0631\u0636 Windows \u0648\u0644\u0627 \u0645\u0643\u0627\u0641\u062d\u0629 \u0627\u0644\u0641\u064a\u0631\u0648\u0633\u0627\u062a. \u0634\u063a\u0651\u0644 \u0628\u0635\u0644\u0627\u062d\u064a\u0627\u062a root: {0}'
+        's_extras_noav' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a: \u0648\u0643\u064a\u0644 Windows'
+        'w_extras_dl_noav' = '\u062a\u0639\u0630\u0631 \u062a\u0646\u0632\u064a\u0644 \u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a ({0}). \u064a\u0639\u0645\u0644 ToutWAF \u0628\u062f\u0648\u0646\u0647\u0627\u060c \u0644\u0643\u0646 \u0647\u0630\u0647 \u0627\u0644\u0644\u0648\u062d\u0629 \u0644\u0646 \u062a\u0639\u0631\u0636 Windows \u062d\u062a\u0649 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a\u0647\u0627.'
+        'w_extras_none_noav' = '\u0644\u0627 \u064a\u062d\u062a\u0648\u064a \u0647\u0630\u0627 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0639\u0644\u0649 \u0625\u0636\u0627\u0641\u0627\u062a: \u0644\u0646 \u062a\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0644\u0648\u062d\u0629 Windows.'
+        'st_extras_ok_noav' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a: \u0645\u062b\u0628\u062a\u0629 (\u0648\u0643\u064a\u0644 Windows)'
+        'st_extras_none_noav' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u0645\u0641\u0642\u0648\u062f\u0629: \u0644\u0627 \u064a\u062a\u0645 \u0639\u0631\u0636 Windows. \u0634\u063a\u0651\u0644 \u0628\u0635\u0644\u0627\u062d\u064a\u0627\u062a root: {0}'
     }
 }
 # END CATALOG
@@ -4059,7 +4164,8 @@ $script:ExtrasDir = ''; $script:ExtrasResult = ''; $script:ExtrasCount = 0; $scr
 # the programs the contract names, nothing else (a file with another name, or a link, is never installed)
 function Get-ExtrasFiles([string]$dir) {
     $out = @()
-    $pairs = @(@('agent-dist', '^toutwaf-agent-windows-(amd64|arm64)\.exe$'), @('av-dist', '^toutwaf-av-(linux-(amd64|arm64)|darwin-(amd64|arm64)|windows-(amd64|arm64)\.exe)$'))
+    $pairs = @(,@('agent-dist', '^toutwaf-agent-windows-(amd64|arm64)\.exe$'))
+    if ($script:AvOffered) { $pairs += ,@('av-dist', '^toutwaf-av-(linux-(amd64|arm64)|darwin-(amd64|arm64)|windows-(amd64|arm64)\.exe)$') }
     foreach ($pair in $pairs) {
         $src = Join-Path $dir $pair[0]
         if (-not (Test-Path $src)) { continue }
@@ -4122,7 +4228,7 @@ function Get-Extras([string]$rel, [string]$tmp, [string]$q) {
         for ($i = 1; $i -le 2 -and -not $ok; $i++) {
             try { Invoke-WebRequest -UseBasicParsing -Uri "$rel/$n$q" -OutFile $f; $ok = (Test-Path $f) } catch { if (Test-Path $f) { Remove-Item $f -Force } }
         }
-        if (-not $ok) { Set-ExtrasFailed 'w_extras_dl' @($n); return }
+        if (-not $ok) { Set-ExtrasFailed (Get-ExtrasKey 'w_extras_dl') @($n); return }
         $line = Get-Content $sumsFile | Where-Object { $_ -match ([regex]::Escape($n) + '$') } | Select-Object -First 1
         $want = ($line -split '\s+')[0].ToLower()
         $got = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower()
@@ -4161,6 +4267,7 @@ function Test-ExtrasCurrent([string]$v, [string]$b) {
     if ($b) { if ($raw -notmatch '"build":"([^"]*)"' -or $Matches[1] -ne $b) { return $false } }
     foreach ($m in [regex]::Matches($raw, '"(toutwaf-[^"]+)"')) {
         $f = $m.Groups[1].Value
+        if ($f -notlike 'toutwaf-agent-*' -and -not $script:AvOffered) { continue }
         $d = if ($f -like 'toutwaf-agent-*') { 'agent-dist' } else { 'av-dist' }
         if (-not (Test-Path (Join-Path (Join-Path $CpDataDir $d) $f))) { return $false }
     }
@@ -4174,18 +4281,18 @@ function Invoke-ExtrasMaintain([string]$tmp, [string]$v, [string]$b) {
     $rel = if ($ZipPath) { '' } else { (Get-RepoBase) + '/releases/' + $script:ResolvedVersion }
     if (-not $ZipPath -and -not (Test-Path (Join-Path $tmp 'SHA256SUMS'))) {
         $q = Get-ReleaseQuery
-        try { Invoke-WebRequest -UseBasicParsing -Uri "$rel/SHA256SUMS$q" -OutFile (Join-Path $tmp 'SHA256SUMS') } catch { Write-Warn (T 'w_extras_dl' @('SHA256SUMS')); return }
+        try { Invoke-WebRequest -UseBasicParsing -Uri "$rel/SHA256SUMS$q" -OutFile (Join-Path $tmp 'SHA256SUMS') } catch { Write-Warn (T (Get-ExtrasKey 'w_extras_dl') @('SHA256SUMS')); return }
         Confirm-ReleaseSignature $rel $tmp $q
     }
     $script:Rel = @{ ArchiveVersion = $v; ArchiveBuild = $b }
-    Invoke-Step (T 's_extras') { Get-Extras $rel $tmp (Get-ReleaseQuery) }
+    Invoke-Step (T (Get-ExtrasKey 's_extras')) { Get-Extras $rel $tmp (Get-ReleaseQuery) }
     Install-Extras
     Write-ExtrasReport
 }
 function Write-ExtrasReport {
     switch ($script:ExtrasResult) {
         'ok' { Write-Out ('  {0} {1}' -f $script:Bul, (T 's_extras_ok' @($script:ExtrasCount, $CpDataDir))) }
-        'none' { Write-Out ('  {0} {1}' -f $script:Bul, (T 'w_extras_none')) }
+        'none' { Write-Out ('  {0} {1}' -f $script:Bul, (T (Get-ExtrasKey 'w_extras_none'))) }
         'failed' { Write-Out ('  {0} {1}' -f $script:Bul, (T 'w_extras_todo' @('install.ps1 -Update'))) }
     }
 }
@@ -4285,7 +4392,7 @@ data_dir: '$($DataDir -replace '\\','/')'
 certs_dir: '$($CertsDir -replace '\\','/')'
 listen:
   http: ["0.0.0.0:$HttpPort"]
-  https: ["0.0.0.0:$HttpsPort"]$(if (Test-Http3On) { "`n  h3: true               # HTTP/3 (QUIC) on UDP $HttpsPort: the installer opens that UDP port in Windows Defender Firewall" })
+  https: ["0.0.0.0:$HttpsPort"]$(if (Test-Http3On) { "`n  h3: true               # HTTP/3 (QUIC) on UDP ${HttpsPort}: the installer opens that UDP port in Windows Defender Firewall" })
 admin:
   listen: 127.0.0.1:9101
 tls:
@@ -4437,7 +4544,7 @@ function Invoke-InstallFlow([string]$action) {
         Invoke-Step (T 's_fetch' @($verLabel, (Get-Arch))) { $script:Rel = Get-Release $tmp }
         if ($Component -ne 'dp' -and -not (Get-ExtrasSkipped)) {
             $xrel = if ($ZipPath) { '' } else { (Get-RepoBase) + '/releases/' + $script:ResolvedVersion }
-            Invoke-Step (T 's_extras') { Get-Extras $xrel $tmp (Get-ReleaseQuery) }
+            Invoke-Step (T (Get-ExtrasKey 's_extras')) { Get-Extras $xrel $tmp (Get-ReleaseQuery) }
         }
         $newBuild = if ($script:Rel.ArchiveBuild) { $script:Rel.ArchiveBuild } else { $script:NewBuild }
         $bins = $script:Rel.Bins

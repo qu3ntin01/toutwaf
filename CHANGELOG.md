@@ -2,6 +2,19 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.5.7 - 2026-11-15
+
+- **Antivirus**: the antivirus (Horizon) is disabled in this release by one switch (not offered in the console, the API, the licence features or the extras); the installers no longer look for its programs.
+- **Mirror**: installs read the ToutWAF package mirror first (signed, pinned key) with the distribution repositories as fallback (`--mirror`, `--no-mirror`).
+- **Firewall**: network interfaces tab (VLAN, bridge, bond, address, MTU) with a trial and automatic rollback, persistence at boot and a protected management interface; ports can be opened on this server and on all nodes in one click; the public address has a Test button.
+- **Attack resilience** (new page): reserve nodes, load shedding by DNS, layer-7 escalation, volumetric help (Cloudflare only, needs network signals from the nodes), and optional overflow forwarding between nodes (off by default, two modes, signed forwarding); presets, a general kill switch and "undo everything"; an advantages/drawbacks table lets the user choose each solution.
+- **Node zones and relays**: a zone per node, the nodes x servers matrix, per-site inter-zone fallback, nodes with no reachable origin leave the DNS answer; the console reaches a server only a node can see through a bounded, audited relay (two switches, off by default).
+- **Backup and restore**: manual backup, restore points and a fresh-server restore (`install.sh --restore`), available only when ToutWAF Backup is activated.
+- **Mail gateway**: optional automatic updates with a stored, sealed SSH access (toggle, window, back-off, forget).
+- **Console**: free public certificate for the console with the same key (pins stay valid), renewal, back to self-signed; node updates from the console with live progress and failure reasons; new Architecture page (simple and advanced views of the installation and of how traffic flows); jobs interrupted by a restart get an `interrupted` state; the address picker layout and hints are fixed.
+- **Installers**: `LC_ALL=C` for `stat` (French-locale refusal of the upgrade helper), `--private-host`, `--restore`.
+- **API**: `GET /architecture`; the module list accepts `toutwaf-backup`.
+
 ## 0.5.6 - 2026-11-14
 
 - **Mail gateway** (Courrier): the generated Rspamd Lua file no longer starts with a `#` comment (Rspamd refused the whole configuration); Postfix is restarted when a reload left it listening on the loopback only, the SMTP port is checked on a reachable address, opened in firewalld/ufw by the application, and the optional `btree` TLS caches (absent on EL 10) are gone; a backup is put back as files only and the default SELinux types are restored (a copy of the backup folders had turned `/etc` and `/etc/postfix` into `var_lib_t`); the official Rspamd repository is added when EPEL does not carry Rspamd (EL 10); the DNS record proposed for the gateway name always uses a public address; the end-to-end test says why the real mail server refused the message (domain not hosted, mailbox unknown); the protected domains that a linked ToutPanel mail server does not host are listed and can be declared on it in one click.

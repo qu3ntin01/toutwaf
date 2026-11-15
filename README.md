@@ -2,13 +2,13 @@
 
 # ToutWAF
 
-**Pare-feu applicatif web (WAAP) auto-hébergé : protège vos sites et vos API, avec une console web en 10 langues.**
+**Plateforme de sécurité auto-hébergée : pare-feu réseau, pare-feu applicatif web (WAF) et protection des applications et des API (WAAP), avec une console web en 10 langues.**
 
-WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauvegardes chiffrées
+Pare-feu · WAF · WAAP · protection API · anti-bot · anti-DDoS · résilience multi-nœuds · reverse proxy · VPN · sauvegardes chiffrées
 
 [Installer](#installation) · [Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Architecture](#architecture) · [Premier démarrage](#premier-démarrage) · [English](README.en.md)
 
-**Version 0.5.6** · build `cc2cfe9689eb` · canal **stable** · 2026-11-14
+**Version 0.5.7** · build `f693b642978a` · canal **stable** · 2026-11-15
 
 </div>
 
@@ -19,6 +19,8 @@ WAF · protection API · anti-bot · anti-DDoS couche 7 · reverse proxy · sauv
 ## C'est quoi ToutWAF ?
 
 ToutWAF se place **devant vos sites web et vos API** et examine chaque requête avant qu'elle n'atteigne votre application : injections SQL, XSS, exécution de commandes, robots malveillants, attaques par volume, fuites de données dans les réponses… Les requêtes saines passent, les autres sont bloquées, et chaque décision est **expliquée** dans la console avec la règle déclenchée.
+
+ToutWAF réunit trois protections : un **pare-feu réseau** (interfaces, zones, NAT, routes, VPN) qui filtre le trafic au niveau des machines ; un **WAF** qui lit chaque requête web ; un **WAAP** qui y ajoute la protection des API (profils Observation / Équilibré / Strict, import OpenAPI), la gestion des robots et la résistance aux attaques par volume. Il ne remplace ni un pare-feu de bordure dédié ni un service anti-DDoS en amont.
 
 Il s'installe sur **votre propre serveur** (Linux ou Windows), sans service cloud : vos données de trafic restent chez vous.
 
@@ -53,8 +55,19 @@ Il s'installe sur **votre propre serveur** (Linux ou Windows), sans service clou
 - **Mises à jour du produit depuis la console** : choix du canal `stable` ou `dev`, avertissement immédiat (pastille de la barre du haut, bandeau, notification) dès qu'une version est publiée (vérification toutes les 5 minutes environ), notes de version, bouton **Mettre à jour maintenant** avec progression en direct ; si la nouvelle version ne démarre pas, la précédente est restaurée automatiquement.
 - **Assistant de premier lancement** que l'on peut passer, avec une aide à côté du champ URL de l'origine et une **détection de la technologie** qui montre les couches trouvées (serveur web, langage, framework, CMS…), un niveau de confiance et les indices relevés pour chaque hypothèse.
 
+**Pare-feu réseau et VPN** (modules activés par défaut)
+- Interfaces réseau (VLAN, pont, agrégat, adresse, MTU) avec essai et retour arrière automatique, conservées au redémarrage ; zones, NAT, routes statiques, DHCP et DNS, portail captif, groupes de passerelles, alias d'URL et de pays ; ouverture des ports sur ce serveur et sur tous les nœuds en un clic.
+- VPN IPsec, L2TP/IPsec et SSL VPN. Ce qui a été essayé sur un vrai noyau et ce qui ne l'a pas été est détaillé dans la documentation.
+
+**Résilience aux attaques et cluster**
+- Cinq solutions indépendantes, au choix de l'administrateur, avec leurs avantages et inconvénients écrits dans la console : nœuds de réserve, délestage par le DNS, escalade en couche 7, aide volumétrique (Cloudflare uniquement), transfert du débordement entre nœuds (facultatif, éteint par défaut). Interrupteur général et « tout annuler ».
+- Zones de nœuds, matrice nœuds × serveurs, secours entre zones par site ; relais borné et audité vers un serveur que seul un nœud voit.
+- Page **Architecture** : la pile réseau et logicielle de votre installation, version simple ou détaillée jusqu'au site.
+
 **Exploitation**
 - **Sauvegardes chiffrées** avec copies hors site (S3 compatible, SFTP, WebDAV), rétention et test de restauration automatique.
+- **Espace sauvegarde et restauration** (sauvegarde manuelle, points de restauration, restauration d'un serveur neuf avec `install.sh --restore`) : disponible uniquement quand ToutWAF Backup est activé.
+- **Passerelle courrier** : mises à jour automatiques facultatives avec un accès mémorisé et chiffré ; **certificat public gratuit pour la console** avec la même clé (les empreintes épinglées restent valides) ; mises à jour des nœuds depuis la console avec suivi.
 - Alertes et intégrations (SIEM, Slack, Teams, e-mail, PagerDuty…), métriques Prometheus, multi-organisations.
 - **Pare-feu de l'hôte** : sous Linux, l'installeur ouvre les ports dont ToutWAF a besoin quand firewalld ou ufw est actif, et **Réglages → Pare-feu** affiche l'état de chaque port et ouvre ceux qui manquent.
 
@@ -218,6 +231,7 @@ Soyons transparents sur ce qui n'est pas (encore) couvert :
 - **Détection** : mesurée avec un outil indépendant (GoTestWAF : 673/673 attaques bloquées, 0/141 faux positifs) et sur un jeu de charges publiques jamais vu pendant le développement (89,9 % en brut ; 99,95 % une fois écartés les fragments de bruit qui ne sont pas des attaques, liste communiquée à nos relecteurs). Aucun WAF n'attrape tout : prévoyez d'ajuster des exceptions pour vos applications. Compromis connus : opérateurs de type MongoDB (`$ne`, `$where`) dans les champs JSON/formulaire et deux `../` ou plus dans une valeur sont bloqués.
 - **Performances** : mesurées sur une machine de test partagée (quelques milliers de requêtes par seconde par instance). Pour votre charge, mesurez sur votre matériel avant la mise en production.
 - Les traductions de la console et des messages d'erreur ont été rédigées avec l'aide d'outils automatiques et n'ont pas encore été relues par des locuteurs natifs.
+- **Peu éprouvé sur du vrai matériel** : interfaces réseau (VLAN, agrégat, IPv6), résilience (essais sur plusieurs nœuds simulés, aucune vraie attaque, aucun vrai compte Cloudflare), TLS entre nœuds du débordement, restauration sur un vrai serveur neuf. Détails dans la documentation.
 - Aucune certification (ANSSI, PCI DSS, ISO 27001) n'est revendiquée.
 
 Cibles non compilées pour cette version :
@@ -227,19 +241,20 @@ Cibles non compilées pour cette version :
 
 ## Versions et téléchargements
 
-**Version 0.5.6**
+**Version 0.5.7**
 
 | Fichier | Système | Architecture | Taille | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 68.5 MiB | `d37154d95503aee81a635f4844d61025ad9a054ad62a443b6b1a1b956682da46` |
-| `toutwaf-extras.tar.gz` | any | any | 48.4 MiB | `ce568c60ca43dfe80fe7bd025fc6e1d6eb2b8d7be42578aa8ade04427b39a909` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 69.7 MiB | `af4f9e564e2ab8027ceee7d73be0eed2497db002733d174cbfb1970a8fac5214` |
+| `toutwaf-extras.tar.gz` | any | any | 18.8 MiB | `55c5d2f661f94119fbf0b7d17e942427dff78d9766a6f6e766531228e8b1a1d5` |
 
-Les fichiers `toutwaf-extras*.tar.gz` (système et architecture `any`) sont les extras de la version : l'agent hôte pour Windows et les programmes de l'antivirus, qu'une console remet aux autres machines. L'installateur les télécharge, les vérifie (SHA-256 et signature) et les installe avec l'archive de la plateforme ; une installation sans eux fonctionne et ne propose ni Windows ni l'antivirus.
+Les fichiers `toutwaf-extras*.tar.gz` (système et architecture `any`) sont les extras de la version : l'agent hôte pour Windows, qu'une console remet aux autres machines. L'installateur les télécharge, les vérifie (SHA-256 et signature) et les installe avec l'archive de la plateforme ; une installation sans eux fonctionne et ne propose pas Windows.
 
 
 | Version | Date | Statut | Dossier |
 |---|---|---|---|
-| `0.5.6` | 2026-11-14T02:52:30Z | **actuelle** | `releases/0.5.6/` |
+| `0.5.7` | 2026-11-15T20:47:03Z | **actuelle** | `releases/0.5.7/` |
+| `0.5.6` | 2026-11-14T02:52:30Z | disponible | `releases/0.5.6/` |
 | `0.5.5` | 2026-11-11T16:11:16Z | disponible | `releases/0.5.5/` |
 | `0.5.4` | 2026-11-10T13:16:18Z | disponible | `releases/0.5.4/` |
 | `0.5.3` | 2026-11-09T22:35:43Z | disponible | `releases/0.5.3/` |
@@ -262,7 +277,7 @@ Les notes de chaque version sont dans [CHANGELOG.md](CHANGELOG.md).
 Chaque dossier de version contient un fichier `SHA256SUMS` ; `channel.json` répète les empreintes de la version courante. L'installeur les vérifie automatiquement. Pour vérifier à la main :
 
 ```sh
-cd releases/0.5.6 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.5.7 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Vérifier une version
@@ -270,7 +285,7 @@ cd releases/0.5.6 && sha256sum -c SHA256SUMS --ignore-missing
 À partir de la version 0.2.0-dev.7, chaque dossier de version contient aussi `SHA256SUMS.sig` : le base64 de la signature Ed25519 brute (64 octets) du fichier `SHA256SUMS` exact. Les installeurs la vérifient par défaut avec une clé publique intégrée au script d'installation (identifiant `f8fc98e4c6e364fa`) et refusent une version dont la signature est invalide, ou absente pour 0.2.0-dev.7 et suivantes ; les versions antérieures à 0.2.0-dev.7 ont été publiées sans signature (empreintes seulement). La clé publique répétée dans `channel.json` est informative et ne sert jamais à faire confiance à une version : prenez la clé dans le script d'installation ou auprès de votre éditeur. Clé publique (brute, base64) : `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. Pour vérifier à la main (OpenSSL 3 ou plus) :
 
 ```sh
-V=0.5.6; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+V=0.5.7; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
