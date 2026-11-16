@@ -8189,8 +8189,15 @@ set_caps() {
 
 # ------------------------------------------------------------------------------------------------ health + rollback
 wait_healthy() {
-  local url="http://127.0.0.1:9101/healthz" _
-  for _ in $(seq 1 30); do curl -fsS -o /dev/null --max-time 2 "$url" 2>/dev/null && return 0; sleep 1; done
+  # /readyz answers at once (the node is up and has its policy). /healthz probes the origins of EVERY site one after the other (up to 0.8 s
+  # each when an origin is unreachable): with many sites it exceeds any short timeout right after a start, and a healthy node was rolled
+  # back. /healthz stays the fallback for a data plane that has no /readyz.
+  local _
+  for _ in $(seq 1 30); do
+    curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:9101/readyz" 2>/dev/null && return 0
+    curl -fsS -o /dev/null --max-time 10 "http://127.0.0.1:9101/healthz" 2>/dev/null && return 0
+    sleep 1
+  done
   return 1
 }
 # BEGIN cp-wait (extracted by tests/cp-wait-test.sh: keep the markers)

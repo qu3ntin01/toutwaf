@@ -2,6 +2,8 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.5.8 - 2026-11-16
+
 ## 0.5.7 - 2026-11-15
 
 - **Antivirus**: the antivirus (Horizon) is disabled in this release by one switch (not offered in the console, the API, the licence features or the extras); the installers no longer look for its programs.
