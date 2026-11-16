@@ -25,8 +25,10 @@
   Actions: -Install (default) -Update -Uninstall [-Purge] -Status -Links. Without any parameter, on a console, a menu is shown.
   Languages: -En -Fr -Es -De -It -Pt -Nl -Ru -Zh -Ar (or -Lang fr, or $env:TOUTWAF_LANG = 'fr') choose the installer language;
   by default it follows the Windows display language, English when that language is not supported.
-  -ViaRepo: read the release from ToutWAF's own package repository for Windows first (index.json checked against its SHA-256); when it is
-  unreachable or damaged the installer falls back to the project's GitLab, then GitHub, as without the switch. The archive is verified the same way.
+  Sources (always, since the mirror work): ToutWAF's own package repository for Windows is read FIRST (index.json checked against its SHA-256 and, when gpg is
+  installed, against the signature made with the repository key whose fingerprint is built into this script), then the project's GitLab, then GitHub. Short timeouts
+  (6 s for the index), never blocking: a file the repository does not hold, or an unreachable repository, moves on to the next source. The archive is verified the
+  same way whatever the source (SHA256SUMS + Ed25519). -NoMirror (or $env:TOUTWAF_NO_MIRROR=1) skips the repository. -ViaRepo is kept and has no further effect.
 #>
 [CmdletBinding()]
 param(
@@ -40,7 +42,8 @@ param(
     [ValidateSet('dp', 'cp', 'all')][string]$Component = 'all',
     [string]$Repo = 'qu3ntin01/toutwaf',      # public binaries-only repository (deploy/RELEASE-LAYOUT.md)
     [string]$BaseUrl = '',
-    [switch]$ViaRepo,                         # try ToutWAF's own package repository for Windows first (falls back to GitLab, then GitHub)
+    [switch]$ViaRepo,                         # kept for compatibility: the repository is now the first source by default
+    [switch]$NoMirror,                        # do not read ToutWAF's own package repository first (also $env:TOUTWAF_NO_MIRROR=1)
     [string]$ZipPath = '',
     [string[]]$ExtrasPath = @(),              # the extras of the release (Windows agents, antivirus programs) from local files: toutwaf-extras*.tar.gz (offline)
     [switch]$NoExtras,                       # do not download nor install the extras (also $env:TOUTWAF_NO_EXTRAS=1)
@@ -439,6 +442,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = 'This release carries no extras: this console will not offer Windows.'
         'st_extras_ok_noav' = 'Extras: installed (Windows agent)'
         'st_extras_none_noav' = 'Extras missing: Windows is not offered. Run as root: {0}'
+        'af_line' = 'Problem detected: {0}; correction applied: {1}; new attempt: {2}'
+        'af_plan_line' = 'Problem detected: {0}; correction planned: {1} (--autofix-dry-run: nothing is changed)'
+        'af_failed_line' = 'Problem detected: {0}; correction failed: {1}; no new attempt'
+        'af_manual_line' = 'Problem detected: {0}; to be done by hand: {1}'
+        'af_try_ok' = 'succeeded'
+        'af_try_ko' = 'failed'
+        'af_try_run' = 'in progress'
+        'af_try_manual' = 'to be run again by you'
+        'af_undo' = 'to undo: {0}'
+        'af_noself' = 'The corrections were made but this installer was read from a pipe and cannot start itself again: run the same command once more.'
+        'af_giveup' = 'No more automatic attempts (limit: {0}).'
+        'af_diag_ready' = 'A diagnostic ready to send was written to {0} (secrets are hidden).'
+        'af_none' = 'Nothing to correct on this machine at the moment.'
+        'af_w_full' = 'full ({0} MB free)'
+        'af_w_noexec' = 'mounted noexec'
+        'af_w_nowrite' = 'not writable'
+        'af_p_tmp' = 'the work directory {0} is unusable ({1})'
+        'af_a_tmp' = 'work directory moved to {0}'
+        'af_p_disk' = 'disk almost full on {0} ({1}%% used, {2} MB free)'
+        'af_a_disk' = 'package caches and old logs cleaned (data untouched)'
+        'af_h_disk' = 'free some space (the installer never deletes data), then run it again'
+        'af_p_lock' = 'the package manager is in use or locked ({0})'
+        'af_a_lock_wait' = 'waited for it to finish (at most {0} s)'
+        'af_a_lock_stale' = 'stale lock set aside: {0}'
+        'af_a_lock_none' = 'nothing holds the lock any more'
+        'af_h_lock' = '{0} is still running: wait for it to finish, then run the installer again'
+        'af_p_clock' = 'the clock is {0} s away from the real time'
+        'af_a_clock' = 'time synchronisation started ({0})'
+        'af_h_clock' = 'set the time (chronyd, or timedatectl set-ntp true), then run the installer again'
+        'af_p_src' = 'the download source does not answer ({0})'
+        'af_a_src' = 'switched to {0}'
+        'af_h_src' = 'no other source answers: check the network, or give a mirror with --base-url'
+        'af_p_label' = 'SELinux labels of ToutWAF files are wrong ({0})'
+        'af_a_label' = 'labels restored with restorecon ({0} paths)'
+        'af_h_label' = 'run restorecon -Rv on the ToutWAF directories and read: ausearch -m avc -ts recent'
+        'af_p_bool' = 'SELinux refuses what a boolean allows ({0})'
+        'af_a_bool' = 'SELinux boolean turned on: {0}'
+        'af_p_perm' = 'owner or permissions are wrong ({0})'
+        'af_a_perm' = 'owner and permissions restored ({0})'
+        'af_h_perm' = 'check the owner of the data and configuration directories'
+        'af_p_exec' = 'a program cannot be executed ({0})'
+        'af_a_exec' = 'execute permission restored on {0}'
+        'af_p_v6' = 'IPv6 is not available but the configuration listens on [::]'
+        'af_a_v6' = '[::] replaced by 0.0.0.0 in {0} file(s) (copies: *.autofix-bak)'
+        'af_p_port' = 'port {0} is taken by {1} ({2})'
+        'af_a_port' = 'service stopped: {0}'
+        'af_h_port' = 'use --autofix-stop-conflicts to let the installer stop {0}, or free the port yourself'
+        'af_p_fw' = 'the firewall ({0}) blocks port(s) {1}'
+        'af_a_fw' = 'port(s) {0} opened ({1})'
+        'af_h_fw' = 'open port(s) {0} in your firewall'
+        'af_h_fw9444' = 'port 9444 (console <-> node link) is never opened to everyone and no source address is known: give --autofix-agent-from ADDRESS, or open it for your nodes only ({0})'
+        'af_h_nftkeep' = 'the nft rule for port {0} lasts until the next reboot: add it to your nftables configuration to keep it'
+        'af_p_key' = 'a package key or repository is expired or unreadable ({0})'
+        'af_a_key_cache' = 'package metadata cache cleaned and downloaded again'
+        'af_a_key_off' = 'ToutWAF mirror repository disabled (the distribution''s own repositories stay): {0}'
+        'af_h_key' = 'update the distribution''s release package (it carries the signing keys), then run the installer again'
+        'af_p_unitload' = 'systemd has not reloaded the unit files'
+        'af_a_unitload' = 'systemd configuration reloaded (daemon-reload)'
+        'af_p_startlimit' = '{0} hit the systemd start limit'
+        'af_a_startlimit' = 'start counter of {0} reset'
+        'af_p_nofile' = '{0} runs out of open files'
+        'af_a_nofile' = 'open files limit raised for {0}'
+        'af_p_slow' = '{0} is slow to become ready but keeps working'
+        'af_a_slow' = 'waited {0} s more'
     }
     'fr' = @{
         'tagline' = 'Protection des applications web et des API'
@@ -748,6 +815,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = 'Cette version ne contient pas d''extras : cette console ne proposera pas Windows.'
         'st_extras_ok_noav' = 'Extras : install\u00e9s (agent Windows)'
         'st_extras_none_noav' = 'Extras absents : Windows n''est pas propos\u00e9. Lancez en root : {0}'
+        'af_line' = 'Probl\u00e8me d\u00e9tect\u00e9 : {0} ; correction appliqu\u00e9e : {1} ; nouvel essai : {2}'
+        'af_plan_line' = 'Probl\u00e8me d\u00e9tect\u00e9 : {0} ; correction pr\u00e9vue : {1} (--autofix-dry-run : rien n''est modifi\u00e9)'
+        'af_failed_line' = 'Probl\u00e8me d\u00e9tect\u00e9 : {0} ; la correction a \u00e9chou\u00e9 : {1} ; pas de nouvel essai'
+        'af_manual_line' = 'Probl\u00e8me d\u00e9tect\u00e9 : {0} ; \u00e0 faire \u00e0 la main : {1}'
+        'af_try_ok' = 'r\u00e9ussi'
+        'af_try_ko' = '\u00e9chou\u00e9'
+        'af_try_run' = 'en cours'
+        'af_try_manual' = '\u00e0 relancer par vous'
+        'af_undo' = 'pour annuler : {0}'
+        'af_noself' = 'Les corrections ont \u00e9t\u00e9 faites, mais cet installateur a \u00e9t\u00e9 lu depuis un tube et ne peut pas se relancer : relancez la m\u00eame commande.'
+        'af_giveup' = 'Plus d''essai automatique (limite : {0}).'
+        'af_diag_ready' = 'Un diagnostic pr\u00eat \u00e0 envoyer a \u00e9t\u00e9 \u00e9crit dans {0} (les secrets sont masqu\u00e9s).'
+        'af_none' = 'Rien \u00e0 corriger sur cette machine pour le moment.'
+        'af_w_full' = 'plein ({0} Mo libres)'
+        'af_w_noexec' = 'mont\u00e9 en noexec'
+        'af_w_nowrite' = 'non inscriptible'
+        'af_p_tmp' = 'le r\u00e9pertoire de travail {0} est inutilisable ({1})'
+        'af_a_tmp' = 'r\u00e9pertoire de travail d\u00e9plac\u00e9 vers {0}'
+        'af_p_disk' = 'disque presque plein sur {0} ({1} %% utilis\u00e9, {2} Mo libres)'
+        'af_a_disk' = 'caches de paquets et anciens journaux nettoy\u00e9s (donn\u00e9es intactes)'
+        'af_h_disk' = 'lib\u00e9rez de la place (l''installateur ne supprime jamais de donn\u00e9es), puis relancez-le'
+        'af_p_lock' = 'le gestionnaire de paquets est occup\u00e9 ou verrouill\u00e9 ({0})'
+        'af_a_lock_wait' = 'attendu qu''il termine (au plus {0} s)'
+        'af_a_lock_stale' = 'verrou obsol\u00e8te mis de c\u00f4t\u00e9 : {0}'
+        'af_a_lock_none' = 'plus rien ne tient le verrou'
+        'af_h_lock' = '{0} tourne encore : attendez sa fin, puis relancez l''installateur'
+        'af_p_clock' = 'l''horloge est d\u00e9cal\u00e9e de {0} s par rapport \u00e0 l''heure r\u00e9elle'
+        'af_a_clock' = 'synchronisation de l''heure lanc\u00e9e ({0})'
+        'af_h_clock' = 'mettez l''heure \u00e0 jour (chronyd, ou timedatectl set-ntp true), puis relancez l''installateur'
+        'af_p_src' = 'la source de t\u00e9l\u00e9chargement ne r\u00e9pond pas ({0})'
+        'af_a_src' = 'bascule sur {0}'
+        'af_h_src' = 'aucune autre source ne r\u00e9pond : v\u00e9rifiez le r\u00e9seau, ou indiquez un miroir avec --base-url'
+        'af_p_label' = 'les \u00e9tiquettes SELinux des fichiers de ToutWAF sont fausses ({0})'
+        'af_a_label' = '\u00e9tiquettes r\u00e9tablies avec restorecon ({0} chemins)'
+        'af_h_label' = 'lancez restorecon -Rv sur les r\u00e9pertoires de ToutWAF et lisez : ausearch -m avc -ts recent'
+        'af_p_bool' = 'SELinux refuse ce qu''un bool\u00e9en autorise ({0})'
+        'af_a_bool' = 'bool\u00e9en SELinux activ\u00e9 : {0}'
+        'af_p_perm' = 'propri\u00e9taire ou permissions erron\u00e9s ({0})'
+        'af_a_perm' = 'propri\u00e9taire et permissions r\u00e9tablis ({0})'
+        'af_h_perm' = 'v\u00e9rifiez le propri\u00e9taire des r\u00e9pertoires de donn\u00e9es et de configuration'
+        'af_p_exec' = 'un programme n''est pas ex\u00e9cutable ({0})'
+        'af_a_exec' = 'droit d''ex\u00e9cution r\u00e9tabli sur {0}'
+        'af_p_v6' = 'IPv6 est absent mais la configuration \u00e9coute sur [::]'
+        'af_a_v6' = '[::] remplac\u00e9 par 0.0.0.0 dans {0} fichier(s) (copies : *.autofix-bak)'
+        'af_p_port' = 'le port {0} est occup\u00e9 par {1} ({2})'
+        'af_a_port' = 'service arr\u00eat\u00e9 : {0}'
+        'af_h_port' = 'utilisez --autofix-stop-conflicts pour que l''installateur arr\u00eate {0}, ou lib\u00e9rez le port vous-m\u00eame'
+        'af_p_fw' = 'le pare-feu ({0}) bloque le ou les ports {1}'
+        'af_a_fw' = 'port(s) {0} ouvert(s) ({1})'
+        'af_h_fw' = 'ouvrez le ou les ports {0} dans votre pare-feu'
+        'af_h_fw9444' = 'le port 9444 (lien console <-> n\u0153ud) n''est jamais ouvert \u00e0 tout le monde et aucune adresse source n''est connue : donnez --autofix-agent-from ADRESSE, ou ouvrez-le pour vos n\u0153uds seulement ({0})'
+        'af_h_nftkeep' = 'la r\u00e8gle nft du port {0} dure jusqu''au prochain red\u00e9marrage : ajoutez-la \u00e0 votre configuration nftables pour la garder'
+        'af_p_key' = 'une cl\u00e9 ou un d\u00e9p\u00f4t de paquets est expir\u00e9 ou illisible ({0})'
+        'af_a_key_cache' = 'cache des m\u00e9tadonn\u00e9es de paquets vid\u00e9 et ret\u00e9l\u00e9charg\u00e9'
+        'af_a_key_off' = 'd\u00e9p\u00f4t du miroir ToutWAF d\u00e9sactiv\u00e9 (les d\u00e9p\u00f4ts de la distribution restent) : {0}'
+        'af_h_key' = 'mettez \u00e0 jour le paquet release de la distribution (il porte les cl\u00e9s de signature), puis relancez l''installateur'
+        'af_p_unitload' = 'systemd n''a pas recharg\u00e9 les fichiers d''unit\u00e9s'
+        'af_a_unitload' = 'configuration de systemd recharg\u00e9e (daemon-reload)'
+        'af_p_startlimit' = '{0} a atteint la limite de d\u00e9marrages de systemd'
+        'af_a_startlimit' = 'compteur de d\u00e9marrages de {0} remis \u00e0 z\u00e9ro'
+        'af_p_nofile' = '{0} manque de fichiers ouverts'
+        'af_a_nofile' = 'limite de fichiers ouverts relev\u00e9e pour {0}'
+        'af_p_slow' = '{0} met du temps \u00e0 \u00eatre pr\u00eat mais continue de travailler'
+        'af_a_slow' = 'attendu {0} s de plus'
     }
     'es' = @{
         'tagline' = 'Protecci\u00f3n de aplicaciones web y API'
@@ -1057,6 +1188,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = 'Esta versi\u00f3n no incluye extras: esta consola no ofrecer\u00e1 Windows.'
         'st_extras_ok_noav' = 'Extras: instalados (agente de Windows)'
         'st_extras_none_noav' = 'Extras ausentes: Windows no se ofrece. Ejecute como root: {0}'
+        'af_line' = 'Problema detectado: {0}; correcci\u00f3n aplicada: {1}; nuevo intento: {2}'
+        'af_plan_line' = 'Problema detectado: {0}; correcci\u00f3n prevista: {1} (--autofix-dry-run: no se cambia nada)'
+        'af_failed_line' = 'Problema detectado: {0}; la correcci\u00f3n fall\u00f3: {1}; sin nuevo intento'
+        'af_manual_line' = 'Problema detectado: {0}; a hacer a mano: {1}'
+        'af_try_ok' = 'logrado'
+        'af_try_ko' = 'fallido'
+        'af_try_run' = 'en curso'
+        'af_try_manual' = 'para que lo ejecute de nuevo'
+        'af_undo' = 'para deshacer: {0}'
+        'af_noself' = 'Se hicieron las correcciones, pero este instalador se ley\u00f3 desde una tuber\u00eda y no puede reiniciarse: ejecute de nuevo el mismo comando.'
+        'af_giveup' = 'No hay m\u00e1s intentos autom\u00e1ticos (l\u00edmite: {0}).'
+        'af_diag_ready' = 'Se escribi\u00f3 un diagn\u00f3stico listo para enviar en {0} (los secretos est\u00e1n ocultos).'
+        'af_none' = 'Nada que corregir en esta m\u00e1quina por ahora.'
+        'af_w_full' = 'lleno ({0} MB libres)'
+        'af_w_noexec' = 'montado como noexec'
+        'af_w_nowrite' = 'no se puede escribir'
+        'af_p_tmp' = 'el directorio de trabajo {0} no se puede usar ({1})'
+        'af_a_tmp' = 'directorio de trabajo movido a {0}'
+        'af_p_disk' = 'disco casi lleno en {0} ({1}%% usado, {2} MB libres)'
+        'af_a_disk' = 'cach\u00e9s de paquetes y registros antiguos limpiados (datos intactos)'
+        'af_h_disk' = 'libere espacio (el instalador nunca borra datos) y vuelva a ejecutarlo'
+        'af_p_lock' = 'el gestor de paquetes est\u00e1 en uso o bloqueado ({0})'
+        'af_a_lock_wait' = 'esperado a que termine (como m\u00e1ximo {0} s)'
+        'af_a_lock_stale' = 'bloqueo obsoleto apartado: {0}'
+        'af_a_lock_none' = 'ya nada mantiene el bloqueo'
+        'af_h_lock' = '{0} sigue en ejecuci\u00f3n: espere a que termine y vuelva a ejecutar el instalador'
+        'af_p_clock' = 'el reloj est\u00e1 desfasado {0} s respecto a la hora real'
+        'af_a_clock' = 'sincronizaci\u00f3n de hora iniciada ({0})'
+        'af_h_clock' = 'ajuste la hora (chronyd, o timedatectl set-ntp true) y vuelva a ejecutar el instalador'
+        'af_p_src' = 'la fuente de descarga no responde ({0})'
+        'af_a_src' = 'cambiado a {0}'
+        'af_h_src' = 'ninguna otra fuente responde: revise la red o indique un espejo con --base-url'
+        'af_p_label' = 'las etiquetas SELinux de los archivos de ToutWAF son incorrectas ({0})'
+        'af_a_label' = 'etiquetas restauradas con restorecon ({0} rutas)'
+        'af_h_label' = 'ejecute restorecon -Rv en los directorios de ToutWAF y lea: ausearch -m avc -ts recent'
+        'af_p_bool' = 'SELinux rechaza lo que un booleano permite ({0})'
+        'af_a_bool' = 'booleano SELinux activado: {0}'
+        'af_p_perm' = 'propietario o permisos incorrectos ({0})'
+        'af_a_perm' = 'propietario y permisos restaurados ({0})'
+        'af_h_perm' = 'compruebe el propietario de los directorios de datos y configuraci\u00f3n'
+        'af_p_exec' = 'un programa no es ejecutable ({0})'
+        'af_a_exec' = 'permiso de ejecuci\u00f3n restaurado en {0}'
+        'af_p_v6' = 'IPv6 no est\u00e1 disponible pero la configuraci\u00f3n escucha en [::]'
+        'af_a_v6' = '[::] sustituido por 0.0.0.0 en {0} archivo(s) (copias: *.autofix-bak)'
+        'af_p_port' = 'el puerto {0} est\u00e1 ocupado por {1} ({2})'
+        'af_a_port' = 'servicio detenido: {0}'
+        'af_h_port' = 'use --autofix-stop-conflicts para que el instalador detenga {0}, o libere el puerto usted mismo'
+        'af_p_fw' = 'el cortafuegos ({0}) bloquea el puerto o puertos {1}'
+        'af_a_fw' = 'puerto(s) {0} abierto(s) ({1})'
+        'af_h_fw' = 'abra el puerto o puertos {0} en su cortafuegos'
+        'af_h_fw9444' = 'el puerto 9444 (enlace consola <-> nodo) nunca se abre a todos y no se conoce ninguna direcci\u00f3n de origen: indique --autofix-agent-from DIRECCI\u00d3N o \u00e1bralo solo para sus nodos ({0})'
+        'af_h_nftkeep' = 'la regla nft del puerto {0} dura hasta el pr\u00f3ximo reinicio: a\u00f1\u00e1dala a su configuraci\u00f3n nftables para conservarla'
+        'af_p_key' = 'una clave o repositorio de paquetes ha caducado o no se puede leer ({0})'
+        'af_a_key_cache' = 'cach\u00e9 de metadatos de paquetes limpiado y descargado de nuevo'
+        'af_a_key_off' = 'repositorio del espejo ToutWAF desactivado (los de la distribuci\u00f3n se mantienen): {0}'
+        'af_h_key' = 'actualice el paquete release de la distribuci\u00f3n (contiene las claves de firma) y vuelva a ejecutar el instalador'
+        'af_p_unitload' = 'systemd no ha recargado los archivos de unidad'
+        'af_a_unitload' = 'configuraci\u00f3n de systemd recargada (daemon-reload)'
+        'af_p_startlimit' = '{0} alcanz\u00f3 el l\u00edmite de arranques de systemd'
+        'af_a_startlimit' = 'contador de arranques de {0} reiniciado'
+        'af_p_nofile' = '{0} se queda sin archivos abiertos'
+        'af_a_nofile' = 'l\u00edmite de archivos abiertos aumentado para {0}'
+        'af_p_slow' = '{0} tarda en estar listo pero sigue trabajando'
+        'af_a_slow' = 'esperados {0} s m\u00e1s'
     }
     'de' = @{
         'tagline' = 'Schutz f\u00fcr Webanwendungen und APIs'
@@ -1366,6 +1561,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = 'Diese Version enth\u00e4lt keine Extras: diese Konsole bietet Windows nicht an.'
         'st_extras_ok_noav' = 'Extras: installiert (Windows-Agent)'
         'st_extras_none_noav' = 'Extras fehlen: Windows wird nicht angeboten. Als root ausf\u00fchren: {0}'
+        'af_line' = 'Problem erkannt: {0}; Korrektur angewendet: {1}; neuer Versuch: {2}'
+        'af_plan_line' = 'Problem erkannt: {0}; geplante Korrektur: {1} (--autofix-dry-run: nichts wird ge\u00e4ndert)'
+        'af_failed_line' = 'Problem erkannt: {0}; Korrektur fehlgeschlagen: {1}; kein neuer Versuch'
+        'af_manual_line' = 'Problem erkannt: {0}; von Hand zu tun: {1}'
+        'af_try_ok' = 'erfolgreich'
+        'af_try_ko' = 'fehlgeschlagen'
+        'af_try_run' = 'l\u00e4uft'
+        'af_try_manual' = 'von Ihnen erneut zu starten'
+        'af_undo' = 'zum R\u00fcckg\u00e4ngigmachen: {0}'
+        'af_noself' = 'Die Korrekturen wurden vorgenommen, aber dieser Installer wurde aus einer Pipe gelesen und kann sich nicht neu starten: F\u00fchren Sie denselben Befehl erneut aus.'
+        'af_giveup' = 'Keine weiteren automatischen Versuche (Grenze: {0}).'
+        'af_diag_ready' = 'Eine versandfertige Diagnose wurde nach {0} geschrieben (Geheimnisse sind ausgeblendet).'
+        'af_none' = 'Derzeit ist auf diesem Rechner nichts zu korrigieren.'
+        'af_w_full' = 'voll ({0} MB frei)'
+        'af_w_noexec' = 'als noexec eingeh\u00e4ngt'
+        'af_w_nowrite' = 'nicht beschreibbar'
+        'af_p_tmp' = 'das Arbeitsverzeichnis {0} ist unbrauchbar ({1})'
+        'af_a_tmp' = 'Arbeitsverzeichnis nach {0} verlegt'
+        'af_p_disk' = 'Datentr\u00e4ger fast voll auf {0} ({1}%% belegt, {2} MB frei)'
+        'af_a_disk' = 'Paket-Caches und alte Protokolle bereinigt (Daten unber\u00fchrt)'
+        'af_h_disk' = 'Schaffen Sie Platz (der Installer l\u00f6scht nie Daten) und starten Sie ihn erneut'
+        'af_p_lock' = 'der Paketmanager ist belegt oder gesperrt ({0})'
+        'af_a_lock_wait' = 'gewartet, bis er fertig ist (h\u00f6chstens {0} s)'
+        'af_a_lock_stale' = 'veraltete Sperre beiseitegelegt: {0}'
+        'af_a_lock_none' = 'nichts h\u00e4lt die Sperre mehr'
+        'af_h_lock' = '{0} l\u00e4uft noch: warten Sie das Ende ab und starten Sie den Installer erneut'
+        'af_p_clock' = 'die Uhr weicht um {0} s von der echten Zeit ab'
+        'af_a_clock' = 'Zeitsynchronisation gestartet ({0})'
+        'af_h_clock' = 'Stellen Sie die Uhrzeit ein (chronyd oder timedatectl set-ntp true) und starten Sie den Installer erneut'
+        'af_p_src' = 'die Download-Quelle antwortet nicht ({0})'
+        'af_a_src' = 'umgeschaltet auf {0}'
+        'af_h_src' = 'keine andere Quelle antwortet: pr\u00fcfen Sie das Netzwerk oder geben Sie mit --base-url einen Spiegel an'
+        'af_p_label' = 'die SELinux-Labels der ToutWAF-Dateien sind falsch ({0})'
+        'af_a_label' = 'Labels mit restorecon wiederhergestellt ({0} Pfade)'
+        'af_h_label' = 'f\u00fchren Sie restorecon -Rv auf den ToutWAF-Verzeichnissen aus und lesen Sie: ausearch -m avc -ts recent'
+        'af_p_bool' = 'SELinux verweigert, was ein Boolean erlaubt ({0})'
+        'af_a_bool' = 'SELinux-Boolean eingeschaltet: {0}'
+        'af_p_perm' = 'Eigent\u00fcmer oder Berechtigungen falsch ({0})'
+        'af_a_perm' = 'Eigent\u00fcmer und Berechtigungen wiederhergestellt ({0})'
+        'af_h_perm' = 'pr\u00fcfen Sie den Eigent\u00fcmer der Daten- und Konfigurationsverzeichnisse'
+        'af_p_exec' = 'ein Programm ist nicht ausf\u00fchrbar ({0})'
+        'af_a_exec' = 'Ausf\u00fchrungsrecht wiederhergestellt f\u00fcr {0}'
+        'af_p_v6' = 'IPv6 ist nicht verf\u00fcgbar, aber die Konfiguration lauscht auf [::]'
+        'af_a_v6' = '[::] durch 0.0.0.0 ersetzt in {0} Datei(en) (Kopien: *.autofix-bak)'
+        'af_p_port' = 'Port {0} ist belegt durch {1} ({2})'
+        'af_a_port' = 'Dienst gestoppt: {0}'
+        'af_h_port' = 'verwenden Sie --autofix-stop-conflicts, damit der Installer {0} stoppt, oder geben Sie den Port selbst frei'
+        'af_p_fw' = 'die Firewall ({0}) blockiert Port(s) {1}'
+        'af_a_fw' = 'Port(s) {0} ge\u00f6ffnet ({1})'
+        'af_h_fw' = '\u00f6ffnen Sie Port(s) {0} in Ihrer Firewall'
+        'af_h_fw9444' = 'Port 9444 (Verbindung Konsole <-> Knoten) wird nie f\u00fcr alle ge\u00f6ffnet und keine Quelladresse ist bekannt: geben Sie --autofix-agent-from ADRESSE an oder \u00f6ffnen Sie ihn nur f\u00fcr Ihre Knoten ({0})'
+        'af_h_nftkeep' = 'die nft-Regel f\u00fcr Port {0} gilt bis zum n\u00e4chsten Neustart: nehmen Sie sie in Ihre nftables-Konfiguration auf, um sie zu behalten'
+        'af_p_key' = 'ein Paketschl\u00fcssel oder Repository ist abgelaufen oder unlesbar ({0})'
+        'af_a_key_cache' = 'Paket-Metadaten-Cache geleert und neu geladen'
+        'af_a_key_off' = 'Repository des ToutWAF-Spiegels deaktiviert (die der Distribution bleiben): {0}'
+        'af_h_key' = 'aktualisieren Sie das Release-Paket der Distribution (es enth\u00e4lt die Signaturschl\u00fcssel) und starten Sie den Installer erneut'
+        'af_p_unitload' = 'systemd hat die Unit-Dateien nicht neu geladen'
+        'af_a_unitload' = 'systemd-Konfiguration neu geladen (daemon-reload)'
+        'af_p_startlimit' = '{0} hat das Startlimit von systemd erreicht'
+        'af_a_startlimit' = 'Startz\u00e4hler von {0} zur\u00fcckgesetzt'
+        'af_p_nofile' = '{0} hat zu wenige offene Dateien zur Verf\u00fcgung'
+        'af_a_nofile' = 'Limit offener Dateien f\u00fcr {0} erh\u00f6ht'
+        'af_p_slow' = '{0} braucht lange bis zur Bereitschaft, arbeitet aber weiter'
+        'af_a_slow' = '{0} s l\u00e4nger gewartet'
     }
     'it' = @{
         'tagline' = 'Protezione di applicazioni web e API'
@@ -1675,6 +1934,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = 'Questa versione non contiene extra: questa console non proporr\u00e0 Windows.'
         'st_extras_ok_noav' = 'Extra: installati (agente Windows)'
         'st_extras_none_noav' = 'Extra mancanti: Windows non \u00e8 proposto. Eseguire come root: {0}'
+        'af_line' = 'Problema rilevato: {0}; correzione applicata: {1}; nuovo tentativo: {2}'
+        'af_plan_line' = 'Problema rilevato: {0}; correzione prevista: {1} (--autofix-dry-run: nulla viene modificato)'
+        'af_failed_line' = 'Problema rilevato: {0}; correzione non riuscita: {1}; nessun nuovo tentativo'
+        'af_manual_line' = 'Problema rilevato: {0}; da fare a mano: {1}'
+        'af_try_ok' = 'riuscito'
+        'af_try_ko' = 'non riuscito'
+        'af_try_run' = 'in corso'
+        'af_try_manual' = 'da rilanciare manualmente'
+        'af_undo' = 'per annullare: {0}'
+        'af_noself' = 'Le correzioni sono state fatte, ma questo installer \u00e8 stato letto da una pipe e non pu\u00f2 riavviarsi: eseguire di nuovo lo stesso comando.'
+        'af_giveup' = 'Nessun altro tentativo automatico (limite: {0}).'
+        'af_diag_ready' = 'Una diagnostica pronta da inviare \u00e8 stata scritta in {0} (i segreti sono nascosti).'
+        'af_none' = 'Nulla da correggere su questa macchina al momento.'
+        'af_w_full' = 'pieno ({0} MB liberi)'
+        'af_w_noexec' = 'montato come noexec'
+        'af_w_nowrite' = 'non scrivibile'
+        'af_p_tmp' = 'la directory di lavoro {0} \u00e8 inutilizzabile ({1})'
+        'af_a_tmp' = 'directory di lavoro spostata in {0}'
+        'af_p_disk' = 'disco quasi pieno su {0} ({1}%% usato, {2} MB liberi)'
+        'af_a_disk' = 'cache dei pacchetti e vecchi log puliti (dati intatti)'
+        'af_h_disk' = 'liberare spazio (l''installer non cancella mai dati) e rilanciarlo'
+        'af_p_lock' = 'il gestore di pacchetti \u00e8 occupato o bloccato ({0})'
+        'af_a_lock_wait' = 'atteso che finisca (al massimo {0} s)'
+        'af_a_lock_stale' = 'blocco obsoleto messo da parte: {0}'
+        'af_a_lock_none' = 'nulla trattiene pi\u00f9 il blocco'
+        'af_h_lock' = '{0} \u00e8 ancora in esecuzione: attendere la fine e rilanciare l''installer'
+        'af_p_clock' = 'l''orologio \u00e8 sfasato di {0} s rispetto all''ora reale'
+        'af_a_clock' = 'sincronizzazione dell''ora avviata ({0})'
+        'af_h_clock' = 'impostare l''ora (chronyd, o timedatectl set-ntp true) e rilanciare l''installer'
+        'af_p_src' = 'la sorgente di download non risponde ({0})'
+        'af_a_src' = 'passato a {0}'
+        'af_h_src' = 'nessun''altra sorgente risponde: controllare la rete o indicare un mirror con --base-url'
+        'af_p_label' = 'le etichette SELinux dei file di ToutWAF sono errate ({0})'
+        'af_a_label' = 'etichette ripristinate con restorecon ({0} percorsi)'
+        'af_h_label' = 'eseguire restorecon -Rv sulle directory di ToutWAF e leggere: ausearch -m avc -ts recent'
+        'af_p_bool' = 'SELinux rifiuta ci\u00f2 che un booleano consente ({0})'
+        'af_a_bool' = 'booleano SELinux attivato: {0}'
+        'af_p_perm' = 'proprietario o permessi errati ({0})'
+        'af_a_perm' = 'proprietario e permessi ripristinati ({0})'
+        'af_h_perm' = 'controllare il proprietario delle directory dei dati e della configurazione'
+        'af_p_exec' = 'un programma non \u00e8 eseguibile ({0})'
+        'af_a_exec' = 'permesso di esecuzione ripristinato su {0}'
+        'af_p_v6' = 'IPv6 non \u00e8 disponibile ma la configurazione ascolta su [::]'
+        'af_a_v6' = '[::] sostituito con 0.0.0.0 in {0} file (copie: *.autofix-bak)'
+        'af_p_port' = 'la porta {0} \u00e8 occupata da {1} ({2})'
+        'af_a_port' = 'servizio fermato: {0}'
+        'af_h_port' = 'usare --autofix-stop-conflicts perch\u00e9 l''installer fermi {0}, o liberare la porta manualmente'
+        'af_p_fw' = 'il firewall ({0}) blocca la porta o le porte {1}'
+        'af_a_fw' = 'porta/e {0} aperta/e ({1})'
+        'af_h_fw' = 'aprire la porta o le porte {0} nel firewall'
+        'af_h_fw9444' = 'la porta 9444 (collegamento console <-> nodo) non viene mai aperta a tutti e non \u00e8 nota alcuna sorgente: indicare --autofix-agent-from INDIRIZZO, o aprirla solo per i propri nodi ({0})'
+        'af_h_nftkeep' = 'la regola nft per la porta {0} dura fino al prossimo riavvio: aggiungerla alla configurazione nftables per conservarla'
+        'af_p_key' = 'una chiave o un repository di pacchetti \u00e8 scaduto o illeggibile ({0})'
+        'af_a_key_cache' = 'cache dei metadati dei pacchetti svuotata e riscaricata'
+        'af_a_key_off' = 'repository del mirror ToutWAF disattivato (quelli della distribuzione restano): {0}'
+        'af_h_key' = 'aggiornare il pacchetto release della distribuzione (contiene le chiavi di firma) e rilanciare l''installer'
+        'af_p_unitload' = 'systemd non ha ricaricato i file di unit\u00e0'
+        'af_a_unitload' = 'configurazione di systemd ricaricata (daemon-reload)'
+        'af_p_startlimit' = '{0} ha raggiunto il limite di avvii di systemd'
+        'af_a_startlimit' = 'contatore di avvii di {0} azzerato'
+        'af_p_nofile' = '{0} esaurisce i file aperti'
+        'af_a_nofile' = 'limite di file aperti aumentato per {0}'
+        'af_p_slow' = '{0} impiega a diventare pronto ma continua a lavorare'
+        'af_a_slow' = 'atteso {0} s in pi\u00f9'
     }
     'pt' = @{
         'tagline' = 'Prote\u00e7\u00e3o de aplica\u00e7\u00f5es web e APIs'
@@ -1984,6 +2307,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = 'Esta vers\u00e3o n\u00e3o inclui extras: esta consola n\u00e3o oferecer\u00e1 o Windows.'
         'st_extras_ok_noav' = 'Extras: instalados (agente Windows)'
         'st_extras_none_noav' = 'Extras em falta: o Windows n\u00e3o \u00e9 oferecido. Execute como root: {0}'
+        'af_line' = 'Problema detetado: {0}; corre\u00e7\u00e3o aplicada: {1}; nova tentativa: {2}'
+        'af_plan_line' = 'Problema detetado: {0}; corre\u00e7\u00e3o prevista: {1} (--autofix-dry-run: nada \u00e9 alterado)'
+        'af_failed_line' = 'Problema detetado: {0}; a corre\u00e7\u00e3o falhou: {1}; sem nova tentativa'
+        'af_manual_line' = 'Problema detetado: {0}; a fazer manualmente: {1}'
+        'af_try_ok' = 'bem-sucedida'
+        'af_try_ko' = 'falhou'
+        'af_try_run' = 'em curso'
+        'af_try_manual' = 'para voltar a executar'
+        'af_undo' = 'para desfazer: {0}'
+        'af_noself' = 'As corre\u00e7\u00f5es foram feitas, mas este instalador foi lido de um pipe e n\u00e3o pode reiniciar-se: execute de novo o mesmo comando.'
+        'af_giveup' = 'Sem mais tentativas autom\u00e1ticas (limite: {0}).'
+        'af_diag_ready' = 'Foi escrito um diagn\u00f3stico pronto a enviar em {0} (os segredos est\u00e3o ocultos).'
+        'af_none' = 'Nada a corrigir nesta m\u00e1quina de momento.'
+        'af_w_full' = 'cheio ({0} MB livres)'
+        'af_w_noexec' = 'montado como noexec'
+        'af_w_nowrite' = 'n\u00e3o grav\u00e1vel'
+        'af_p_tmp' = 'o diret\u00f3rio de trabalho {0} \u00e9 inutiliz\u00e1vel ({1})'
+        'af_a_tmp' = 'diret\u00f3rio de trabalho movido para {0}'
+        'af_p_disk' = 'disco quase cheio em {0} ({1}%% usado, {2} MB livres)'
+        'af_a_disk' = 'caches de pacotes e registos antigos limpos (dados intactos)'
+        'af_h_disk' = 'liberte espa\u00e7o (o instalador nunca apaga dados) e volte a execut\u00e1-lo'
+        'af_p_lock' = 'o gestor de pacotes est\u00e1 ocupado ou bloqueado ({0})'
+        'af_a_lock_wait' = 'aguardado que termine (no m\u00e1ximo {0} s)'
+        'af_a_lock_stale' = 'bloqueio obsoleto posto de lado: {0}'
+        'af_a_lock_none' = 'nada mant\u00e9m o bloqueio'
+        'af_h_lock' = '{0} ainda est\u00e1 em execu\u00e7\u00e3o: aguarde o fim e volte a executar o instalador'
+        'af_p_clock' = 'o rel\u00f3gio est\u00e1 desfasado {0} s da hora real'
+        'af_a_clock' = 'sincroniza\u00e7\u00e3o da hora iniciada ({0})'
+        'af_h_clock' = 'acerte a hora (chronyd, ou timedatectl set-ntp true) e volte a executar o instalador'
+        'af_p_src' = 'a fonte de transfer\u00eancia n\u00e3o responde ({0})'
+        'af_a_src' = 'mudado para {0}'
+        'af_h_src' = 'nenhuma outra fonte responde: verifique a rede ou indique um espelho com --base-url'
+        'af_p_label' = 'as etiquetas SELinux dos ficheiros do ToutWAF est\u00e3o erradas ({0})'
+        'af_a_label' = 'etiquetas restauradas com restorecon ({0} caminhos)'
+        'af_h_label' = 'execute restorecon -Rv nos diret\u00f3rios do ToutWAF e leia: ausearch -m avc -ts recent'
+        'af_p_bool' = 'o SELinux recusa o que um booleano permite ({0})'
+        'af_a_bool' = 'booleano SELinux ativado: {0}'
+        'af_p_perm' = 'propriet\u00e1rio ou permiss\u00f5es errados ({0})'
+        'af_a_perm' = 'propriet\u00e1rio e permiss\u00f5es restaurados ({0})'
+        'af_h_perm' = 'verifique o propriet\u00e1rio dos diret\u00f3rios de dados e de configura\u00e7\u00e3o'
+        'af_p_exec' = 'um programa n\u00e3o \u00e9 execut\u00e1vel ({0})'
+        'af_a_exec' = 'permiss\u00e3o de execu\u00e7\u00e3o restaurada em {0}'
+        'af_p_v6' = 'o IPv6 n\u00e3o est\u00e1 dispon\u00edvel mas a configura\u00e7\u00e3o escuta em [::]'
+        'af_a_v6' = '[::] substitu\u00eddo por 0.0.0.0 em {0} ficheiro(s) (c\u00f3pias: *.autofix-bak)'
+        'af_p_port' = 'a porta {0} est\u00e1 ocupada por {1} ({2})'
+        'af_a_port' = 'servi\u00e7o parado: {0}'
+        'af_h_port' = 'use --autofix-stop-conflicts para o instalador parar {0}, ou libere a porta manualmente'
+        'af_p_fw' = 'a firewall ({0}) bloqueia a porta ou portas {1}'
+        'af_a_fw' = 'porta(s) {0} aberta(s) ({1})'
+        'af_h_fw' = 'abra a porta ou portas {0} na sua firewall'
+        'af_h_fw9444' = 'a porta 9444 (liga\u00e7\u00e3o consola <-> n\u00f3) nunca \u00e9 aberta a todos e nenhum endere\u00e7o de origem \u00e9 conhecido: indique --autofix-agent-from ENDERE\u00c7O, ou abra-a s\u00f3 para os seus n\u00f3s ({0})'
+        'af_h_nftkeep' = 'a regra nft da porta {0} dura at\u00e9 ao pr\u00f3ximo rein\u00edcio: adicione-a \u00e0 sua configura\u00e7\u00e3o nftables para a manter'
+        'af_p_key' = 'uma chave ou reposit\u00f3rio de pacotes expirou ou est\u00e1 ileg\u00edvel ({0})'
+        'af_a_key_cache' = 'cache de metadados de pacotes limpa e transferida de novo'
+        'af_a_key_off' = 'reposit\u00f3rio do espelho ToutWAF desativado (os da distribui\u00e7\u00e3o mant\u00eam-se): {0}'
+        'af_h_key' = 'atualize o pacote release da distribui\u00e7\u00e3o (cont\u00e9m as chaves de assinatura) e volte a executar o instalador'
+        'af_p_unitload' = 'o systemd n\u00e3o recarregou os ficheiros de unidade'
+        'af_a_unitload' = 'configura\u00e7\u00e3o do systemd recarregada (daemon-reload)'
+        'af_p_startlimit' = '{0} atingiu o limite de arranques do systemd'
+        'af_a_startlimit' = 'contador de arranques de {0} reposto'
+        'af_p_nofile' = '{0} fica sem ficheiros abertos'
+        'af_a_nofile' = 'limite de ficheiros abertos aumentado para {0}'
+        'af_p_slow' = '{0} demora a ficar pronto mas continua a trabalhar'
+        'af_a_slow' = 'aguardados mais {0} s'
     }
     'nl' = @{
         'tagline' = 'Bescherming van webapplicaties en API''s'
@@ -2293,6 +2680,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = 'Deze versie bevat geen extra''s: deze console biedt Windows niet aan.'
         'st_extras_ok_noav' = 'Extra''s: ge\u00efnstalleerd (Windows-agent)'
         'st_extras_none_noav' = 'Extra''s ontbreken: Windows wordt niet aangeboden. Voer uit als root: {0}'
+        'af_line' = 'Probleem gevonden: {0}; correctie toegepast: {1}; nieuwe poging: {2}'
+        'af_plan_line' = 'Probleem gevonden: {0}; geplande correctie: {1} (--autofix-dry-run: er wordt niets gewijzigd)'
+        'af_failed_line' = 'Probleem gevonden: {0}; correctie mislukt: {1}; geen nieuwe poging'
+        'af_manual_line' = 'Probleem gevonden: {0}; handmatig te doen: {1}'
+        'af_try_ok' = 'geslaagd'
+        'af_try_ko' = 'mislukt'
+        'af_try_run' = 'bezig'
+        'af_try_manual' = 'door u opnieuw te starten'
+        'af_undo' = 'ongedaan maken: {0}'
+        'af_noself' = 'De correcties zijn uitgevoerd, maar dit installatieprogramma is via een pipe gelezen en kan zichzelf niet herstarten: voer dezelfde opdracht opnieuw uit.'
+        'af_giveup' = 'Geen automatische pogingen meer (limiet: {0}).'
+        'af_diag_ready' = 'Een verzendklare diagnose is geschreven naar {0} (geheimen zijn verborgen).'
+        'af_none' = 'Op dit moment is er niets te corrigeren op deze machine.'
+        'af_w_full' = 'vol ({0} MB vrij)'
+        'af_w_noexec' = 'als noexec gekoppeld'
+        'af_w_nowrite' = 'niet beschrijfbaar'
+        'af_p_tmp' = 'de werkmap {0} is onbruikbaar ({1})'
+        'af_a_tmp' = 'werkmap verplaatst naar {0}'
+        'af_p_disk' = 'schijf bijna vol op {0} ({1}%% gebruikt, {2} MB vrij)'
+        'af_a_disk' = 'pakketcaches en oude logboeken opgeschoond (gegevens ongemoeid)'
+        'af_h_disk' = 'maak ruimte vrij (het installatieprogramma wist nooit gegevens) en start het opnieuw'
+        'af_p_lock' = 'de pakketbeheerder is bezig of vergrendeld ({0})'
+        'af_a_lock_wait' = 'gewacht tot hij klaar is (maximaal {0} s)'
+        'af_a_lock_stale' = 'verouderde vergrendeling opzijgezet: {0}'
+        'af_a_lock_none' = 'niets houdt de vergrendeling meer vast'
+        'af_h_lock' = '{0} draait nog: wacht tot het klaar is en start het installatieprogramma opnieuw'
+        'af_p_clock' = 'de klok loopt {0} s af van de echte tijd'
+        'af_a_clock' = 'tijdsynchronisatie gestart ({0})'
+        'af_h_clock' = 'stel de tijd in (chronyd of timedatectl set-ntp true) en start het installatieprogramma opnieuw'
+        'af_p_src' = 'de downloadbron antwoordt niet ({0})'
+        'af_a_src' = 'overgeschakeld naar {0}'
+        'af_h_src' = 'geen andere bron antwoordt: controleer het netwerk of geef een mirror op met --base-url'
+        'af_p_label' = 'de SELinux-labels van de ToutWAF-bestanden zijn onjuist ({0})'
+        'af_a_label' = 'labels hersteld met restorecon ({0} paden)'
+        'af_h_label' = 'voer restorecon -Rv uit op de ToutWAF-mappen en lees: ausearch -m avc -ts recent'
+        'af_p_bool' = 'SELinux weigert wat een boolean toestaat ({0})'
+        'af_a_bool' = 'SELinux-boolean ingeschakeld: {0}'
+        'af_p_perm' = 'eigenaar of rechten onjuist ({0})'
+        'af_a_perm' = 'eigenaar en rechten hersteld ({0})'
+        'af_h_perm' = 'controleer de eigenaar van de gegevens- en configuratiemappen'
+        'af_p_exec' = 'een programma is niet uitvoerbaar ({0})'
+        'af_a_exec' = 'uitvoerrecht hersteld op {0}'
+        'af_p_v6' = 'IPv6 is niet beschikbaar maar de configuratie luistert op [::]'
+        'af_a_v6' = '[::] vervangen door 0.0.0.0 in {0} bestand(en) (kopie\u00ebn: *.autofix-bak)'
+        'af_p_port' = 'poort {0} is bezet door {1} ({2})'
+        'af_a_port' = 'service gestopt: {0}'
+        'af_h_port' = 'gebruik --autofix-stop-conflicts zodat het installatieprogramma {0} stopt, of maak de poort zelf vrij'
+        'af_p_fw' = 'de firewall ({0}) blokkeert poort(en) {1}'
+        'af_a_fw' = 'poort(en) {0} geopend ({1})'
+        'af_h_fw' = 'open poort(en) {0} in uw firewall'
+        'af_h_fw9444' = 'poort 9444 (verbinding console <-> node) wordt nooit voor iedereen geopend en er is geen bronadres bekend: geef --autofix-agent-from ADRES op, of open hem alleen voor uw nodes ({0})'
+        'af_h_nftkeep' = 'de nft-regel voor poort {0} geldt tot de volgende herstart: voeg hem toe aan uw nftables-configuratie om hem te behouden'
+        'af_p_key' = 'een pakketsleutel of repository is verlopen of onleesbaar ({0})'
+        'af_a_key_cache' = 'pakketmetadata-cache geleegd en opnieuw opgehaald'
+        'af_a_key_off' = 'repository van de ToutWAF-mirror uitgeschakeld (die van de distributie blijven): {0}'
+        'af_h_key' = 'werk het release-pakket van de distributie bij (het bevat de ondertekeningssleutels) en start het installatieprogramma opnieuw'
+        'af_p_unitload' = 'systemd heeft de unitbestanden niet herladen'
+        'af_a_unitload' = 'systemd-configuratie herladen (daemon-reload)'
+        'af_p_startlimit' = '{0} heeft de startlimiet van systemd bereikt'
+        'af_a_startlimit' = 'startteller van {0} teruggezet'
+        'af_p_nofile' = '{0} komt open bestanden tekort'
+        'af_a_nofile' = 'limiet voor open bestanden verhoogd voor {0}'
+        'af_p_slow' = '{0} is traag gereed maar blijft werken'
+        'af_a_slow' = '{0} s langer gewacht'
     }
     'ru' = @{
         'tagline' = '\u0417\u0430\u0449\u0438\u0442\u0430 \u0432\u0435\u0431-\u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0439 \u0438 API'
@@ -2602,6 +3053,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = '\u0412 \u044d\u0442\u043e\u043c \u0440\u0435\u043b\u0438\u0437\u0435 \u043d\u0435\u0442 \u0434\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0439: \u044d\u0442\u0430 \u043a\u043e\u043d\u0441\u043e\u043b\u044c \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0438\u0442 Windows.'
         'st_extras_ok_noav' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f: \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b (\u0430\u0433\u0435\u043d\u0442 \u0434\u043b\u044f Windows)'
         'st_extras_none_noav' = '\u0414\u043e\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044f \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044e\u0442: Windows \u043d\u0435 \u043f\u0440\u0435\u0434\u043b\u0430\u0433\u0430\u0435\u0442\u0441\u044f. \u0412\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u043e\u0442 root: {0}'
+        'af_line' = '\u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d\u0430 \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u0430: {0}; \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u043f\u0440\u0438\u043c\u0435\u043d\u0435\u043d\u043e: {1}; \u043d\u043e\u0432\u0430\u044f \u043f\u043e\u043f\u044b\u0442\u043a\u0430: {2}'
+        'af_plan_line' = '\u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d\u0430 \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u0430: {0}; \u0437\u0430\u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435: {1} (--autofix-dry-run: \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043c\u0435\u043d\u044f\u0435\u0442\u0441\u044f)'
+        'af_failed_line' = '\u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d\u0430 \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u0430: {0}; \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c: {1}; \u043d\u043e\u0432\u043e\u0439 \u043f\u043e\u043f\u044b\u0442\u043a\u0438 \u043d\u0435\u0442'
+        'af_manual_line' = '\u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d\u0430 \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u0430: {0}; \u043d\u0443\u0436\u043d\u043e \u0441\u0434\u0435\u043b\u0430\u0442\u044c \u0432\u0440\u0443\u0447\u043d\u0443\u044e: {1}'
+        'af_try_ok' = '\u0443\u0441\u043f\u0435\u0448\u043d\u043e'
+        'af_try_ko' = '\u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c'
+        'af_try_run' = '\u0432\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442\u0441\u044f'
+        'af_try_manual' = '\u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u043d\u043e\u0432\u0430 \u0432\u0440\u0443\u0447\u043d\u0443\u044e'
+        'af_undo' = '\u0447\u0442\u043e\u0431\u044b \u043e\u0442\u043c\u0435\u043d\u0438\u0442\u044c: {0}'
+        'af_noself' = '\u0418\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u044f \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d\u044b, \u043d\u043e \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0431\u044b\u043b \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d \u0438\u0437 \u043a\u0430\u043d\u0430\u043b\u0430 \u0438 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u0441\u0435\u0431\u044f: \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0442\u0443 \u0436\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u0443 \u0435\u0449\u0451 \u0440\u0430\u0437.'
+        'af_giveup' = '\u0411\u043e\u043b\u044c\u0448\u0435 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438\u0445 \u043f\u043e\u043f\u044b\u0442\u043e\u043a \u043d\u0435\u0442 (\u043f\u0440\u0435\u0434\u0435\u043b: {0}).'
+        'af_diag_ready' = '\u0413\u043e\u0442\u043e\u0432\u0430\u044f \u043a \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0435 \u0434\u0438\u0430\u0433\u043d\u043e\u0441\u0442\u0438\u043a\u0430 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u0430 \u0432 {0} (\u0441\u0435\u043a\u0440\u0435\u0442\u044b \u0441\u043a\u0440\u044b\u0442\u044b).'
+        'af_none' = '\u0421\u0435\u0439\u0447\u0430\u0441 \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435 \u043d\u0435\u0447\u0435\u0433\u043e \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u044f\u0442\u044c.'
+        'af_w_full' = '\u0437\u0430\u043f\u043e\u043b\u043d\u0435\u043d (\u0441\u0432\u043e\u0431\u043e\u0434\u043d\u043e {0} \u041c\u0411)'
+        'af_w_noexec' = '\u0441\u043c\u043e\u043d\u0442\u0438\u0440\u043e\u0432\u0430\u043d \u0441 noexec'
+        'af_w_nowrite' = '\u0437\u0430\u043f\u0438\u0441\u044c \u043d\u0435\u0432\u043e\u0437\u043c\u043e\u0436\u043d\u0430'
+        'af_p_tmp' = '\u0440\u0430\u0431\u043e\u0447\u0438\u0439 \u043a\u0430\u0442\u0430\u043b\u043e\u0433 {0} \u043d\u0435\u043f\u0440\u0438\u0433\u043e\u0434\u0435\u043d ({1})'
+        'af_a_tmp' = '\u0440\u0430\u0431\u043e\u0447\u0438\u0439 \u043a\u0430\u0442\u0430\u043b\u043e\u0433 \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0451\u043d \u0432 {0}'
+        'af_p_disk' = '\u0434\u0438\u0441\u043a \u043f\u043e\u0447\u0442\u0438 \u0437\u0430\u043f\u043e\u043b\u043d\u0435\u043d \u043d\u0430 {0} (\u0437\u0430\u043d\u044f\u0442\u043e {1}%%, \u0441\u0432\u043e\u0431\u043e\u0434\u043d\u043e {2} \u041c\u0411)'
+        'af_a_disk' = '\u043a\u044d\u0448\u0438 \u043f\u0430\u043a\u0435\u0442\u043e\u0432 \u0438 \u0441\u0442\u0430\u0440\u044b\u0435 \u0436\u0443\u0440\u043d\u0430\u043b\u044b \u043e\u0447\u0438\u0449\u0435\u043d\u044b (\u0434\u0430\u043d\u043d\u044b\u0435 \u043d\u0435 \u0442\u0440\u043e\u043d\u0443\u0442\u044b)'
+        'af_h_disk' = '\u043e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u043c\u0435\u0441\u0442\u043e (\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u0443\u0434\u0430\u043b\u044f\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0435) \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0435\u0433\u043e \u0441\u043d\u043e\u0432\u0430'
+        'af_p_lock' = '\u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440 \u043f\u0430\u043a\u0435\u0442\u043e\u0432 \u0437\u0430\u043d\u044f\u0442 \u0438\u043b\u0438 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d ({0})'
+        'af_a_lock_wait' = '\u043e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u0435\u0433\u043e \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0438\u044f (\u043d\u0435 \u0431\u043e\u043b\u0435\u0435 {0} \u0441)'
+        'af_a_lock_stale' = '\u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0430\u044f \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u0443\u0431\u0440\u0430\u043d\u0430: {0}'
+        'af_a_lock_none' = '\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0443 \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0438\u0447\u0442\u043e \u043d\u0435 \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442'
+        'af_h_lock' = '{0} \u0435\u0449\u0451 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442: \u0434\u043e\u0436\u0434\u0438\u0442\u0435\u0441\u044c \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0438\u044f \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430'
+        'af_p_clock' = '\u0447\u0430\u0441\u044b \u043e\u0442\u043b\u0438\u0447\u0430\u044e\u0442\u0441\u044f \u043e\u0442 \u0442\u043e\u0447\u043d\u043e\u0433\u043e \u0432\u0440\u0435\u043c\u0435\u043d\u0438 \u043d\u0430 {0} \u0441'
+        'af_a_clock' = '\u0437\u0430\u043f\u0443\u0449\u0435\u043d\u0430 \u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u044f \u0432\u0440\u0435\u043c\u0435\u043d\u0438 ({0})'
+        'af_h_clock' = '\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 \u0432\u0440\u0435\u043c\u044f (chronyd \u0438\u043b\u0438 timedatectl set-ntp true) \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430'
+        'af_p_src' = '\u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u043d\u0435 \u043e\u0442\u0432\u0435\u0447\u0430\u0435\u0442 ({0})'
+        'af_a_src' = '\u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0435\u043d\u043e \u043d\u0430 {0}'
+        'af_h_src' = '\u0434\u0440\u0443\u0433\u0438\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438 \u043d\u0435 \u043e\u0442\u0432\u0435\u0447\u0430\u044e\u0442: \u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u0435\u0442\u044c \u0438\u043b\u0438 \u0443\u043a\u0430\u0436\u0438\u0442\u0435 \u0437\u0435\u0440\u043a\u0430\u043b\u043e \u0447\u0435\u0440\u0435\u0437 --base-url'
+        'af_p_label' = '\u043c\u0435\u0442\u043a\u0438 SELinux \u0444\u0430\u0439\u043b\u043e\u0432 ToutWAF \u043d\u0435\u0432\u0435\u0440\u043d\u044b ({0})'
+        'af_a_label' = '\u043c\u0435\u0442\u043a\u0438 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b \u0441 \u043f\u043e\u043c\u043e\u0449\u044c\u044e restorecon (\u043f\u0443\u0442\u0435\u0439: {0})'
+        'af_h_label' = '\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 restorecon -Rv \u0434\u043b\u044f \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u043e\u0432 ToutWAF \u0438 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0439\u0442\u0435: ausearch -m avc -ts recent'
+        'af_p_bool' = 'SELinux \u0437\u0430\u043f\u0440\u0435\u0449\u0430\u0435\u0442 \u0442\u043e, \u0447\u0442\u043e \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0435\u0442 \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c ({0})'
+        'af_a_bool' = '\u0432\u043a\u043b\u044e\u0447\u0451\u043d \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c SELinux: {0}'
+        'af_p_perm' = '\u043d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446 \u0438\u043b\u0438 \u043f\u0440\u0430\u0432\u0430 ({0})'
+        'af_a_perm' = '\u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446 \u0438 \u043f\u0440\u0430\u0432\u0430 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b ({0})'
+        'af_h_perm' = '\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0432\u043b\u0430\u0434\u0435\u043b\u044c\u0446\u0430 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u043e\u0432 \u0434\u0430\u043d\u043d\u044b\u0445 \u0438 \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438'
+        'af_p_exec' = '\u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430 \u043d\u0435 \u0438\u0441\u043f\u043e\u043b\u043d\u044f\u0435\u043c\u0430\u044f ({0})'
+        'af_a_exec' = '\u043f\u0440\u0430\u0432\u043e \u043d\u0430 \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e: {0}'
+        'af_p_v6' = 'IPv6 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d, \u043d\u043e \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f \u0441\u043b\u0443\u0448\u0430\u0435\u0442 [::]'
+        'af_a_v6' = '[::] \u0437\u0430\u043c\u0435\u043d\u0451\u043d \u043d\u0430 0.0.0.0 \u0432 \u0444\u0430\u0439\u043b\u0430\u0445: {0} (\u043a\u043e\u043f\u0438\u0438: *.autofix-bak)'
+        'af_p_port' = '\u043f\u043e\u0440\u0442 {0} \u0437\u0430\u043d\u044f\u0442 \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u043e\u043c {1} ({2})'
+        'af_a_port' = '\u0441\u043b\u0443\u0436\u0431\u0430 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: {0}'
+        'af_h_port' = '\u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 --autofix-stop-conflicts, \u0447\u0442\u043e\u0431\u044b \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u043b {0}, \u0438\u043b\u0438 \u043e\u0441\u0432\u043e\u0431\u043e\u0434\u0438\u0442\u0435 \u043f\u043e\u0440\u0442 \u0441\u0430\u043c\u043e\u0441\u0442\u043e\u044f\u0442\u0435\u043b\u044c\u043d\u043e'
+        'af_p_fw' = '\u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440 ({0}) \u0431\u043b\u043e\u043a\u0438\u0440\u0443\u0435\u0442 \u043f\u043e\u0440\u0442(\u044b) {1}'
+        'af_a_fw' = '\u043f\u043e\u0440\u0442(\u044b) {0} \u043e\u0442\u043a\u0440\u044b\u0442(\u044b) ({1})'
+        'af_h_fw' = '\u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u043f\u043e\u0440\u0442(\u044b) {0} \u0432 \u0431\u0440\u0430\u043d\u0434\u043c\u0430\u0443\u044d\u0440\u0435'
+        'af_h_fw9444' = '\u043f\u043e\u0440\u0442 9444 (\u0441\u0432\u044f\u0437\u044c \u043a\u043e\u043d\u0441\u043e\u043b\u044c <-> \u0443\u0437\u0435\u043b) \u043d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0434\u043b\u044f \u0432\u0441\u0435\u0445, \u0430\u0434\u0440\u0435\u0441 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0430 \u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043d: \u0443\u043a\u0430\u0436\u0438\u0442\u0435 --autofix-agent-from \u0410\u0414\u0420\u0415\u0421 \u0438\u043b\u0438 \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0435\u0433\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u0434\u043b\u044f \u0432\u0430\u0448\u0438\u0445 \u0443\u0437\u043b\u043e\u0432 ({0})'
+        'af_h_nftkeep' = '\u043f\u0440\u0430\u0432\u0438\u043b\u043e nft \u0434\u043b\u044f \u043f\u043e\u0440\u0442\u0430 {0} \u0434\u0435\u0439\u0441\u0442\u0432\u0443\u0435\u0442 \u0434\u043e \u043f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438: \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0435\u0433\u043e \u0432 \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044e nftables, \u0447\u0442\u043e\u0431\u044b \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c'
+        'af_p_key' = '\u043a\u043b\u044e\u0447 \u0438\u043b\u0438 \u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u0439 \u043f\u0430\u043a\u0435\u0442\u043e\u0432 \u043f\u0440\u043e\u0441\u0440\u043e\u0447\u0435\u043d \u0438\u043b\u0438 \u043d\u0435\u0447\u0438\u0442\u0430\u0435\u043c ({0})'
+        'af_a_key_cache' = '\u043a\u044d\u0448 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0445 \u043f\u0430\u043a\u0435\u0442\u043e\u0432 \u043e\u0447\u0438\u0449\u0435\u043d \u0438 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d \u0437\u0430\u043d\u043e\u0432\u043e'
+        'af_a_key_off' = '\u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u0439 \u0437\u0435\u0440\u043a\u0430\u043b\u0430 ToutWAF \u043e\u0442\u043a\u043b\u044e\u0447\u0451\u043d (\u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u0438 \u0434\u0438\u0441\u0442\u0440\u0438\u0431\u0443\u0442\u0438\u0432\u0430 \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f): {0}'
+        'af_h_key' = '\u043e\u0431\u043d\u043e\u0432\u0438\u0442\u0435 \u043f\u0430\u043a\u0435\u0442 release \u0434\u0438\u0441\u0442\u0440\u0438\u0431\u0443\u0442\u0438\u0432\u0430 (\u0432 \u043d\u0451\u043c \u043a\u043b\u044e\u0447\u0438 \u043f\u043e\u0434\u043f\u0438\u0441\u0438) \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430'
+        'af_p_unitload' = 'systemd \u043d\u0435 \u043f\u0435\u0440\u0435\u0447\u0438\u0442\u0430\u043b \u0444\u0430\u0439\u043b\u044b \u044e\u043d\u0438\u0442\u043e\u0432'
+        'af_a_unitload' = '\u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044f systemd \u043f\u0435\u0440\u0435\u0447\u0438\u0442\u0430\u043d\u0430 (daemon-reload)'
+        'af_p_startlimit' = '{0} \u0434\u043e\u0441\u0442\u0438\u0433 \u043b\u0438\u043c\u0438\u0442\u0430 \u0437\u0430\u043f\u0443\u0441\u043a\u043e\u0432 systemd'
+        'af_a_startlimit' = '\u0441\u0447\u0451\u0442\u0447\u0438\u043a \u0437\u0430\u043f\u0443\u0441\u043a\u043e\u0432 {0} \u0441\u0431\u0440\u043e\u0448\u0435\u043d'
+        'af_p_nofile' = '{0} \u0438\u0441\u0447\u0435\u0440\u043f\u0430\u043b \u043b\u0438\u043c\u0438\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u0444\u0430\u0439\u043b\u043e\u0432'
+        'af_a_nofile' = '\u043b\u0438\u043c\u0438\u0442 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0445 \u0444\u0430\u0439\u043b\u043e\u0432 \u0434\u043b\u044f {0} \u043f\u043e\u0432\u044b\u0448\u0435\u043d'
+        'af_p_slow' = '{0} \u0434\u043e\u043b\u0433\u043e \u0433\u043e\u0442\u043e\u0432\u0438\u0442\u0441\u044f, \u043d\u043e \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0435\u0442 \u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c'
+        'af_a_slow' = '\u043e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u043f\u0440\u043e\u0434\u043b\u0435\u043d\u043e \u043d\u0430 {0} \u0441'
     }
     'zh' = @{
         'tagline' = 'Web \u5e94\u7528\u4e0e API \u9632\u62a4'
@@ -2911,6 +3426,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = '\u6b64\u7248\u672c\u4e0d\u542b\u9644\u52a0\u5305\uff1a\u6b64\u63a7\u5236\u53f0\u4e0d\u4f1a\u63d0\u4f9b Windows\u3002'
         'st_extras_ok_noav' = '\u9644\u52a0\u5305\uff1a\u5df2\u5b89\u88c5\uff08Windows \u4ee3\u7406\uff09'
         'st_extras_none_noav' = '\u7f3a\u5c11\u9644\u52a0\u5305\uff1a\u4e0d\u63d0\u4f9b Windows\u3002\u8bf7\u4ee5 root \u8fd0\u884c\uff1a{0}'
+        'af_line' = '\u68c0\u6d4b\u5230\u95ee\u9898\uff1a{0}\uff1b\u5df2\u5e94\u7528\u4fee\u6b63\uff1a{1}\uff1b\u91cd\u8bd5\u7ed3\u679c\uff1a{2}'
+        'af_plan_line' = '\u68c0\u6d4b\u5230\u95ee\u9898\uff1a{0}\uff1b\u8ba1\u5212\u7684\u4fee\u6b63\uff1a{1}\uff08--autofix-dry-run\uff1a\u4e0d\u505a\u4efb\u4f55\u66f4\u6539\uff09'
+        'af_failed_line' = '\u68c0\u6d4b\u5230\u95ee\u9898\uff1a{0}\uff1b\u4fee\u6b63\u5931\u8d25\uff1a{1}\uff1b\u4e0d\u518d\u91cd\u8bd5'
+        'af_manual_line' = '\u68c0\u6d4b\u5230\u95ee\u9898\uff1a{0}\uff1b\u9700\u8981\u624b\u52a8\u5904\u7406\uff1a{1}'
+        'af_try_ok' = '\u6210\u529f'
+        'af_try_ko' = '\u5931\u8d25'
+        'af_try_run' = '\u8fdb\u884c\u4e2d'
+        'af_try_manual' = '\u8bf7\u60a8\u91cd\u65b0\u8fd0\u884c'
+        'af_undo' = '\u64a4\u9500\u65b9\u6cd5\uff1a{0}'
+        'af_noself' = '\u4fee\u6b63\u5df2\u5b8c\u6210\uff0c\u4f46\u6b64\u5b89\u88c5\u7a0b\u5e8f\u662f\u901a\u8fc7\u7ba1\u9053\u8bfb\u53d6\u7684\uff0c\u65e0\u6cd5\u81ea\u884c\u91cd\u65b0\u542f\u52a8\uff1a\u8bf7\u518d\u6b21\u8fd0\u884c\u540c\u4e00\u6761\u547d\u4ee4\u3002'
+        'af_giveup' = '\u4e0d\u518d\u81ea\u52a8\u91cd\u8bd5\uff08\u4e0a\u9650\uff1a{0}\uff09\u3002'
+        'af_diag_ready' = '\u53ef\u76f4\u63a5\u53d1\u9001\u7684\u8bca\u65ad\u4fe1\u606f\u5df2\u5199\u5165 {0}\uff08\u5bc6\u94a5\u5df2\u9690\u85cf\uff09\u3002'
+        'af_none' = '\u6b64\u673a\u5668\u76ee\u524d\u6ca1\u6709\u9700\u8981\u4fee\u6b63\u7684\u95ee\u9898\u3002'
+        'af_w_full' = '\u5df2\u6ee1\uff08\u5269\u4f59 {0} MB\uff09'
+        'af_w_noexec' = '\u4ee5 noexec \u6302\u8f7d'
+        'af_w_nowrite' = '\u65e0\u6cd5\u5199\u5165'
+        'af_p_tmp' = '\u5de5\u4f5c\u76ee\u5f55 {0} \u4e0d\u53ef\u7528\uff08{1}\uff09'
+        'af_a_tmp' = '\u5de5\u4f5c\u76ee\u5f55\u5df2\u6539\u4e3a {0}'
+        'af_p_disk' = '{0} \u4e0a\u78c1\u76d8\u51e0\u4e4e\u5df2\u6ee1\uff08\u5df2\u7528 {1}%%\uff0c\u5269\u4f59 {2} MB\uff09'
+        'af_a_disk' = '\u5df2\u6e05\u7406\u8f6f\u4ef6\u5305\u7f13\u5b58\u548c\u65e7\u65e5\u5fd7\uff08\u6570\u636e\u672a\u52a8\uff09'
+        'af_h_disk' = '\u8bf7\u817e\u51fa\u7a7a\u95f4\uff08\u5b89\u88c5\u7a0b\u5e8f\u7edd\u4e0d\u5220\u9664\u6570\u636e\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c'
+        'af_p_lock' = '\u8f6f\u4ef6\u5305\u7ba1\u7406\u5668\u6b63\u5fd9\u6216\u88ab\u9501\u5b9a\uff08{0}\uff09'
+        'af_a_lock_wait' = '\u5df2\u7b49\u5f85\u5176\u7ed3\u675f\uff08\u6700\u591a {0} \u79d2\uff09'
+        'af_a_lock_stale' = '\u5df2\u79fb\u5f00\u8fc7\u671f\u7684\u9501\uff1a{0}'
+        'af_a_lock_none' = '\u5df2\u6ca1\u6709\u8fdb\u7a0b\u6301\u6709\u8be5\u9501'
+        'af_h_lock' = '{0} \u4ecd\u5728\u8fd0\u884c\uff1a\u8bf7\u7b49\u5f85\u5176\u7ed3\u675f\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f'
+        'af_p_clock' = '\u7cfb\u7edf\u65f6\u949f\u4e0e\u5b9e\u9645\u65f6\u95f4\u76f8\u5dee {0} \u79d2'
+        'af_a_clock' = '\u5df2\u542f\u52a8\u65f6\u95f4\u540c\u6b65\uff08{0}\uff09'
+        'af_h_clock' = '\u8bf7\u6821\u51c6\u65f6\u95f4\uff08chronyd \u6216 timedatectl set-ntp true\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f'
+        'af_p_src' = '\u4e0b\u8f7d\u6e90\u65e0\u54cd\u5e94\uff08{0}\uff09'
+        'af_a_src' = '\u5df2\u5207\u6362\u5230 {0}'
+        'af_h_src' = '\u6ca1\u6709\u5176\u4ed6\u6e90\u53ef\u7528\uff1a\u8bf7\u68c0\u67e5\u7f51\u7edc\uff0c\u6216\u7528 --base-url \u6307\u5b9a\u955c\u50cf'
+        'af_p_label' = 'ToutWAF \u6587\u4ef6\u7684 SELinux \u6807\u7b7e\u4e0d\u6b63\u786e\uff08{0}\uff09'
+        'af_a_label' = '\u5df2\u7528 restorecon \u6062\u590d\u6807\u7b7e\uff08{0} \u4e2a\u8def\u5f84\uff09'
+        'af_h_label' = '\u5bf9 ToutWAF \u76ee\u5f55\u8fd0\u884c restorecon -Rv\uff0c\u5e76\u67e5\u770b\uff1aausearch -m avc -ts recent'
+        'af_p_bool' = 'SELinux \u62d2\u7edd\u4e86\u67d0\u4e2a\u5e03\u5c14\u503c\u672c\u53ef\u5141\u8bb8\u7684\u64cd\u4f5c\uff08{0}\uff09'
+        'af_a_bool' = '\u5df2\u5f00\u542f SELinux \u5e03\u5c14\u503c\uff1a{0}'
+        'af_p_perm' = '\u6240\u6709\u8005\u6216\u6743\u9650\u4e0d\u6b63\u786e\uff08{0}\uff09'
+        'af_a_perm' = '\u5df2\u6062\u590d\u6240\u6709\u8005\u548c\u6743\u9650\uff08{0}\uff09'
+        'af_h_perm' = '\u8bf7\u68c0\u67e5\u6570\u636e\u76ee\u5f55\u548c\u914d\u7f6e\u76ee\u5f55\u7684\u6240\u6709\u8005'
+        'af_p_exec' = '\u7a0b\u5e8f\u4e0d\u53ef\u6267\u884c\uff08{0}\uff09'
+        'af_a_exec' = '\u5df2\u6062\u590d {0} \u7684\u6267\u884c\u6743\u9650'
+        'af_p_v6' = 'IPv6 \u4e0d\u53ef\u7528\uff0c\u4f46\u914d\u7f6e\u5728 [::] \u4e0a\u76d1\u542c'
+        'af_a_v6' = '\u5df2\u5728 {0} \u4e2a\u6587\u4ef6\u4e2d\u5c06 [::] \u66ff\u6362\u4e3a 0.0.0.0\uff08\u5907\u4efd\uff1a*.autofix-bak\uff09'
+        'af_p_port' = '\u7aef\u53e3 {0} \u88ab {1} \u5360\u7528\uff08{2}\uff09'
+        'af_a_port' = '\u5df2\u505c\u6b62\u670d\u52a1\uff1a{0}'
+        'af_h_port' = '\u4f7f\u7528 --autofix-stop-conflicts \u8ba9\u5b89\u88c5\u7a0b\u5e8f\u505c\u6b62 {0}\uff0c\u6216\u81ea\u884c\u91ca\u653e\u8be5\u7aef\u53e3'
+        'af_p_fw' = '\u9632\u706b\u5899\uff08{0}\uff09\u963b\u6b62\u4e86\u7aef\u53e3 {1}'
+        'af_a_fw' = '\u5df2\u5f00\u653e\u7aef\u53e3 {0}\uff08{1}\uff09'
+        'af_h_fw' = '\u8bf7\u5728\u9632\u706b\u5899\u4e2d\u5f00\u653e\u7aef\u53e3 {0}'
+        'af_h_fw9444' = '\u7aef\u53e3 9444\uff08\u63a7\u5236\u53f0\u4e0e\u8282\u70b9\u4e4b\u95f4\u7684\u8fde\u63a5\uff09\u7edd\u4e0d\u5bf9\u6240\u6709\u4eba\u5f00\u653e\uff0c\u4e14\u6765\u6e90\u5730\u5740\u672a\u77e5\uff1a\u8bf7\u63d0\u4f9b --autofix-agent-from \u5730\u5740\uff0c\u6216\u4ec5\u5bf9\u60a8\u7684\u8282\u70b9\u5f00\u653e\uff08{0}\uff09'
+        'af_h_nftkeep' = '\u7aef\u53e3 {0} \u7684 nft \u89c4\u5219\u5728\u4e0b\u6b21\u91cd\u542f\u524d\u6709\u6548\uff1a\u8bf7\u5c06\u5176\u52a0\u5165 nftables \u914d\u7f6e\u4ee5\u4fdd\u7559'
+        'af_p_key' = '\u8f6f\u4ef6\u5305\u5bc6\u94a5\u6216\u4ed3\u5e93\u5df2\u8fc7\u671f\u6216\u65e0\u6cd5\u8bfb\u53d6\uff08{0}\uff09'
+        'af_a_key_cache' = '\u5df2\u6e05\u9664\u5e76\u91cd\u65b0\u4e0b\u8f7d\u8f6f\u4ef6\u5305\u5143\u6570\u636e\u7f13\u5b58'
+        'af_a_key_off' = '\u5df2\u505c\u7528 ToutWAF \u955c\u50cf\u4ed3\u5e93\uff08\u53d1\u884c\u7248\u81ea\u5e26\u4ed3\u5e93\u4fdd\u7559\uff09\uff1a{0}'
+        'af_h_key' = '\u8bf7\u66f4\u65b0\u53d1\u884c\u7248\u7684 release \u8f6f\u4ef6\u5305\uff08\u542b\u7b7e\u540d\u5bc6\u94a5\uff09\uff0c\u7136\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f'
+        'af_p_unitload' = 'systemd \u5c1a\u672a\u91cd\u65b0\u52a0\u8f7d\u5355\u5143\u6587\u4ef6'
+        'af_a_unitload' = '\u5df2\u91cd\u65b0\u52a0\u8f7d systemd \u914d\u7f6e\uff08daemon-reload\uff09'
+        'af_p_startlimit' = '{0} \u8fbe\u5230\u4e86 systemd \u7684\u542f\u52a8\u6b21\u6570\u9650\u5236'
+        'af_a_startlimit' = '\u5df2\u91cd\u7f6e {0} \u7684\u542f\u52a8\u8ba1\u6570'
+        'af_p_nofile' = '{0} \u7684\u6253\u5f00\u6587\u4ef6\u6570\u5df2\u7528\u5c3d'
+        'af_a_nofile' = '\u5df2\u63d0\u9ad8 {0} \u7684\u6253\u5f00\u6587\u4ef6\u6570\u9650\u5236'
+        'af_p_slow' = '{0} \u5c31\u7eea\u8f83\u6162\uff0c\u4f46\u4ecd\u5728\u5de5\u4f5c'
+        'af_a_slow' = '\u591a\u7b49\u5f85\u4e86 {0} \u79d2'
     }
     'ar' = @{
         'tagline' = '\u062d\u0645\u0627\u064a\u0629 \u062a\u0637\u0628\u064a\u0642\u0627\u062a \u0627\u0644\u0648\u064a\u0628 \u0648\u0648\u0627\u062c\u0647\u0627\u062a API'
@@ -3220,6 +3799,70 @@ $script:Catalog = @{
         'w_extras_none_noav' = '\u0644\u0627 \u064a\u062d\u062a\u0648\u064a \u0647\u0630\u0627 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0639\u0644\u0649 \u0625\u0636\u0627\u0641\u0627\u062a: \u0644\u0646 \u062a\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0644\u0648\u062d\u0629 Windows.'
         'st_extras_ok_noav' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a: \u0645\u062b\u0628\u062a\u0629 (\u0648\u0643\u064a\u0644 Windows)'
         'st_extras_none_noav' = '\u0627\u0644\u0625\u0636\u0627\u0641\u0627\u062a \u0645\u0641\u0642\u0648\u062f\u0629: \u0644\u0627 \u064a\u062a\u0645 \u0639\u0631\u0636 Windows. \u0634\u063a\u0651\u0644 \u0628\u0635\u0644\u0627\u062d\u064a\u0627\u062a root: {0}'
+        'af_line' = '\u062a\u0645 \u0627\u0643\u062a\u0634\u0627\u0641 \u0645\u0634\u0643\u0644\u0629: {0}\u061b \u0627\u0644\u062a\u0635\u062d\u064a\u062d \u0627\u0644\u0645\u0637\u0628\u0642: {1}\u061b \u0627\u0644\u0645\u062d\u0627\u0648\u0644\u0629 \u0627\u0644\u062c\u062f\u064a\u062f\u0629: {2}'
+        'af_plan_line' = '\u062a\u0645 \u0627\u0643\u062a\u0634\u0627\u0641 \u0645\u0634\u0643\u0644\u0629: {0}\u061b \u0627\u0644\u062a\u0635\u062d\u064a\u062d \u0627\u0644\u0645\u062e\u0637\u0637: {1} (--autofix-dry-run: \u0644\u0627 \u064a\u062a\u0645 \u062a\u063a\u064a\u064a\u0631 \u0623\u064a \u0634\u064a\u0621)'
+        'af_failed_line' = '\u062a\u0645 \u0627\u0643\u062a\u0634\u0627\u0641 \u0645\u0634\u0643\u0644\u0629: {0}\u061b \u0641\u0634\u0644 \u0627\u0644\u062a\u0635\u062d\u064a\u062d: {1}\u061b \u0644\u0627 \u0645\u062d\u0627\u0648\u0644\u0629 \u062c\u062f\u064a\u062f\u0629'
+        'af_manual_line' = '\u062a\u0645 \u0627\u0643\u062a\u0634\u0627\u0641 \u0645\u0634\u0643\u0644\u0629: {0}\u061b \u064a\u062c\u0628 \u0627\u0644\u0642\u064a\u0627\u0645 \u0628\u0645\u0627 \u064a\u0644\u064a \u064a\u062f\u0648\u064a\u0627: {1}'
+        'af_try_ok' = '\u0646\u062c\u062d\u062a'
+        'af_try_ko' = '\u0641\u0634\u0644\u062a'
+        'af_try_run' = '\u0642\u064a\u062f \u0627\u0644\u062a\u0646\u0641\u064a\u0630'
+        'af_try_manual' = '\u064a\u062c\u0628 \u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062a\u0634\u063a\u064a\u0644 \u064a\u062f\u0648\u064a\u0627'
+        'af_undo' = '\u0644\u0644\u062a\u0631\u0627\u062c\u0639: {0}'
+        'af_noself' = '\u062a\u0645 \u0625\u062c\u0631\u0627\u0621 \u0627\u0644\u062a\u0635\u062d\u064a\u062d\u0627\u062a \u0644\u0643\u0646 \u0627\u0644\u0645\u062b\u0628\u062a \u0642\u064f\u0631\u0626 \u0639\u0628\u0631 \u0623\u0646\u0628\u0648\u0628 \u0648\u0644\u0627 \u064a\u0645\u0643\u0646\u0647 \u0625\u0639\u0627\u062f\u0629 \u062a\u0634\u063a\u064a\u0644 \u0646\u0641\u0633\u0647: \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0623\u0645\u0631 \u0646\u0641\u0633\u0647.'
+        'af_giveup' = '\u0644\u0627 \u0645\u0632\u064a\u062f \u0645\u0646 \u0627\u0644\u0645\u062d\u0627\u0648\u0644\u0627\u062a \u0627\u0644\u062a\u0644\u0642\u0627\u0626\u064a\u0629 (\u0627\u0644\u062d\u062f: {0}).'
+        'af_diag_ready' = '\u062a\u0645\u062a \u0643\u062a\u0627\u0628\u0629 \u062a\u0634\u062e\u064a\u0635 \u062c\u0627\u0647\u0632 \u0644\u0644\u0625\u0631\u0633\u0627\u0644 \u0641\u064a {0} (\u0627\u0644\u0623\u0633\u0631\u0627\u0631 \u0645\u062e\u0641\u064a\u0629).'
+        'af_none' = '\u0644\u0627 \u0634\u064a\u0621 \u064a\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u062a\u0635\u062d\u064a\u062d \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632 \u062d\u0627\u0644\u064a\u0627.'
+        'af_w_full' = '\u0645\u0645\u062a\u0644\u0626 (\u0627\u0644\u0645\u062a\u0627\u062d {0} \u0645\u064a\u063a\u0627\u0628\u0627\u064a\u062a)'
+        'af_w_noexec' = '\u0645\u062b\u0628\u062a \u0628\u062e\u064a\u0627\u0631 noexec'
+        'af_w_nowrite' = '\u063a\u064a\u0631 \u0642\u0627\u0628\u0644 \u0644\u0644\u0643\u062a\u0627\u0628\u0629'
+        'af_p_tmp' = '\u0645\u062c\u0644\u062f \u0627\u0644\u0639\u0645\u0644 {0} \u063a\u064a\u0631 \u0635\u0627\u0644\u062d \u0644\u0644\u0627\u0633\u062a\u062e\u062f\u0627\u0645 ({1})'
+        'af_a_tmp' = '\u062a\u0645 \u0646\u0642\u0644 \u0645\u062c\u0644\u062f \u0627\u0644\u0639\u0645\u0644 \u0625\u0644\u0649 {0}'
+        'af_p_disk' = '\u0627\u0644\u0642\u0631\u0635 \u0634\u0628\u0647 \u0645\u0645\u062a\u0644\u0626 \u0639\u0644\u0649 {0} (\u0645\u0633\u062a\u062e\u062f\u0645 {1}%%\u060c \u0627\u0644\u0645\u062a\u0627\u062d {2} \u0645\u064a\u063a\u0627\u0628\u0627\u064a\u062a)'
+        'af_a_disk' = '\u062a\u0645 \u062a\u0646\u0638\u064a\u0641 \u0630\u0627\u0643\u0631\u0629 \u0627\u0644\u062d\u0632\u0645 \u0627\u0644\u0645\u0624\u0642\u062a\u0629 \u0648\u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0627\u0644\u0642\u062f\u064a\u0645\u0629 (\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0633\u0644\u064a\u0645\u0629)'
+        'af_h_disk' = '\u062d\u0631\u0651\u0631 \u0645\u0633\u0627\u062d\u0629 (\u0627\u0644\u0645\u062b\u0628\u062a \u0644\u0627 \u064a\u062d\u0630\u0641 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0623\u0628\u062f\u0627) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644\u0647'
+        'af_p_lock' = '\u0645\u062f\u064a\u0631 \u0627\u0644\u062d\u0632\u0645 \u0645\u0634\u063a\u0648\u0644 \u0623\u0648 \u0645\u0642\u0641\u0644 ({0})'
+        'af_a_lock_wait' = '\u062a\u0645 \u0627\u0644\u0627\u0646\u062a\u0638\u0627\u0631 \u062d\u062a\u0649 \u064a\u0646\u062a\u0647\u064a ({0} \u062b\u0627\u0646\u064a\u0629 \u0643\u062d\u062f \u0623\u0642\u0635\u0649)'
+        'af_a_lock_stale' = '\u062a\u0645 \u062a\u0646\u062d\u064a\u0629 \u0642\u0641\u0644 \u0642\u062f\u064a\u0645: {0}'
+        'af_a_lock_none' = '\u0644\u0645 \u064a\u0639\u062f \u0634\u064a\u0621 \u064a\u062d\u062a\u0641\u0638 \u0628\u0627\u0644\u0642\u0641\u0644'
+        'af_h_lock' = '{0} \u0645\u0627 \u0632\u0627\u0644 \u064a\u0639\u0645\u0644: \u0627\u0646\u062a\u0638\u0631 \u0627\u0646\u062a\u0647\u0627\u0621\u0647 \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a'
+        'af_p_clock' = '\u0627\u0644\u0633\u0627\u0639\u0629 \u062a\u062e\u062a\u0644\u0641 \u0639\u0646 \u0627\u0644\u0648\u0642\u062a \u0627\u0644\u062d\u0642\u064a\u0642\u064a \u0628\u0645\u0642\u062f\u0627\u0631 {0} \u062b\u0627\u0646\u064a\u0629'
+        'af_a_clock' = '\u0628\u062f\u0623\u062a \u0645\u0632\u0627\u0645\u0646\u0629 \u0627\u0644\u0648\u0642\u062a ({0})'
+        'af_h_clock' = '\u0627\u0636\u0628\u0637 \u0627\u0644\u0648\u0642\u062a (chronyd \u0623\u0648 timedatectl set-ntp true) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a'
+        'af_p_src' = '\u0645\u0635\u062f\u0631 \u0627\u0644\u062a\u0646\u0632\u064a\u0644 \u0644\u0627 \u064a\u0633\u062a\u062c\u064a\u0628 ({0})'
+        'af_a_src' = '\u062a\u0645 \u0627\u0644\u062a\u062d\u0648\u064a\u0644 \u0625\u0644\u0649 {0}'
+        'af_h_src' = '\u0644\u0627 \u064a\u0633\u062a\u062c\u064a\u0628 \u0623\u064a \u0645\u0635\u062f\u0631 \u0622\u062e\u0631: \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0634\u0628\u0643\u0629 \u0623\u0648 \u062d\u062f\u062f \u0646\u0633\u062e\u0629 \u0645\u0631\u0622\u0629 \u0639\u0628\u0631 --base-url'
+        'af_p_label' = '\u062a\u0633\u0645\u064a\u0627\u062a SELinux \u0644\u0645\u0644\u0641\u0627\u062a ToutWAF \u063a\u064a\u0631 \u0635\u062d\u064a\u062d\u0629 ({0})'
+        'af_a_label' = '\u062a\u0645\u062a \u0627\u0633\u062a\u0639\u0627\u062f\u0629 \u0627\u0644\u062a\u0633\u0645\u064a\u0627\u062a \u0628\u0648\u0627\u0633\u0637\u0629 restorecon ({0} \u0645\u0633\u0627\u0631\u0627)'
+        'af_h_label' = '\u0634\u063a\u0651\u0644 restorecon -Rv \u0639\u0644\u0649 \u0645\u062c\u0644\u062f\u0627\u062a ToutWAF \u0648\u0627\u0642\u0631\u0623: ausearch -m avc -ts recent'
+        'af_p_bool' = '\u064a\u0631\u0641\u0636 SELinux \u0645\u0627 \u064a\u0633\u0645\u062d \u0628\u0647 \u0645\u062a\u063a\u064a\u0631 \u0645\u0646\u0637\u0642\u064a ({0})'
+        'af_a_bool' = '\u062a\u0645 \u062a\u0641\u0639\u064a\u0644 \u0645\u062a\u063a\u064a\u0631 SELinux \u0627\u0644\u0645\u0646\u0637\u0642\u064a: {0}'
+        'af_p_perm' = '\u0627\u0644\u0645\u0627\u0644\u0643 \u0623\u0648 \u0627\u0644\u0623\u0630\u0648\u0646\u0627\u062a \u063a\u064a\u0631 \u0635\u062d\u064a\u062d\u0629 ({0})'
+        'af_a_perm' = '\u062a\u0645\u062a \u0627\u0633\u062a\u0639\u0627\u062f\u0629 \u0627\u0644\u0645\u0627\u0644\u0643 \u0648\u0627\u0644\u0623\u0630\u0648\u0646\u0627\u062a ({0})'
+        'af_h_perm' = '\u062a\u062d\u0642\u0642 \u0645\u0646 \u0645\u0627\u0644\u0643 \u0645\u062c\u0644\u062f\u0627\u062a \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u0627\u0644\u0625\u0639\u062f\u0627\u062f'
+        'af_p_exec' = '\u0628\u0631\u0646\u0627\u0645\u062c \u063a\u064a\u0631 \u0642\u0627\u0628\u0644 \u0644\u0644\u062a\u0646\u0641\u064a\u0630 ({0})'
+        'af_a_exec' = '\u062a\u0645\u062a \u0627\u0633\u062a\u0639\u0627\u062f\u0629 \u0625\u0630\u0646 \u0627\u0644\u062a\u0646\u0641\u064a\u0630 \u0639\u0644\u0649 {0}'
+        'af_p_v6' = 'IPv6 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d \u0644\u0643\u0646 \u0627\u0644\u0625\u0639\u062f\u0627\u062f \u064a\u0633\u062a\u0645\u0639 \u0639\u0644\u0649 [::]'
+        'af_a_v6' = '\u062a\u0645 \u0627\u0633\u062a\u0628\u062f\u0627\u0644 [::] \u0628\u0640 0.0.0.0 \u0641\u064a {0} \u0645\u0644\u0641 (\u0627\u0644\u0646\u0633\u062e: *.autofix-bak)'
+        'af_p_port' = '\u0627\u0644\u0645\u0646\u0641\u0630 {0} \u0645\u0634\u063a\u0648\u0644 \u0628\u0648\u0627\u0633\u0637\u0629 {1} ({2})'
+        'af_a_port' = '\u062a\u0645 \u0625\u064a\u0642\u0627\u0641 \u0627\u0644\u062e\u062f\u0645\u0629: {0}'
+        'af_h_port' = '\u0627\u0633\u062a\u062e\u062f\u0645 --autofix-stop-conflicts \u0644\u064a\u0648\u0642\u0641 \u0627\u0644\u0645\u062b\u0628\u062a {0} \u0623\u0648 \u062d\u0631\u0651\u0631 \u0627\u0644\u0645\u0646\u0641\u0630 \u0628\u0646\u0641\u0633\u0643'
+        'af_p_fw' = '\u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 ({0}) \u064a\u062d\u0638\u0631 \u0627\u0644\u0645\u0646\u0641\u0630 \u0623\u0648 \u0627\u0644\u0645\u0646\u0627\u0641\u0630 {1}'
+        'af_a_fw' = '\u062a\u0645 \u0641\u062a\u062d \u0627\u0644\u0645\u0646\u0641\u0630 \u0623\u0648 \u0627\u0644\u0645\u0646\u0627\u0641\u0630 {0} ({1})'
+        'af_h_fw' = '\u0627\u0641\u062a\u062d \u0627\u0644\u0645\u0646\u0641\u0630 \u0623\u0648 \u0627\u0644\u0645\u0646\u0627\u0641\u0630 {0} \u0641\u064a \u062c\u062f\u0627\u0631 \u0627\u0644\u062d\u0645\u0627\u064a\u0629'
+        'af_h_fw9444' = '\u0627\u0644\u0645\u0646\u0641\u0630 9444 (\u0631\u0627\u0628\u0637 \u0648\u062d\u062f\u0629 \u0627\u0644\u062a\u062d\u0643\u0645 <-> \u0627\u0644\u0639\u0642\u062f\u0629) \u0644\u0627 \u064a\u064f\u0641\u062a\u062d \u0644\u0644\u062c\u0645\u064a\u0639 \u0623\u0628\u062f\u0627 \u0648\u0644\u0627 \u064a\u0648\u062c\u062f \u0639\u0646\u0648\u0627\u0646 \u0645\u0635\u062f\u0631 \u0645\u0639\u0631\u0648\u0641: \u062d\u062f\u062f --autofix-agent-from \u0627\u0644\u0639\u0646\u0648\u0627\u0646 \u0623\u0648 \u0627\u0641\u062a\u062d\u0647 \u0644\u0639\u0642\u062f\u0643 \u0641\u0642\u0637 ({0})'
+        'af_h_nftkeep' = '\u0642\u0627\u0639\u062f\u0629 nft \u0644\u0644\u0645\u0646\u0641\u0630 {0} \u062a\u0628\u0642\u0649 \u062d\u062a\u0649 \u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u062a\u0627\u0644\u064a\u0629: \u0623\u0636\u0641\u0647\u0627 \u0625\u0644\u0649 \u0625\u0639\u062f\u0627\u062f nftables \u0644\u0644\u0627\u062d\u062a\u0641\u0627\u0638 \u0628\u0647\u0627'
+        'af_p_key' = '\u0645\u0641\u062a\u0627\u062d \u0623\u0648 \u0645\u0633\u062a\u0648\u062f\u0639 \u0627\u0644\u062d\u0632\u0645 \u0645\u0646\u062a\u0647\u064a \u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0629 \u0623\u0648 \u063a\u064a\u0631 \u0645\u0642\u0631\u0648\u0621 ({0})'
+        'af_a_key_cache' = '\u062a\u0645 \u0645\u0633\u062d \u0630\u0627\u0643\u0631\u0629 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062d\u0632\u0645 \u0627\u0644\u0645\u0624\u0642\u062a\u0629 \u0648\u062a\u0646\u0632\u064a\u0644\u0647\u0627 \u0645\u0646 \u062c\u062f\u064a\u062f'
+        'af_a_key_off' = '\u062a\u0645 \u062a\u0639\u0637\u064a\u0644 \u0645\u0633\u062a\u0648\u062f\u0639 \u0645\u0631\u0622\u0629 ToutWAF (\u062a\u0628\u0642\u0649 \u0645\u0633\u062a\u0648\u062f\u0639\u0627\u062a \u0627\u0644\u062a\u0648\u0632\u064a\u0639\u0629): {0}'
+        'af_h_key' = '\u062d\u062f\u0651\u062b \u062d\u0632\u0645\u0629 release \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u062a\u0648\u0632\u064a\u0639\u0629 (\u062a\u062d\u0645\u0644 \u0645\u0641\u0627\u062a\u064a\u062d \u0627\u0644\u062a\u0648\u0642\u064a\u0639) \u062b\u0645 \u0623\u0639\u062f \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0645\u062b\u0628\u062a'
+        'af_p_unitload' = '\u0644\u0645 \u064a\u0639\u062f systemd \u062a\u062d\u0645\u064a\u0644 \u0645\u0644\u0641\u0627\u062a \u0627\u0644\u0648\u062d\u062f\u0627\u062a'
+        'af_a_unitload' = '\u062a\u0645\u062a \u0625\u0639\u0627\u062f\u0629 \u062a\u062d\u0645\u064a\u0644 \u0625\u0639\u062f\u0627\u062f systemd (daemon-reload)'
+        'af_p_startlimit' = '{0} \u0628\u0644\u063a \u062d\u062f \u0628\u062f\u0621 \u0627\u0644\u062a\u0634\u063a\u064a\u0644 \u0641\u064a systemd'
+        'af_a_startlimit' = '\u062a\u0645\u062a \u0625\u0639\u0627\u062f\u0629 \u0636\u0628\u0637 \u0639\u062f\u0627\u062f \u0628\u062f\u0621 {0}'
+        'af_p_nofile' = '{0} \u0627\u0633\u062a\u0646\u0641\u062f \u0639\u062f\u062f \u0627\u0644\u0645\u0644\u0641\u0627\u062a \u0627\u0644\u0645\u0641\u062a\u0648\u062d\u0629'
+        'af_a_nofile' = '\u062a\u0645 \u0631\u0641\u0639 \u062d\u062f \u0627\u0644\u0645\u0644\u0641\u0627\u062a \u0627\u0644\u0645\u0641\u062a\u0648\u062d\u0629 \u0644\u0640 {0}'
+        'af_p_slow' = '{0} \u0628\u0637\u064a\u0621 \u0641\u064a \u0627\u0644\u062c\u0627\u0647\u0632\u064a\u0629 \u0644\u0643\u0646\u0647 \u064a\u0648\u0627\u0635\u0644 \u0627\u0644\u0639\u0645\u0644'
+        'af_a_slow' = '\u062a\u0645 \u0627\u0644\u0627\u0646\u062a\u0638\u0627\u0631 {0} \u062b\u0627\u0646\u064a\u0629 \u0625\u0636\u0627\u0641\u064a\u0629'
     }
 }
 # END CATALOG
@@ -3955,29 +4598,72 @@ function Step-SrcFallback {
 # the winget manifests and a signed index.json. The archive is verified exactly as before (SHA256SUMS + Ed25519 signature of this installer), so the repository
 # is a transport, not a trust anchor. If anything is wrong with it the sources stay as they were (GitLab, then GitHub): this switch never blocks an installation.
 $script:RepoWindows = if ($env:TOUTWAF_REPO_WINDOWS_URL) { $env:TOUTWAF_REPO_WINDOWS_URL.TrimEnd('/') } else { 'https://repo.qu3ntin.com/include/toutwaf/Windows/-/raw' }
+# Short timeouts: the repository is only the preferred source, a slow one must cost seconds, not minutes.
+$script:MirrorIndexTimeout = 6
+$script:RepoKeyFpr = '7A816F4DD2C6953E25517531DCB7102BD9AE62F1'   # repository key (index.json.asc); the key is never trusted from the place it is fetched from
+function Get-MirrorDisabled { return ($NoMirror -or $env:TOUTWAF_NO_MIRROR -in @('1', 'yes', 'true', 'on')) }
+# $true: index.json.asc is a good signature of the repository key (fingerprint = the one above); $false: bad; $null: could not be checked (no gpg)
+function Test-IndexSignature([string]$base, [string]$idxFile, [string]$tmp) {
+    $gpg = Get-Command gpg -ErrorAction SilentlyContinue
+    if (-not $gpg) { $gpg = Get-Command gpg.exe -ErrorAction SilentlyContinue }
+    if (-not $gpg) { $g = Join-Path ${env:ProgramFiles} 'Git\usr\bin\gpg.exe'; if (Test-Path $g) { $gpg = Get-Command $g } }
+    if (-not $gpg) { return $null }
+    $home2 = Join-Path $tmp ('gnupg-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $home2 -Force | Out-Null
+    try {
+        $asc = Join-Path $tmp 'index.json.asc'; $pub = Join-Path $tmp 'toutwaf.asc'
+        Invoke-WebRequest -UseBasicParsing -Uri "$base/index.json.asc" -OutFile $asc -TimeoutSec $script:MirrorIndexTimeout
+        Invoke-WebRequest -UseBasicParsing -Uri "$base/toutwaf.asc" -OutFile $pub -TimeoutSec $script:MirrorIndexTimeout
+        $fp = (& $gpg.Source --homedir $home2 --batch --show-keys --with-colons $pub 2>$null | Where-Object { $_ -like 'fpr:*' } | ForEach-Object { ($_ -split ':')[9] }) -join ' '
+        if ($fp -ne $script:RepoKeyFpr) { return $false }
+        & $gpg.Source --homedir $home2 --batch --import $pub 2>$null | Out-Null
+        & $gpg.Source --homedir $home2 --batch --status-fd 1 --verify $asc $idxFile 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch { return $false } finally { Remove-Item $home2 -Recurse -Force -ErrorAction SilentlyContinue }
+}
 function Use-ViaRepo {
-    if ($script:Bound.ContainsKey('Repo')) { Write-Warn '-ViaRepo is ignored with -Repo (another repository was chosen)'; return }
+    if ($script:Bound.ContainsKey('Repo')) { return }
     $root = $script:RepoWindows
     $base = "$root/$(Get-ChannelBranch)"
+    $t = Join-Path ([IO.Path]::GetTempPath()) ('tw-idx-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $t -Force | Out-Null
     try {
-        $idxRaw = (Invoke-WebRequest -UseBasicParsing -Uri "$base/index.json" -TimeoutSec 15).Content
-        $sumRaw = (Invoke-WebRequest -UseBasicParsing -Uri "$base/index.json.sha256" -TimeoutSec 15).Content
-        if ($idxRaw -is [byte[]]) { $idxRaw = [Text.Encoding]::UTF8.GetString($idxRaw) }
-        if ($sumRaw -is [byte[]]) { $sumRaw = [Text.Encoding]::UTF8.GetString($sumRaw) }
-        $want = ((([string]$sumRaw).Trim()) -split '\s+')[0].ToLowerInvariant()
-        $sha = [Security.Cryptography.SHA256]::Create()
-        $got = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$idxRaw)) | ForEach-Object { $_.ToString('x2') })
-        if ($want -ne $got) { throw 'index.json does not match index.json.sha256' }
-        $idx = ([string]$idxRaw) | ConvertFrom-Json
-        if ([string]$idx.channel -ne $script:Channel) { throw "the repository serves the $($idx.channel) channel, not $($script:Channel)" }
-        $asset = "toutwaf-windows-$(Get-Arch).zip"
-        if (@($idx.files | Where-Object { $_.path -eq "releases/$($idx.version)/$asset" }).Count -eq 0) { throw "the repository has no $asset" }
-    } catch {
-        Write-Warn "-ViaRepo: the ToutWAF package repository is not usable ($($_.Exception.Message)); using the direct download instead (GitLab, then GitHub)"
-        return
-    }
+        try {
+            $idxFile = Join-Path $t 'index.json'
+            Invoke-WebRequest -UseBasicParsing -Uri "$base/index.json" -OutFile $idxFile -TimeoutSec $script:MirrorIndexTimeout
+            $sumRaw = (Invoke-WebRequest -UseBasicParsing -Uri "$base/index.json.sha256" -TimeoutSec $script:MirrorIndexTimeout).Content
+            if ($sumRaw -is [byte[]]) { $sumRaw = [Text.Encoding]::UTF8.GetString($sumRaw) }
+            $want = ((([string]$sumRaw).Trim()) -split '\s+')[0].ToLowerInvariant()
+            $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $idxFile).Hash.ToLowerInvariant()
+            if ($want -ne $got) { throw 'index.json does not match index.json.sha256' }
+            $sig = Test-IndexSignature $base $idxFile $t
+            if ($sig -eq $false) { throw 'index.json is not signed by the ToutWAF repository key' }
+            if ($null -eq $sig) { Write-InstallLog 'repository index: signature not checked (gpg not found); SHA-256 and the release signature still apply' }
+            $idx = [IO.File]::ReadAllText($idxFile) | ConvertFrom-Json
+            if ([string]$idx.channel -ne $script:Channel) { throw "the repository serves the $($idx.channel) channel, not $($script:Channel)" }
+            $asset = "toutwaf-windows-$(Get-Arch).zip"
+            if (@($idx.files | Where-Object { $_.path -eq "releases/$($idx.version)/$asset" }).Count -eq 0) { throw "the repository holds no $asset" }
+        } catch {
+            Write-InstallLog "package repository not used: $($_.Exception.Message)"
+            Write-Info "ToutWAF package repository not used ($($_.Exception.Message)); direct download (GitLab, then GitHub)"
+            return
+        }
+    } finally { Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue }
     $script:SrcFallback2 = $script:SrcFallback; $script:SrcFallback = $script:SrcPrimary; $script:SrcPrimary = $root; $script:SrcRoot = ''
     Write-Info "source: ToutWAF package repository ($base)"
+}
+# Download relPath (relative to the channel branch) from the current source; a failure (unreachable, 404, timeout) moves on to the next source, never blocking.
+# The source that served a file keeps serving the rest of the release, so the files of one release always agree.
+function Save-FromSources([string]$relPath, [string]$out, [string]$query = '', [int]$timeout = 30) {
+    while ($true) {
+        try { Invoke-WebRequest -UseBasicParsing -Uri ((Get-RepoBase) + '/' + $relPath + $query) -OutFile $out -TimeoutSec $timeout; return }
+        catch {
+            if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue }
+            Write-InstallLog "download $relPath from $(Get-RepoBase): $($_.Exception.Message)"
+            if (-not $BaseUrl -and -not $env:TOUTWAF_BASE_URL -and (Step-SrcFallback)) { continue }
+            throw
+        }
+    }
 }
 function Save-InstallerConf {
     if ($DryRun) { return }
@@ -4114,7 +4800,7 @@ $script:ChJson = $null
 function Resolve-Release {
     # sets $script:ResolvedVersion
     $pinned = ($Version -ne 'latest')
-    if ($ViaRepo -and -not $BaseUrl -and -not $env:TOUTWAF_BASE_URL) { Use-ViaRepo }
+    if (-not (Get-MirrorDisabled) -and -not $BaseUrl -and -not $env:TOUTWAF_BASE_URL) { Use-ViaRepo }
     $script:ChJson = Get-ChannelJson
     $script:NewBuild = ''
     if (-not $script:ChJson) {
@@ -4226,7 +4912,7 @@ function Get-Extras([string]$rel, [string]$tmp, [string]$q) {
         $f = Join-Path $tmp $n
         $ok = $false
         for ($i = 1; $i -le 2 -and -not $ok; $i++) {
-            try { Invoke-WebRequest -UseBasicParsing -Uri "$rel/$n$q" -OutFile $f; $ok = (Test-Path $f) } catch { if (Test-Path $f) { Remove-Item $f -Force } }
+            try { Save-FromSources "releases/$($script:ResolvedVersion)/$n" $f $q; $ok = (Test-Path $f) } catch { if (Test-Path $f) { Remove-Item $f -Force } }
         }
         if (-not $ok) { Set-ExtrasFailed (Get-ExtrasKey 'w_extras_dl') @($n); return }
         $line = Get-Content $sumsFile | Where-Object { $_ -match ([regex]::Escape($n) + '$') } | Select-Object -First 1
@@ -4281,7 +4967,7 @@ function Invoke-ExtrasMaintain([string]$tmp, [string]$v, [string]$b) {
     $rel = if ($ZipPath) { '' } else { (Get-RepoBase) + '/releases/' + $script:ResolvedVersion }
     if (-not $ZipPath -and -not (Test-Path (Join-Path $tmp 'SHA256SUMS'))) {
         $q = Get-ReleaseQuery
-        try { Invoke-WebRequest -UseBasicParsing -Uri "$rel/SHA256SUMS$q" -OutFile (Join-Path $tmp 'SHA256SUMS') } catch { Write-Warn (T (Get-ExtrasKey 'w_extras_dl') @('SHA256SUMS')); return }
+        try { Save-FromSources "releases/$($script:ResolvedVersion)/SHA256SUMS" (Join-Path $tmp 'SHA256SUMS') $q } catch { Write-Warn (T (Get-ExtrasKey 'w_extras_dl') @('SHA256SUMS')); return }
         Confirm-ReleaseSignature $rel $tmp $q
     }
     $script:Rel = @{ ArchiveVersion = $v; ArchiveBuild = $b }
@@ -4309,8 +4995,9 @@ function Get-Release([string]$tmp) {
             $resolved = $script:ResolvedVersion
             $rel = (Get-RepoBase) + "/releases/$resolved"
             $q = Get-ReleaseQuery
-            Invoke-WebRequest -UseBasicParsing -Uri "$rel/$name$q" -OutFile $zip
-            Invoke-WebRequest -UseBasicParsing -Uri "$rel/SHA256SUMS$q" -OutFile (Join-Path $tmp 'SHA256SUMS')
+            Save-FromSources "releases/$resolved/$name" $zip $q
+            Save-FromSources "releases/$resolved/SHA256SUMS" (Join-Path $tmp 'SHA256SUMS') $q
+            $rel = (Get-RepoBase) + "/releases/$resolved"   # the source may have changed while downloading
             $line = Get-Content (Join-Path $tmp 'SHA256SUMS') | Where-Object { $_ -match ([regex]::Escape($name) + '$') } | Select-Object -First 1
             if (-not $line) { throw "No checksum published for $name" }
             $want = ($line -split '\s+')[0].ToLower()

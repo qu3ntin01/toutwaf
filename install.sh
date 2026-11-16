@@ -3165,6 +3165,646 @@ nl|st_extras_none_noav|Extra's ontbreken: Windows wordt niet aangeboden. Voer ui
 ru|st_extras_none_noav|Дополнения отсутствуют: Windows не предлагается. Выполните от root: %s
 zh|st_extras_none_noav|缺少附加包：不提供 Windows。请以 root 运行：%s
 ar|st_extras_none_noav|الإضافات مفقودة: لا يتم عرض Windows. شغّل بصلاحيات root: %s
+en|af_line|Problem detected: %s; correction applied: %s; new attempt: %s
+fr|af_line|Problème détecté : %s ; correction appliquée : %s ; nouvel essai : %s
+es|af_line|Problema detectado: %s; corrección aplicada: %s; nuevo intento: %s
+de|af_line|Problem erkannt: %s; Korrektur angewendet: %s; neuer Versuch: %s
+it|af_line|Problema rilevato: %s; correzione applicata: %s; nuovo tentativo: %s
+pt|af_line|Problema detetado: %s; correção aplicada: %s; nova tentativa: %s
+nl|af_line|Probleem gevonden: %s; correctie toegepast: %s; nieuwe poging: %s
+ru|af_line|Обнаружена проблема: %s; исправление применено: %s; новая попытка: %s
+zh|af_line|检测到问题：%s；已应用修正：%s；重试结果：%s
+ar|af_line|تم اكتشاف مشكلة: %s؛ التصحيح المطبق: %s؛ المحاولة الجديدة: %s
+en|af_plan_line|Problem detected: %s; correction planned: %s (--autofix-dry-run: nothing is changed)
+fr|af_plan_line|Problème détecté : %s ; correction prévue : %s (--autofix-dry-run : rien n'est modifié)
+es|af_plan_line|Problema detectado: %s; corrección prevista: %s (--autofix-dry-run: no se cambia nada)
+de|af_plan_line|Problem erkannt: %s; geplante Korrektur: %s (--autofix-dry-run: nichts wird geändert)
+it|af_plan_line|Problema rilevato: %s; correzione prevista: %s (--autofix-dry-run: nulla viene modificato)
+pt|af_plan_line|Problema detetado: %s; correção prevista: %s (--autofix-dry-run: nada é alterado)
+nl|af_plan_line|Probleem gevonden: %s; geplande correctie: %s (--autofix-dry-run: er wordt niets gewijzigd)
+ru|af_plan_line|Обнаружена проблема: %s; запланированное исправление: %s (--autofix-dry-run: ничего не меняется)
+zh|af_plan_line|检测到问题：%s；计划的修正：%s（--autofix-dry-run：不做任何更改）
+ar|af_plan_line|تم اكتشاف مشكلة: %s؛ التصحيح المخطط: %s (--autofix-dry-run: لا يتم تغيير أي شيء)
+en|af_failed_line|Problem detected: %s; correction failed: %s; no new attempt
+fr|af_failed_line|Problème détecté : %s ; la correction a échoué : %s ; pas de nouvel essai
+es|af_failed_line|Problema detectado: %s; la corrección falló: %s; sin nuevo intento
+de|af_failed_line|Problem erkannt: %s; Korrektur fehlgeschlagen: %s; kein neuer Versuch
+it|af_failed_line|Problema rilevato: %s; correzione non riuscita: %s; nessun nuovo tentativo
+pt|af_failed_line|Problema detetado: %s; a correção falhou: %s; sem nova tentativa
+nl|af_failed_line|Probleem gevonden: %s; correctie mislukt: %s; geen nieuwe poging
+ru|af_failed_line|Обнаружена проблема: %s; исправление не удалось: %s; новой попытки нет
+zh|af_failed_line|检测到问题：%s；修正失败：%s；不再重试
+ar|af_failed_line|تم اكتشاف مشكلة: %s؛ فشل التصحيح: %s؛ لا محاولة جديدة
+en|af_manual_line|Problem detected: %s; to be done by hand: %s
+fr|af_manual_line|Problème détecté : %s ; à faire à la main : %s
+es|af_manual_line|Problema detectado: %s; a hacer a mano: %s
+de|af_manual_line|Problem erkannt: %s; von Hand zu tun: %s
+it|af_manual_line|Problema rilevato: %s; da fare a mano: %s
+pt|af_manual_line|Problema detetado: %s; a fazer manualmente: %s
+nl|af_manual_line|Probleem gevonden: %s; handmatig te doen: %s
+ru|af_manual_line|Обнаружена проблема: %s; нужно сделать вручную: %s
+zh|af_manual_line|检测到问题：%s；需要手动处理：%s
+ar|af_manual_line|تم اكتشاف مشكلة: %s؛ يجب القيام بما يلي يدويا: %s
+en|af_try_ok|succeeded
+fr|af_try_ok|réussi
+es|af_try_ok|logrado
+de|af_try_ok|erfolgreich
+it|af_try_ok|riuscito
+pt|af_try_ok|bem-sucedida
+nl|af_try_ok|geslaagd
+ru|af_try_ok|успешно
+zh|af_try_ok|成功
+ar|af_try_ok|نجحت
+en|af_try_ko|failed
+fr|af_try_ko|échoué
+es|af_try_ko|fallido
+de|af_try_ko|fehlgeschlagen
+it|af_try_ko|non riuscito
+pt|af_try_ko|falhou
+nl|af_try_ko|mislukt
+ru|af_try_ko|не удалось
+zh|af_try_ko|失败
+ar|af_try_ko|فشلت
+en|af_try_run|in progress
+fr|af_try_run|en cours
+es|af_try_run|en curso
+de|af_try_run|läuft
+it|af_try_run|in corso
+pt|af_try_run|em curso
+nl|af_try_run|bezig
+ru|af_try_run|выполняется
+zh|af_try_run|进行中
+ar|af_try_run|قيد التنفيذ
+en|af_try_manual|to be run again by you
+fr|af_try_manual|à relancer par vous
+es|af_try_manual|para que lo ejecute de nuevo
+de|af_try_manual|von Ihnen erneut zu starten
+it|af_try_manual|da rilanciare manualmente
+pt|af_try_manual|para voltar a executar
+nl|af_try_manual|door u opnieuw te starten
+ru|af_try_manual|запустите снова вручную
+zh|af_try_manual|请您重新运行
+ar|af_try_manual|يجب إعادة التشغيل يدويا
+en|af_undo|to undo: %s
+fr|af_undo|pour annuler : %s
+es|af_undo|para deshacer: %s
+de|af_undo|zum Rückgängigmachen: %s
+it|af_undo|per annullare: %s
+pt|af_undo|para desfazer: %s
+nl|af_undo|ongedaan maken: %s
+ru|af_undo|чтобы отменить: %s
+zh|af_undo|撤销方法：%s
+ar|af_undo|للتراجع: %s
+en|af_noself|The corrections were made but this installer was read from a pipe and cannot start itself again: run the same command once more.
+fr|af_noself|Les corrections ont été faites, mais cet installateur a été lu depuis un tube et ne peut pas se relancer : relancez la même commande.
+es|af_noself|Se hicieron las correcciones, pero este instalador se leyó desde una tubería y no puede reiniciarse: ejecute de nuevo el mismo comando.
+de|af_noself|Die Korrekturen wurden vorgenommen, aber dieser Installer wurde aus einer Pipe gelesen und kann sich nicht neu starten: Führen Sie denselben Befehl erneut aus.
+it|af_noself|Le correzioni sono state fatte, ma questo installer è stato letto da una pipe e non può riavviarsi: eseguire di nuovo lo stesso comando.
+pt|af_noself|As correções foram feitas, mas este instalador foi lido de um pipe e não pode reiniciar-se: execute de novo o mesmo comando.
+nl|af_noself|De correcties zijn uitgevoerd, maar dit installatieprogramma is via een pipe gelezen en kan zichzelf niet herstarten: voer dezelfde opdracht opnieuw uit.
+ru|af_noself|Исправления выполнены, но установщик был прочитан из канала и не может перезапустить себя: запустите ту же команду ещё раз.
+zh|af_noself|修正已完成，但此安装程序是通过管道读取的，无法自行重新启动：请再次运行同一条命令。
+ar|af_noself|تم إجراء التصحيحات لكن المثبت قُرئ عبر أنبوب ولا يمكنه إعادة تشغيل نفسه: أعد تشغيل الأمر نفسه.
+en|af_giveup|No more automatic attempts (limit: %s).
+fr|af_giveup|Plus d'essai automatique (limite : %s).
+es|af_giveup|No hay más intentos automáticos (límite: %s).
+de|af_giveup|Keine weiteren automatischen Versuche (Grenze: %s).
+it|af_giveup|Nessun altro tentativo automatico (limite: %s).
+pt|af_giveup|Sem mais tentativas automáticas (limite: %s).
+nl|af_giveup|Geen automatische pogingen meer (limiet: %s).
+ru|af_giveup|Больше автоматических попыток нет (предел: %s).
+zh|af_giveup|不再自动重试（上限：%s）。
+ar|af_giveup|لا مزيد من المحاولات التلقائية (الحد: %s).
+en|af_diag_ready|A diagnostic ready to send was written to %s (secrets are hidden).
+fr|af_diag_ready|Un diagnostic prêt à envoyer a été écrit dans %s (les secrets sont masqués).
+es|af_diag_ready|Se escribió un diagnóstico listo para enviar en %s (los secretos están ocultos).
+de|af_diag_ready|Eine versandfertige Diagnose wurde nach %s geschrieben (Geheimnisse sind ausgeblendet).
+it|af_diag_ready|Una diagnostica pronta da inviare è stata scritta in %s (i segreti sono nascosti).
+pt|af_diag_ready|Foi escrito um diagnóstico pronto a enviar em %s (os segredos estão ocultos).
+nl|af_diag_ready|Een verzendklare diagnose is geschreven naar %s (geheimen zijn verborgen).
+ru|af_diag_ready|Готовая к отправке диагностика записана в %s (секреты скрыты).
+zh|af_diag_ready|可直接发送的诊断信息已写入 %s（密钥已隐藏）。
+ar|af_diag_ready|تمت كتابة تشخيص جاهز للإرسال في %s (الأسرار مخفية).
+en|af_none|Nothing to correct on this machine at the moment.
+fr|af_none|Rien à corriger sur cette machine pour le moment.
+es|af_none|Nada que corregir en esta máquina por ahora.
+de|af_none|Derzeit ist auf diesem Rechner nichts zu korrigieren.
+it|af_none|Nulla da correggere su questa macchina al momento.
+pt|af_none|Nada a corrigir nesta máquina de momento.
+nl|af_none|Op dit moment is er niets te corrigeren op deze machine.
+ru|af_none|Сейчас на этой машине нечего исправлять.
+zh|af_none|此机器目前没有需要修正的问题。
+ar|af_none|لا شيء يحتاج إلى تصحيح على هذا الجهاز حاليا.
+en|af_w_full|full (%s MB free)
+fr|af_w_full|plein (%s Mo libres)
+es|af_w_full|lleno (%s MB libres)
+de|af_w_full|voll (%s MB frei)
+it|af_w_full|pieno (%s MB liberi)
+pt|af_w_full|cheio (%s MB livres)
+nl|af_w_full|vol (%s MB vrij)
+ru|af_w_full|заполнен (свободно %s МБ)
+zh|af_w_full|已满（剩余 %s MB）
+ar|af_w_full|ممتلئ (المتاح %s ميغابايت)
+en|af_w_noexec|mounted noexec
+fr|af_w_noexec|monté en noexec
+es|af_w_noexec|montado como noexec
+de|af_w_noexec|als noexec eingehängt
+it|af_w_noexec|montato come noexec
+pt|af_w_noexec|montado como noexec
+nl|af_w_noexec|als noexec gekoppeld
+ru|af_w_noexec|смонтирован с noexec
+zh|af_w_noexec|以 noexec 挂载
+ar|af_w_noexec|مثبت بخيار noexec
+en|af_w_nowrite|not writable
+fr|af_w_nowrite|non inscriptible
+es|af_w_nowrite|no se puede escribir
+de|af_w_nowrite|nicht beschreibbar
+it|af_w_nowrite|non scrivibile
+pt|af_w_nowrite|não gravável
+nl|af_w_nowrite|niet beschrijfbaar
+ru|af_w_nowrite|запись невозможна
+zh|af_w_nowrite|无法写入
+ar|af_w_nowrite|غير قابل للكتابة
+en|af_p_tmp|the work directory %s is unusable (%s)
+fr|af_p_tmp|le répertoire de travail %s est inutilisable (%s)
+es|af_p_tmp|el directorio de trabajo %s no se puede usar (%s)
+de|af_p_tmp|das Arbeitsverzeichnis %s ist unbrauchbar (%s)
+it|af_p_tmp|la directory di lavoro %s è inutilizzabile (%s)
+pt|af_p_tmp|o diretório de trabalho %s é inutilizável (%s)
+nl|af_p_tmp|de werkmap %s is onbruikbaar (%s)
+ru|af_p_tmp|рабочий каталог %s непригоден (%s)
+zh|af_p_tmp|工作目录 %s 不可用（%s）
+ar|af_p_tmp|مجلد العمل %s غير صالح للاستخدام (%s)
+en|af_a_tmp|work directory moved to %s
+fr|af_a_tmp|répertoire de travail déplacé vers %s
+es|af_a_tmp|directorio de trabajo movido a %s
+de|af_a_tmp|Arbeitsverzeichnis nach %s verlegt
+it|af_a_tmp|directory di lavoro spostata in %s
+pt|af_a_tmp|diretório de trabalho movido para %s
+nl|af_a_tmp|werkmap verplaatst naar %s
+ru|af_a_tmp|рабочий каталог перенесён в %s
+zh|af_a_tmp|工作目录已改为 %s
+ar|af_a_tmp|تم نقل مجلد العمل إلى %s
+en|af_p_disk|disk almost full on %s (%s%% used, %s MB free)
+fr|af_p_disk|disque presque plein sur %s (%s %% utilisé, %s Mo libres)
+es|af_p_disk|disco casi lleno en %s (%s%% usado, %s MB libres)
+de|af_p_disk|Datenträger fast voll auf %s (%s%% belegt, %s MB frei)
+it|af_p_disk|disco quasi pieno su %s (%s%% usato, %s MB liberi)
+pt|af_p_disk|disco quase cheio em %s (%s%% usado, %s MB livres)
+nl|af_p_disk|schijf bijna vol op %s (%s%% gebruikt, %s MB vrij)
+ru|af_p_disk|диск почти заполнен на %s (занято %s%%, свободно %s МБ)
+zh|af_p_disk|%s 上磁盘几乎已满（已用 %s%%，剩余 %s MB）
+ar|af_p_disk|القرص شبه ممتلئ على %s (مستخدم %s%%، المتاح %s ميغابايت)
+en|af_a_disk|package caches and old logs cleaned (data untouched)
+fr|af_a_disk|caches de paquets et anciens journaux nettoyés (données intactes)
+es|af_a_disk|cachés de paquetes y registros antiguos limpiados (datos intactos)
+de|af_a_disk|Paket-Caches und alte Protokolle bereinigt (Daten unberührt)
+it|af_a_disk|cache dei pacchetti e vecchi log puliti (dati intatti)
+pt|af_a_disk|caches de pacotes e registos antigos limpos (dados intactos)
+nl|af_a_disk|pakketcaches en oude logboeken opgeschoond (gegevens ongemoeid)
+ru|af_a_disk|кэши пакетов и старые журналы очищены (данные не тронуты)
+zh|af_a_disk|已清理软件包缓存和旧日志（数据未动）
+ar|af_a_disk|تم تنظيف ذاكرة الحزم المؤقتة والسجلات القديمة (البيانات سليمة)
+en|af_h_disk|free some space (the installer never deletes data), then run it again
+fr|af_h_disk|libérez de la place (l'installateur ne supprime jamais de données), puis relancez-le
+es|af_h_disk|libere espacio (el instalador nunca borra datos) y vuelva a ejecutarlo
+de|af_h_disk|Schaffen Sie Platz (der Installer löscht nie Daten) und starten Sie ihn erneut
+it|af_h_disk|liberare spazio (l'installer non cancella mai dati) e rilanciarlo
+pt|af_h_disk|liberte espaço (o instalador nunca apaga dados) e volte a executá-lo
+nl|af_h_disk|maak ruimte vrij (het installatieprogramma wist nooit gegevens) en start het opnieuw
+ru|af_h_disk|освободите место (установщик никогда не удаляет данные) и запустите его снова
+zh|af_h_disk|请腾出空间（安装程序绝不删除数据），然后重新运行
+ar|af_h_disk|حرّر مساحة (المثبت لا يحذف البيانات أبدا) ثم أعد تشغيله
+en|af_p_lock|the package manager is in use or locked (%s)
+fr|af_p_lock|le gestionnaire de paquets est occupé ou verrouillé (%s)
+es|af_p_lock|el gestor de paquetes está en uso o bloqueado (%s)
+de|af_p_lock|der Paketmanager ist belegt oder gesperrt (%s)
+it|af_p_lock|il gestore di pacchetti è occupato o bloccato (%s)
+pt|af_p_lock|o gestor de pacotes está ocupado ou bloqueado (%s)
+nl|af_p_lock|de pakketbeheerder is bezig of vergrendeld (%s)
+ru|af_p_lock|менеджер пакетов занят или заблокирован (%s)
+zh|af_p_lock|软件包管理器正忙或被锁定（%s）
+ar|af_p_lock|مدير الحزم مشغول أو مقفل (%s)
+en|af_a_lock_wait|waited for it to finish (at most %s s)
+fr|af_a_lock_wait|attendu qu'il termine (au plus %s s)
+es|af_a_lock_wait|esperado a que termine (como máximo %s s)
+de|af_a_lock_wait|gewartet, bis er fertig ist (höchstens %s s)
+it|af_a_lock_wait|atteso che finisca (al massimo %s s)
+pt|af_a_lock_wait|aguardado que termine (no máximo %s s)
+nl|af_a_lock_wait|gewacht tot hij klaar is (maximaal %s s)
+ru|af_a_lock_wait|ожидание его завершения (не более %s с)
+zh|af_a_lock_wait|已等待其结束（最多 %s 秒）
+ar|af_a_lock_wait|تم الانتظار حتى ينتهي (%s ثانية كحد أقصى)
+en|af_a_lock_stale|stale lock set aside: %s
+fr|af_a_lock_stale|verrou obsolète mis de côté : %s
+es|af_a_lock_stale|bloqueo obsoleto apartado: %s
+de|af_a_lock_stale|veraltete Sperre beiseitegelegt: %s
+it|af_a_lock_stale|blocco obsoleto messo da parte: %s
+pt|af_a_lock_stale|bloqueio obsoleto posto de lado: %s
+nl|af_a_lock_stale|verouderde vergrendeling opzijgezet: %s
+ru|af_a_lock_stale|устаревшая блокировка убрана: %s
+zh|af_a_lock_stale|已移开过期的锁：%s
+ar|af_a_lock_stale|تم تنحية قفل قديم: %s
+en|af_a_lock_none|nothing holds the lock any more
+fr|af_a_lock_none|plus rien ne tient le verrou
+es|af_a_lock_none|ya nada mantiene el bloqueo
+de|af_a_lock_none|nichts hält die Sperre mehr
+it|af_a_lock_none|nulla trattiene più il blocco
+pt|af_a_lock_none|nada mantém o bloqueio
+nl|af_a_lock_none|niets houdt de vergrendeling meer vast
+ru|af_a_lock_none|блокировку больше ничто не удерживает
+zh|af_a_lock_none|已没有进程持有该锁
+ar|af_a_lock_none|لم يعد شيء يحتفظ بالقفل
+en|af_h_lock|%s is still running: wait for it to finish, then run the installer again
+fr|af_h_lock|%s tourne encore : attendez sa fin, puis relancez l'installateur
+es|af_h_lock|%s sigue en ejecución: espere a que termine y vuelva a ejecutar el instalador
+de|af_h_lock|%s läuft noch: warten Sie das Ende ab und starten Sie den Installer erneut
+it|af_h_lock|%s è ancora in esecuzione: attendere la fine e rilanciare l'installer
+pt|af_h_lock|%s ainda está em execução: aguarde o fim e volte a executar o instalador
+nl|af_h_lock|%s draait nog: wacht tot het klaar is en start het installatieprogramma opnieuw
+ru|af_h_lock|%s ещё работает: дождитесь завершения и запустите установщик снова
+zh|af_h_lock|%s 仍在运行：请等待其结束，然后重新运行安装程序
+ar|af_h_lock|%s ما زال يعمل: انتظر انتهاءه ثم أعد تشغيل المثبت
+en|af_p_clock|the clock is %s s away from the real time
+fr|af_p_clock|l'horloge est décalée de %s s par rapport à l'heure réelle
+es|af_p_clock|el reloj está desfasado %s s respecto a la hora real
+de|af_p_clock|die Uhr weicht um %s s von der echten Zeit ab
+it|af_p_clock|l'orologio è sfasato di %s s rispetto all'ora reale
+pt|af_p_clock|o relógio está desfasado %s s da hora real
+nl|af_p_clock|de klok loopt %s s af van de echte tijd
+ru|af_p_clock|часы отличаются от точного времени на %s с
+zh|af_p_clock|系统时钟与实际时间相差 %s 秒
+ar|af_p_clock|الساعة تختلف عن الوقت الحقيقي بمقدار %s ثانية
+en|af_a_clock|time synchronisation started (%s)
+fr|af_a_clock|synchronisation de l'heure lancée (%s)
+es|af_a_clock|sincronización de hora iniciada (%s)
+de|af_a_clock|Zeitsynchronisation gestartet (%s)
+it|af_a_clock|sincronizzazione dell'ora avviata (%s)
+pt|af_a_clock|sincronização da hora iniciada (%s)
+nl|af_a_clock|tijdsynchronisatie gestart (%s)
+ru|af_a_clock|запущена синхронизация времени (%s)
+zh|af_a_clock|已启动时间同步（%s）
+ar|af_a_clock|بدأت مزامنة الوقت (%s)
+en|af_h_clock|set the time (chronyd, or timedatectl set-ntp true), then run the installer again
+fr|af_h_clock|mettez l'heure à jour (chronyd, ou timedatectl set-ntp true), puis relancez l'installateur
+es|af_h_clock|ajuste la hora (chronyd, o timedatectl set-ntp true) y vuelva a ejecutar el instalador
+de|af_h_clock|Stellen Sie die Uhrzeit ein (chronyd oder timedatectl set-ntp true) und starten Sie den Installer erneut
+it|af_h_clock|impostare l'ora (chronyd, o timedatectl set-ntp true) e rilanciare l'installer
+pt|af_h_clock|acerte a hora (chronyd, ou timedatectl set-ntp true) e volte a executar o instalador
+nl|af_h_clock|stel de tijd in (chronyd of timedatectl set-ntp true) en start het installatieprogramma opnieuw
+ru|af_h_clock|установите время (chronyd или timedatectl set-ntp true) и запустите установщик снова
+zh|af_h_clock|请校准时间（chronyd 或 timedatectl set-ntp true），然后重新运行安装程序
+ar|af_h_clock|اضبط الوقت (chronyd أو timedatectl set-ntp true) ثم أعد تشغيل المثبت
+en|af_p_src|the download source does not answer (%s)
+fr|af_p_src|la source de téléchargement ne répond pas (%s)
+es|af_p_src|la fuente de descarga no responde (%s)
+de|af_p_src|die Download-Quelle antwortet nicht (%s)
+it|af_p_src|la sorgente di download non risponde (%s)
+pt|af_p_src|a fonte de transferência não responde (%s)
+nl|af_p_src|de downloadbron antwoordt niet (%s)
+ru|af_p_src|источник загрузки не отвечает (%s)
+zh|af_p_src|下载源无响应（%s）
+ar|af_p_src|مصدر التنزيل لا يستجيب (%s)
+en|af_a_src|switched to %s
+fr|af_a_src|bascule sur %s
+es|af_a_src|cambiado a %s
+de|af_a_src|umgeschaltet auf %s
+it|af_a_src|passato a %s
+pt|af_a_src|mudado para %s
+nl|af_a_src|overgeschakeld naar %s
+ru|af_a_src|переключено на %s
+zh|af_a_src|已切换到 %s
+ar|af_a_src|تم التحويل إلى %s
+en|af_h_src|no other source answers: check the network, or give a mirror with --base-url
+fr|af_h_src|aucune autre source ne répond : vérifiez le réseau, ou indiquez un miroir avec --base-url
+es|af_h_src|ninguna otra fuente responde: revise la red o indique un espejo con --base-url
+de|af_h_src|keine andere Quelle antwortet: prüfen Sie das Netzwerk oder geben Sie mit --base-url einen Spiegel an
+it|af_h_src|nessun'altra sorgente risponde: controllare la rete o indicare un mirror con --base-url
+pt|af_h_src|nenhuma outra fonte responde: verifique a rede ou indique um espelho com --base-url
+nl|af_h_src|geen andere bron antwoordt: controleer het netwerk of geef een mirror op met --base-url
+ru|af_h_src|другие источники не отвечают: проверьте сеть или укажите зеркало через --base-url
+zh|af_h_src|没有其他源可用：请检查网络，或用 --base-url 指定镜像
+ar|af_h_src|لا يستجيب أي مصدر آخر: تحقق من الشبكة أو حدد نسخة مرآة عبر --base-url
+en|af_p_label|SELinux labels of ToutWAF files are wrong (%s)
+fr|af_p_label|les étiquettes SELinux des fichiers de ToutWAF sont fausses (%s)
+es|af_p_label|las etiquetas SELinux de los archivos de ToutWAF son incorrectas (%s)
+de|af_p_label|die SELinux-Labels der ToutWAF-Dateien sind falsch (%s)
+it|af_p_label|le etichette SELinux dei file di ToutWAF sono errate (%s)
+pt|af_p_label|as etiquetas SELinux dos ficheiros do ToutWAF estão erradas (%s)
+nl|af_p_label|de SELinux-labels van de ToutWAF-bestanden zijn onjuist (%s)
+ru|af_p_label|метки SELinux файлов ToutWAF неверны (%s)
+zh|af_p_label|ToutWAF 文件的 SELinux 标签不正确（%s）
+ar|af_p_label|تسميات SELinux لملفات ToutWAF غير صحيحة (%s)
+en|af_a_label|labels restored with restorecon (%s paths)
+fr|af_a_label|étiquettes rétablies avec restorecon (%s chemins)
+es|af_a_label|etiquetas restauradas con restorecon (%s rutas)
+de|af_a_label|Labels mit restorecon wiederhergestellt (%s Pfade)
+it|af_a_label|etichette ripristinate con restorecon (%s percorsi)
+pt|af_a_label|etiquetas restauradas com restorecon (%s caminhos)
+nl|af_a_label|labels hersteld met restorecon (%s paden)
+ru|af_a_label|метки восстановлены с помощью restorecon (путей: %s)
+zh|af_a_label|已用 restorecon 恢复标签（%s 个路径）
+ar|af_a_label|تمت استعادة التسميات بواسطة restorecon (%s مسارا)
+en|af_h_label|run restorecon -Rv on the ToutWAF directories and read: ausearch -m avc -ts recent
+fr|af_h_label|lancez restorecon -Rv sur les répertoires de ToutWAF et lisez : ausearch -m avc -ts recent
+es|af_h_label|ejecute restorecon -Rv en los directorios de ToutWAF y lea: ausearch -m avc -ts recent
+de|af_h_label|führen Sie restorecon -Rv auf den ToutWAF-Verzeichnissen aus und lesen Sie: ausearch -m avc -ts recent
+it|af_h_label|eseguire restorecon -Rv sulle directory di ToutWAF e leggere: ausearch -m avc -ts recent
+pt|af_h_label|execute restorecon -Rv nos diretórios do ToutWAF e leia: ausearch -m avc -ts recent
+nl|af_h_label|voer restorecon -Rv uit op de ToutWAF-mappen en lees: ausearch -m avc -ts recent
+ru|af_h_label|выполните restorecon -Rv для каталогов ToutWAF и прочитайте: ausearch -m avc -ts recent
+zh|af_h_label|对 ToutWAF 目录运行 restorecon -Rv，并查看：ausearch -m avc -ts recent
+ar|af_h_label|شغّل restorecon -Rv على مجلدات ToutWAF واقرأ: ausearch -m avc -ts recent
+en|af_p_bool|SELinux refuses what a boolean allows (%s)
+fr|af_p_bool|SELinux refuse ce qu'un booléen autorise (%s)
+es|af_p_bool|SELinux rechaza lo que un booleano permite (%s)
+de|af_p_bool|SELinux verweigert, was ein Boolean erlaubt (%s)
+it|af_p_bool|SELinux rifiuta ciò che un booleano consente (%s)
+pt|af_p_bool|o SELinux recusa o que um booleano permite (%s)
+nl|af_p_bool|SELinux weigert wat een boolean toestaat (%s)
+ru|af_p_bool|SELinux запрещает то, что разрешает переключатель (%s)
+zh|af_p_bool|SELinux 拒绝了某个布尔值本可允许的操作（%s）
+ar|af_p_bool|يرفض SELinux ما يسمح به متغير منطقي (%s)
+en|af_a_bool|SELinux boolean turned on: %s
+fr|af_a_bool|booléen SELinux activé : %s
+es|af_a_bool|booleano SELinux activado: %s
+de|af_a_bool|SELinux-Boolean eingeschaltet: %s
+it|af_a_bool|booleano SELinux attivato: %s
+pt|af_a_bool|booleano SELinux ativado: %s
+nl|af_a_bool|SELinux-boolean ingeschakeld: %s
+ru|af_a_bool|включён переключатель SELinux: %s
+zh|af_a_bool|已开启 SELinux 布尔值：%s
+ar|af_a_bool|تم تفعيل متغير SELinux المنطقي: %s
+en|af_p_perm|owner or permissions are wrong (%s)
+fr|af_p_perm|propriétaire ou permissions erronés (%s)
+es|af_p_perm|propietario o permisos incorrectos (%s)
+de|af_p_perm|Eigentümer oder Berechtigungen falsch (%s)
+it|af_p_perm|proprietario o permessi errati (%s)
+pt|af_p_perm|proprietário ou permissões errados (%s)
+nl|af_p_perm|eigenaar of rechten onjuist (%s)
+ru|af_p_perm|неверный владелец или права (%s)
+zh|af_p_perm|所有者或权限不正确（%s）
+ar|af_p_perm|المالك أو الأذونات غير صحيحة (%s)
+en|af_a_perm|owner and permissions restored (%s)
+fr|af_a_perm|propriétaire et permissions rétablis (%s)
+es|af_a_perm|propietario y permisos restaurados (%s)
+de|af_a_perm|Eigentümer und Berechtigungen wiederhergestellt (%s)
+it|af_a_perm|proprietario e permessi ripristinati (%s)
+pt|af_a_perm|proprietário e permissões restaurados (%s)
+nl|af_a_perm|eigenaar en rechten hersteld (%s)
+ru|af_a_perm|владелец и права восстановлены (%s)
+zh|af_a_perm|已恢复所有者和权限（%s）
+ar|af_a_perm|تمت استعادة المالك والأذونات (%s)
+en|af_h_perm|check the owner of the data and configuration directories
+fr|af_h_perm|vérifiez le propriétaire des répertoires de données et de configuration
+es|af_h_perm|compruebe el propietario de los directorios de datos y configuración
+de|af_h_perm|prüfen Sie den Eigentümer der Daten- und Konfigurationsverzeichnisse
+it|af_h_perm|controllare il proprietario delle directory dei dati e della configurazione
+pt|af_h_perm|verifique o proprietário dos diretórios de dados e de configuração
+nl|af_h_perm|controleer de eigenaar van de gegevens- en configuratiemappen
+ru|af_h_perm|проверьте владельца каталогов данных и конфигурации
+zh|af_h_perm|请检查数据目录和配置目录的所有者
+ar|af_h_perm|تحقق من مالك مجلدات البيانات والإعداد
+en|af_p_exec|a program cannot be executed (%s)
+fr|af_p_exec|un programme n'est pas exécutable (%s)
+es|af_p_exec|un programa no es ejecutable (%s)
+de|af_p_exec|ein Programm ist nicht ausführbar (%s)
+it|af_p_exec|un programma non è eseguibile (%s)
+pt|af_p_exec|um programa não é executável (%s)
+nl|af_p_exec|een programma is niet uitvoerbaar (%s)
+ru|af_p_exec|программа не исполняемая (%s)
+zh|af_p_exec|程序不可执行（%s）
+ar|af_p_exec|برنامج غير قابل للتنفيذ (%s)
+en|af_a_exec|execute permission restored on %s
+fr|af_a_exec|droit d'exécution rétabli sur %s
+es|af_a_exec|permiso de ejecución restaurado en %s
+de|af_a_exec|Ausführungsrecht wiederhergestellt für %s
+it|af_a_exec|permesso di esecuzione ripristinato su %s
+pt|af_a_exec|permissão de execução restaurada em %s
+nl|af_a_exec|uitvoerrecht hersteld op %s
+ru|af_a_exec|право на исполнение восстановлено: %s
+zh|af_a_exec|已恢复 %s 的执行权限
+ar|af_a_exec|تمت استعادة إذن التنفيذ على %s
+en|af_p_v6|IPv6 is not available but the configuration listens on [::]
+fr|af_p_v6|IPv6 est absent mais la configuration écoute sur [::]
+es|af_p_v6|IPv6 no está disponible pero la configuración escucha en [::]
+de|af_p_v6|IPv6 ist nicht verfügbar, aber die Konfiguration lauscht auf [::]
+it|af_p_v6|IPv6 non è disponibile ma la configurazione ascolta su [::]
+pt|af_p_v6|o IPv6 não está disponível mas a configuração escuta em [::]
+nl|af_p_v6|IPv6 is niet beschikbaar maar de configuratie luistert op [::]
+ru|af_p_v6|IPv6 недоступен, но конфигурация слушает [::]
+zh|af_p_v6|IPv6 不可用，但配置在 [::] 上监听
+ar|af_p_v6|IPv6 غير متاح لكن الإعداد يستمع على [::]
+en|af_a_v6|[::] replaced by 0.0.0.0 in %s file(s) (copies: *.autofix-bak)
+fr|af_a_v6|[::] remplacé par 0.0.0.0 dans %s fichier(s) (copies : *.autofix-bak)
+es|af_a_v6|[::] sustituido por 0.0.0.0 en %s archivo(s) (copias: *.autofix-bak)
+de|af_a_v6|[::] durch 0.0.0.0 ersetzt in %s Datei(en) (Kopien: *.autofix-bak)
+it|af_a_v6|[::] sostituito con 0.0.0.0 in %s file (copie: *.autofix-bak)
+pt|af_a_v6|[::] substituído por 0.0.0.0 em %s ficheiro(s) (cópias: *.autofix-bak)
+nl|af_a_v6|[::] vervangen door 0.0.0.0 in %s bestand(en) (kopieën: *.autofix-bak)
+ru|af_a_v6|[::] заменён на 0.0.0.0 в файлах: %s (копии: *.autofix-bak)
+zh|af_a_v6|已在 %s 个文件中将 [::] 替换为 0.0.0.0（备份：*.autofix-bak）
+ar|af_a_v6|تم استبدال [::] بـ 0.0.0.0 في %s ملف (النسخ: *.autofix-bak)
+en|af_p_port|port %s is taken by %s (%s)
+fr|af_p_port|le port %s est occupé par %s (%s)
+es|af_p_port|el puerto %s está ocupado por %s (%s)
+de|af_p_port|Port %s ist belegt durch %s (%s)
+it|af_p_port|la porta %s è occupata da %s (%s)
+pt|af_p_port|a porta %s está ocupada por %s (%s)
+nl|af_p_port|poort %s is bezet door %s (%s)
+ru|af_p_port|порт %s занят процессом %s (%s)
+zh|af_p_port|端口 %s 被 %s 占用（%s）
+ar|af_p_port|المنفذ %s مشغول بواسطة %s (%s)
+en|af_a_port|service stopped: %s
+fr|af_a_port|service arrêté : %s
+es|af_a_port|servicio detenido: %s
+de|af_a_port|Dienst gestoppt: %s
+it|af_a_port|servizio fermato: %s
+pt|af_a_port|serviço parado: %s
+nl|af_a_port|service gestopt: %s
+ru|af_a_port|служба остановлена: %s
+zh|af_a_port|已停止服务：%s
+ar|af_a_port|تم إيقاف الخدمة: %s
+en|af_h_port|use --autofix-stop-conflicts to let the installer stop %s, or free the port yourself
+fr|af_h_port|utilisez --autofix-stop-conflicts pour que l'installateur arrête %s, ou libérez le port vous-même
+es|af_h_port|use --autofix-stop-conflicts para que el instalador detenga %s, o libere el puerto usted mismo
+de|af_h_port|verwenden Sie --autofix-stop-conflicts, damit der Installer %s stoppt, oder geben Sie den Port selbst frei
+it|af_h_port|usare --autofix-stop-conflicts perché l'installer fermi %s, o liberare la porta manualmente
+pt|af_h_port|use --autofix-stop-conflicts para o instalador parar %s, ou libere a porta manualmente
+nl|af_h_port|gebruik --autofix-stop-conflicts zodat het installatieprogramma %s stopt, of maak de poort zelf vrij
+ru|af_h_port|используйте --autofix-stop-conflicts, чтобы установщик остановил %s, или освободите порт самостоятельно
+zh|af_h_port|使用 --autofix-stop-conflicts 让安装程序停止 %s，或自行释放该端口
+ar|af_h_port|استخدم --autofix-stop-conflicts ليوقف المثبت %s أو حرّر المنفذ بنفسك
+en|af_p_fw|the firewall (%s) blocks port(s) %s
+fr|af_p_fw|le pare-feu (%s) bloque le ou les ports %s
+es|af_p_fw|el cortafuegos (%s) bloquea el puerto o puertos %s
+de|af_p_fw|die Firewall (%s) blockiert Port(s) %s
+it|af_p_fw|il firewall (%s) blocca la porta o le porte %s
+pt|af_p_fw|a firewall (%s) bloqueia a porta ou portas %s
+nl|af_p_fw|de firewall (%s) blokkeert poort(en) %s
+ru|af_p_fw|брандмауэр (%s) блокирует порт(ы) %s
+zh|af_p_fw|防火墙（%s）阻止了端口 %s
+ar|af_p_fw|جدار الحماية (%s) يحظر المنفذ أو المنافذ %s
+en|af_a_fw|port(s) %s opened (%s)
+fr|af_a_fw|port(s) %s ouvert(s) (%s)
+es|af_a_fw|puerto(s) %s abierto(s) (%s)
+de|af_a_fw|Port(s) %s geöffnet (%s)
+it|af_a_fw|porta/e %s aperta/e (%s)
+pt|af_a_fw|porta(s) %s aberta(s) (%s)
+nl|af_a_fw|poort(en) %s geopend (%s)
+ru|af_a_fw|порт(ы) %s открыт(ы) (%s)
+zh|af_a_fw|已开放端口 %s（%s）
+ar|af_a_fw|تم فتح المنفذ أو المنافذ %s (%s)
+en|af_h_fw|open port(s) %s in your firewall
+fr|af_h_fw|ouvrez le ou les ports %s dans votre pare-feu
+es|af_h_fw|abra el puerto o puertos %s en su cortafuegos
+de|af_h_fw|öffnen Sie Port(s) %s in Ihrer Firewall
+it|af_h_fw|aprire la porta o le porte %s nel firewall
+pt|af_h_fw|abra a porta ou portas %s na sua firewall
+nl|af_h_fw|open poort(en) %s in uw firewall
+ru|af_h_fw|откройте порт(ы) %s в брандмауэре
+zh|af_h_fw|请在防火墙中开放端口 %s
+ar|af_h_fw|افتح المنفذ أو المنافذ %s في جدار الحماية
+en|af_h_fw9444|port 9444 (console <-> node link) is never opened to everyone and no source address is known: give --autofix-agent-from ADDRESS, or open it for your nodes only (%s)
+fr|af_h_fw9444|le port 9444 (lien console <-> nœud) n'est jamais ouvert à tout le monde et aucune adresse source n'est connue : donnez --autofix-agent-from ADRESSE, ou ouvrez-le pour vos nœuds seulement (%s)
+es|af_h_fw9444|el puerto 9444 (enlace consola <-> nodo) nunca se abre a todos y no se conoce ninguna dirección de origen: indique --autofix-agent-from DIRECCIÓN o ábralo solo para sus nodos (%s)
+de|af_h_fw9444|Port 9444 (Verbindung Konsole <-> Knoten) wird nie für alle geöffnet und keine Quelladresse ist bekannt: geben Sie --autofix-agent-from ADRESSE an oder öffnen Sie ihn nur für Ihre Knoten (%s)
+it|af_h_fw9444|la porta 9444 (collegamento console <-> nodo) non viene mai aperta a tutti e non è nota alcuna sorgente: indicare --autofix-agent-from INDIRIZZO, o aprirla solo per i propri nodi (%s)
+pt|af_h_fw9444|a porta 9444 (ligação consola <-> nó) nunca é aberta a todos e nenhum endereço de origem é conhecido: indique --autofix-agent-from ENDEREÇO, ou abra-a só para os seus nós (%s)
+nl|af_h_fw9444|poort 9444 (verbinding console <-> node) wordt nooit voor iedereen geopend en er is geen bronadres bekend: geef --autofix-agent-from ADRES op, of open hem alleen voor uw nodes (%s)
+ru|af_h_fw9444|порт 9444 (связь консоль <-> узел) никогда не открывается для всех, адрес источника неизвестен: укажите --autofix-agent-from АДРЕС или откройте его только для ваших узлов (%s)
+zh|af_h_fw9444|端口 9444（控制台与节点之间的连接）绝不对所有人开放，且来源地址未知：请提供 --autofix-agent-from 地址，或仅对您的节点开放（%s）
+ar|af_h_fw9444|المنفذ 9444 (رابط وحدة التحكم <-> العقدة) لا يُفتح للجميع أبدا ولا يوجد عنوان مصدر معروف: حدد --autofix-agent-from العنوان أو افتحه لعقدك فقط (%s)
+en|af_h_nftkeep|the nft rule for port %s lasts until the next reboot: add it to your nftables configuration to keep it
+fr|af_h_nftkeep|la règle nft du port %s dure jusqu'au prochain redémarrage : ajoutez-la à votre configuration nftables pour la garder
+es|af_h_nftkeep|la regla nft del puerto %s dura hasta el próximo reinicio: añádala a su configuración nftables para conservarla
+de|af_h_nftkeep|die nft-Regel für Port %s gilt bis zum nächsten Neustart: nehmen Sie sie in Ihre nftables-Konfiguration auf, um sie zu behalten
+it|af_h_nftkeep|la regola nft per la porta %s dura fino al prossimo riavvio: aggiungerla alla configurazione nftables per conservarla
+pt|af_h_nftkeep|a regra nft da porta %s dura até ao próximo reinício: adicione-a à sua configuração nftables para a manter
+nl|af_h_nftkeep|de nft-regel voor poort %s geldt tot de volgende herstart: voeg hem toe aan uw nftables-configuratie om hem te behouden
+ru|af_h_nftkeep|правило nft для порта %s действует до перезагрузки: добавьте его в конфигурацию nftables, чтобы сохранить
+zh|af_h_nftkeep|端口 %s 的 nft 规则在下次重启前有效：请将其加入 nftables 配置以保留
+ar|af_h_nftkeep|قاعدة nft للمنفذ %s تبقى حتى إعادة التشغيل التالية: أضفها إلى إعداد nftables للاحتفاظ بها
+en|af_p_key|a package key or repository is expired or unreadable (%s)
+fr|af_p_key|une clé ou un dépôt de paquets est expiré ou illisible (%s)
+es|af_p_key|una clave o repositorio de paquetes ha caducado o no se puede leer (%s)
+de|af_p_key|ein Paketschlüssel oder Repository ist abgelaufen oder unlesbar (%s)
+it|af_p_key|una chiave o un repository di pacchetti è scaduto o illeggibile (%s)
+pt|af_p_key|uma chave ou repositório de pacotes expirou ou está ilegível (%s)
+nl|af_p_key|een pakketsleutel of repository is verlopen of onleesbaar (%s)
+ru|af_p_key|ключ или репозиторий пакетов просрочен или нечитаем (%s)
+zh|af_p_key|软件包密钥或仓库已过期或无法读取（%s）
+ar|af_p_key|مفتاح أو مستودع الحزم منتهي الصلاحية أو غير مقروء (%s)
+en|af_a_key_cache|package metadata cache cleaned and downloaded again
+fr|af_a_key_cache|cache des métadonnées de paquets vidé et retéléchargé
+es|af_a_key_cache|caché de metadatos de paquetes limpiado y descargado de nuevo
+de|af_a_key_cache|Paket-Metadaten-Cache geleert und neu geladen
+it|af_a_key_cache|cache dei metadati dei pacchetti svuotata e riscaricata
+pt|af_a_key_cache|cache de metadados de pacotes limpa e transferida de novo
+nl|af_a_key_cache|pakketmetadata-cache geleegd en opnieuw opgehaald
+ru|af_a_key_cache|кэш метаданных пакетов очищен и загружен заново
+zh|af_a_key_cache|已清除并重新下载软件包元数据缓存
+ar|af_a_key_cache|تم مسح ذاكرة بيانات الحزم المؤقتة وتنزيلها من جديد
+en|af_a_key_off|ToutWAF mirror repository disabled (the distribution's own repositories stay): %s
+fr|af_a_key_off|dépôt du miroir ToutWAF désactivé (les dépôts de la distribution restent) : %s
+es|af_a_key_off|repositorio del espejo ToutWAF desactivado (los de la distribución se mantienen): %s
+de|af_a_key_off|Repository des ToutWAF-Spiegels deaktiviert (die der Distribution bleiben): %s
+it|af_a_key_off|repository del mirror ToutWAF disattivato (quelli della distribuzione restano): %s
+pt|af_a_key_off|repositório do espelho ToutWAF desativado (os da distribuição mantêm-se): %s
+nl|af_a_key_off|repository van de ToutWAF-mirror uitgeschakeld (die van de distributie blijven): %s
+ru|af_a_key_off|репозиторий зеркала ToutWAF отключён (репозитории дистрибутива остаются): %s
+zh|af_a_key_off|已停用 ToutWAF 镜像仓库（发行版自带仓库保留）：%s
+ar|af_a_key_off|تم تعطيل مستودع مرآة ToutWAF (تبقى مستودعات التوزيعة): %s
+en|af_h_key|update the distribution's release package (it carries the signing keys), then run the installer again
+fr|af_h_key|mettez à jour le paquet release de la distribution (il porte les clés de signature), puis relancez l'installateur
+es|af_h_key|actualice el paquete release de la distribución (contiene las claves de firma) y vuelva a ejecutar el instalador
+de|af_h_key|aktualisieren Sie das Release-Paket der Distribution (es enthält die Signaturschlüssel) und starten Sie den Installer erneut
+it|af_h_key|aggiornare il pacchetto release della distribuzione (contiene le chiavi di firma) e rilanciare l'installer
+pt|af_h_key|atualize o pacote release da distribuição (contém as chaves de assinatura) e volte a executar o instalador
+nl|af_h_key|werk het release-pakket van de distributie bij (het bevat de ondertekeningssleutels) en start het installatieprogramma opnieuw
+ru|af_h_key|обновите пакет release дистрибутива (в нём ключи подписи) и запустите установщик снова
+zh|af_h_key|请更新发行版的 release 软件包（含签名密钥），然后重新运行安装程序
+ar|af_h_key|حدّث حزمة release الخاصة بالتوزيعة (تحمل مفاتيح التوقيع) ثم أعد تشغيل المثبت
+en|af_p_unitload|systemd has not reloaded the unit files
+fr|af_p_unitload|systemd n'a pas rechargé les fichiers d'unités
+es|af_p_unitload|systemd no ha recargado los archivos de unidad
+de|af_p_unitload|systemd hat die Unit-Dateien nicht neu geladen
+it|af_p_unitload|systemd non ha ricaricato i file di unità
+pt|af_p_unitload|o systemd não recarregou os ficheiros de unidade
+nl|af_p_unitload|systemd heeft de unitbestanden niet herladen
+ru|af_p_unitload|systemd не перечитал файлы юнитов
+zh|af_p_unitload|systemd 尚未重新加载单元文件
+ar|af_p_unitload|لم يعد systemd تحميل ملفات الوحدات
+en|af_a_unitload|systemd configuration reloaded (daemon-reload)
+fr|af_a_unitload|configuration de systemd rechargée (daemon-reload)
+es|af_a_unitload|configuración de systemd recargada (daemon-reload)
+de|af_a_unitload|systemd-Konfiguration neu geladen (daemon-reload)
+it|af_a_unitload|configurazione di systemd ricaricata (daemon-reload)
+pt|af_a_unitload|configuração do systemd recarregada (daemon-reload)
+nl|af_a_unitload|systemd-configuratie herladen (daemon-reload)
+ru|af_a_unitload|конфигурация systemd перечитана (daemon-reload)
+zh|af_a_unitload|已重新加载 systemd 配置（daemon-reload）
+ar|af_a_unitload|تمت إعادة تحميل إعداد systemd (daemon-reload)
+en|af_p_startlimit|%s hit the systemd start limit
+fr|af_p_startlimit|%s a atteint la limite de démarrages de systemd
+es|af_p_startlimit|%s alcanzó el límite de arranques de systemd
+de|af_p_startlimit|%s hat das Startlimit von systemd erreicht
+it|af_p_startlimit|%s ha raggiunto il limite di avvii di systemd
+pt|af_p_startlimit|%s atingiu o limite de arranques do systemd
+nl|af_p_startlimit|%s heeft de startlimiet van systemd bereikt
+ru|af_p_startlimit|%s достиг лимита запусков systemd
+zh|af_p_startlimit|%s 达到了 systemd 的启动次数限制
+ar|af_p_startlimit|%s بلغ حد بدء التشغيل في systemd
+en|af_a_startlimit|start counter of %s reset
+fr|af_a_startlimit|compteur de démarrages de %s remis à zéro
+es|af_a_startlimit|contador de arranques de %s reiniciado
+de|af_a_startlimit|Startzähler von %s zurückgesetzt
+it|af_a_startlimit|contatore di avvii di %s azzerato
+pt|af_a_startlimit|contador de arranques de %s reposto
+nl|af_a_startlimit|startteller van %s teruggezet
+ru|af_a_startlimit|счётчик запусков %s сброшен
+zh|af_a_startlimit|已重置 %s 的启动计数
+ar|af_a_startlimit|تمت إعادة ضبط عداد بدء %s
+en|af_p_nofile|%s runs out of open files
+fr|af_p_nofile|%s manque de fichiers ouverts
+es|af_p_nofile|%s se queda sin archivos abiertos
+de|af_p_nofile|%s hat zu wenige offene Dateien zur Verfügung
+it|af_p_nofile|%s esaurisce i file aperti
+pt|af_p_nofile|%s fica sem ficheiros abertos
+nl|af_p_nofile|%s komt open bestanden tekort
+ru|af_p_nofile|%s исчерпал лимит открытых файлов
+zh|af_p_nofile|%s 的打开文件数已用尽
+ar|af_p_nofile|%s استنفد عدد الملفات المفتوحة
+en|af_a_nofile|open files limit raised for %s
+fr|af_a_nofile|limite de fichiers ouverts relevée pour %s
+es|af_a_nofile|límite de archivos abiertos aumentado para %s
+de|af_a_nofile|Limit offener Dateien für %s erhöht
+it|af_a_nofile|limite di file aperti aumentato per %s
+pt|af_a_nofile|limite de ficheiros abertos aumentado para %s
+nl|af_a_nofile|limiet voor open bestanden verhoogd voor %s
+ru|af_a_nofile|лимит открытых файлов для %s повышен
+zh|af_a_nofile|已提高 %s 的打开文件数限制
+ar|af_a_nofile|تم رفع حد الملفات المفتوحة لـ %s
+en|af_p_slow|%s is slow to become ready but keeps working
+fr|af_p_slow|%s met du temps à être prêt mais continue de travailler
+es|af_p_slow|%s tarda en estar listo pero sigue trabajando
+de|af_p_slow|%s braucht lange bis zur Bereitschaft, arbeitet aber weiter
+it|af_p_slow|%s impiega a diventare pronto ma continua a lavorare
+pt|af_p_slow|%s demora a ficar pronto mas continua a trabalhar
+nl|af_p_slow|%s is traag gereed maar blijft werken
+ru|af_p_slow|%s долго готовится, но продолжает работать
+zh|af_p_slow|%s 就绪较慢，但仍在工作
+ar|af_p_slow|%s بطيء في الجاهزية لكنه يواصل العمل
+en|af_a_slow|waited %s s more
+fr|af_a_slow|attendu %s s de plus
+es|af_a_slow|esperados %s s más
+de|af_a_slow|%s s länger gewartet
+it|af_a_slow|atteso %s s in più
+pt|af_a_slow|aguardados mais %s s
+nl|af_a_slow|%s s langer gewacht
+ru|af_a_slow|ожидание продлено на %s с
+zh|af_a_slow|多等待了 %s 秒
+ar|af_a_slow|تم الانتظار %s ثانية إضافية
 # END CATALOG
 TW_CATALOG
 }
@@ -3465,11 +4105,12 @@ fail_report() {   # message
   [ "$UI_COLOR" = 1 ] && printf '\033[?25h'
   printf '%s%s %s%s%s\n' "$RED" "$ERM" "$1" "$R" "${2:+ ($2)}" >&3
   if [ -n "$LOG" ] && [ -s "$LOG" ]; then tail -n 15 "$LOG" | sed 's/^/    /' >&3; printf '    %s\n' "$(t log_hint "$LOG")" >&3; fi
+  if declare -F autofix_report_tail >/dev/null 2>&1; then autofix_report_tail || true; fi   # the corrections tried and the diagnostic to send (autofix block)
 }
-die() { local _m; _m="$(IFS=' '; printf '%s' "$*")"; fail_report "$_m"; exit 1; }   # (the report itself keeps the strict IFS)
+die() { local _m; _m="$(IFS=' '; printf '%s' "$*")"; if declare -F autofix_failure >/dev/null 2>&1; then autofix_failure "$_m" || true; fi; fail_report "$_m"; exit 1; }   # (the report itself keeps the strict IFS)
 # jn ARGS...: the words joined with a blank ("${arr[*]}" would join them with a newline under the IFS of this script)
 jn() { local IFS=' '; printf '%s' "$*"; }
-on_err() { local rc=$?; trap - ERR; fail_report "${CUR_STEP:-$(t failed)}" "$(t failed) rc=$rc"; exit "$rc"; }
+on_err() { local rc=$?; trap - ERR; if declare -F autofix_failure >/dev/null 2>&1; then autofix_failure "${CUR_STEP:-$(t failed)} rc=$rc" || true; fi; fail_report "${CUR_STEP:-$(t failed)}" "$(t failed) rc=$rc"; exit "$rc"; }
 cleanup() {
   # the spinner runs in a background subshell that may inherit this EXIT trap: only the main shell may clean up
   [ "${BASHPID:-$$}" = "$$" ] || return 0
@@ -4129,6 +4770,805 @@ prereq_run_check() {   # --check-prereq: the verdict on the disk space, DNS and 
 TTY_DEV=""
 if [ -t 0 ] && [ -t 1 ]; then TTY_DEV=/dev/stdin
 elif [ -t 1 ] && { : </dev/tty; } 2>/dev/null; then TTY_DEV=/dev/tty; fi
+# BEGIN autofix (extracted by deploy/tests/autofix-test.sh: keep the markers)
+# ------------------------------------------------------------------------------------------------ automatic correction
+# "When something goes wrong the installer corrects it by itself": a catalogue of  diagnosis -> correction -> new attempt, run at every failure
+# (a step that fails, a service that does not start, a health check that is too slow). Each correction is
+#   * idempotent (a second run changes nothing), bounded (a wait has a limit, a fix is tried once per installation, two new attempts at most),
+#   * reversible (what it changed is written with the command that undoes it: /var/log/toutwaf-autofix.undo and the installer log),
+#   * never destructive for the data (caches, rotated logs and labels only; nothing of the data directory is ever deleted).
+# Every action is told in one line, in the console, in /var/log/toutwaf-install.log and in the progress file the update task of the console shows:
+#   [autofix] Problem detected: ...; correction applied: ...; new attempt: succeeded|failed
+# A new attempt = the installer starts again from its own file with what it was asked (steps are idempotent); a failure that nothing can correct
+# keeps the old behaviour (clean rollback) and writes a diagnostic ready to be sent. --no-autofix switches all of it off, --autofix-dry-run only
+# says what would be done. Messages: the af_* keys of the catalogue (10 languages).
+AUTOFIX=1; case "${TOUTWAF_NO_AUTOFIX:-}" in 1|yes|true|on) AUTOFIX=0;; esac
+AUTOFIX_DRY=0
+AUTOFIX_STOP_CONFLICTS=0; case "${TOUTWAF_AUTOFIX_STOP_CONFLICTS:-}" in 1|yes|true|on) AUTOFIX_STOP_CONFLICTS=1;; esac
+AF_RESUME=""; AF_FLOW=0         # AF_FLOW=1 once the installation or the update itself starts: a refused option or a wrong command line is not a failure to correct
+AUTOFIX_AGENT_FROM="${TOUTWAF_AUTOFIX_AGENT_FROM:-}"       # the address that may reach the port 9444 (console <-> node link): never opened to everyone
+AF_ROOT=""                      # a prefix for every path read or written (the tests); empty on a real machine
+AF_ACTIVE=""; AF_CTX=""; AF_PROBLEM=""; AF_PLAN=""; AF_ACTION=""; AF_ADVICE=""; AF_UNIT=""; AF_DIAG_PATH=""
+AF_CATALOG="tmp disk locks clock source selinux perms exec ipv6 port firewall boolean pkgkey unitload startlimit nofile"
+AF_SVC_CATALOG="unitload startlimit nofile selinux perms exec ipv6 port boolean"
+AF_MAX_TRIES=2
+AF_TRY=0; case "${TOUTWAF_AUTOFIX_TRY:-0}" in [0-9]) AF_TRY="${TOUTWAF_AUTOFIX_TRY:-0}";; esac
+AF_PREV="${TOUTWAF_AUTOFIX_APPLIED:-}"        # the corrections of the earlier attempts: id US problem US action, records separated by RS
+AF_REC=()                                     # the corrections of this attempt (same format, one record per element)
+AF_FAILED=()                                  # ids tried without success
+AF_PEND=()                                    # lines said before the installer log exists
+AF_SELF="${BASH_SOURCE[0]:-}"; if [ -n "$AF_SELF" ] && [ -f "$AF_SELF" ] && head -c2 "$AF_SELF" 2>/dev/null | grep -q '^#!'; then AF_SELF="$(cd "$(dirname "$AF_SELF")" && pwd)/$(basename "$AF_SELF")"; else AF_SELF=""; fi
+AF_ARGS=("$@")
+AF_US=$'\037'; AF_RS=$'\036'
+
+af_p() { printf '%s%s' "$AF_ROOT" "$1"; }
+af_want_dp() { case "${COMPONENT:-all}" in dp|all) return 0;; esac; return 1; }
+af_want_cp() { case "${COMPONENT:-all}" in cp|all) return 0;; esac; return 1; }
+af_is_root() { [ "$(id -u 2>/dev/null || echo 1)" = 0 ]; }
+af_ctx_has() { grep -Eiq -e "$1" <<<"$AF_CTX"; }
+af_ctx_first() { grep -Eio -e "$1" <<<"$AF_CTX" | head -n1 || true; }
+af_bounded() { local s="$1"; shift; if have timeout; then timeout "$s" "$@"; else "$@"; fi; }
+af_now() { date +%s; }
+af_out() { "$@" 2>/dev/null || true; }   # the output of a command whatever its status (no pipeline: a reader that stops early must not fail the test under pipefail)
+af_unit_known() { have systemctl && grep -q "^${1%.service}" <<<"$(af_out systemctl list-unit-files "$1")"; }
+af_poll() { sleep "${AF_POLL:-5}" 2>/dev/null || true; }
+af_num() { case "${1:-}" in ""|*[!0-9]*) printf '0';; *) printf '%s' "$1";; esac; }
+af_df() {   # af_df COLUMN PATH: column 4 = free MB, 5 = percent used (df -Pm)
+  local v; v="$(df -Pm "$2" 2>/dev/null | awk -v c="$1" 'NR==2{gsub("%","",$c); print $c}' | head -n1 || true)"
+  af_num "$v"
+}
+af_known() {   # af_known ID: already corrected earlier in this installation (this attempt or an earlier one)
+  local r
+  case "$AF_RS$AF_PREV" in *"$AF_RS$1$AF_US"*) return 0;; esac
+  for r in ${AF_REC[@]+"${AF_REC[@]}"}; do case "$r" in "$1$AF_US"*) return 0;; esac; done
+  for r in ${AF_FAILED[@]+"${AF_FAILED[@]}"}; do [ "$r" = "$1" ] && return 0; done
+  return 1
+}
+# af_emit TEXT: one line, in the console (unless --quiet), the installer log and the progress file of the console's update task
+af_emit() {
+  local IFS=' '
+  if [ -n "${LOG:-}" ]; then log "[autofix] $*"; else AF_PEND+=("[autofix] $*"); fi
+  progress "[autofix] $*"
+  if [ "${QUIET:-0}" = 0 ]; then { printf '    %s\n' "[autofix] $*" >&3; } 2>/dev/null || true; fi
+  return 0
+}
+autofix_flush_pending() { local l; for l in ${AF_PEND[@]+"${AF_PEND[@]}"}; do log "$l"; done; AF_PEND=(); return 0; }
+# af_undo COMMAND: what undoes the change just made (kept in the log and in /var/log/toutwaf-autofix.undo)
+af_undo() {
+  local f; f="$(af_p /var/log/toutwaf-autofix.undo)"
+  af_emit "$(t af_undo "$*")"
+  { printf '# %s %s\n%s\n' "$(date -u +%FT%TZ 2>/dev/null || echo now)" "${AF_PROBLEM:-}" "$*" >>"$f"; chmod 0600 "$f"; } 2>/dev/null || true
+  return 0
+}
+af_guard_begin() { AF_SAVED_E=0; case "$-" in *e*) AF_SAVED_E=1;; esac; AF_SAVED_ERR="$(trap -p ERR)"; trap - ERR; set +e; return 0; }
+af_guard_end() { [ "$AF_SAVED_E" = 1 ] && set -e; [ -n "$AF_SAVED_ERR" ] && eval "$AF_SAVED_ERR"; return 0; }
+# (the actions that only read or remove -- --check-env, --check-prereq, --status, --links, --uninstall -- never correct anything)
+af_enabled() {
+  case "${ACTION:-}" in checkenv|checkprereq|status|links|uninstall) return 1;; esac
+  [ "$AUTOFIX" = 1 ] && [ "${DRY_RUN:-0}" = 0 ] && [ "${STAGING:-0}" = 0 ]
+}
+
+# ---- work directory: /tmp full, or mounted noexec (the incident "curl: (23) Failure writing output")
+af_tmp_bad() {   # af_tmp_bad DIR: prints why when DIR cannot hold the download and the unpacked archive; returns 0 then
+  local d="$1" free opts
+  [ -d "$d" ] || return 1
+  free="$(af_df 4 "$d")"
+  if [ "$free" -gt 0 ] && [ "$free" -lt "${AF_TMP_MIN_MB:-300}" ]; then t af_w_full "$free"; return 0; fi
+  if have findmnt; then
+    opts="$(findmnt -no OPTIONS -T "$d" 2>/dev/null || true)"
+    case ",$opts," in *,noexec,*) t af_w_noexec; return 0;; esac
+  fi
+  return 1
+}
+af_pick_workdir() {   # a root's directory with room that allows execution: prints it
+  local c why
+  for c in "${TOUTWAF_AUTOFIX_TMPDIR:-}" /var/tmp /var/lib /root /opt; do
+    [ -n "$c" ] || continue
+    c="$(af_p "$c")"
+    [ -d "$c" ] && [ -w "$c" ] || continue
+    why="$(af_tmp_bad "$c" || true)"; [ -z "$why" ] || continue
+    printf '%s' "$c"; return 0
+  done
+  return 1
+}
+# autofix_prepare_tmp: before the work directory is made (in the CURRENT shell: TMPDIR must reach every program started later): when /tmp is full, not
+# writable or mounted noexec, another directory of root's is used
+autofix_prepare_tmp() {
+  local base="${TMPDIR:-/tmp}" why="" alt="" probe=""
+  af_enabled || return 0
+  why="$(af_tmp_bad "$base" || true)"
+  if [ -z "$why" ]; then
+    probe="$(mktemp -d 2>/dev/null || true)"
+    if [ -n "$probe" ]; then rm -rf "$probe"; else why="$(t af_w_nowrite)"; fi
+  fi
+  [ -n "$why" ] || return 0
+  alt="$(af_pick_workdir)" || return 0
+  AF_PROBLEM="$(t af_p_tmp "$base" "$why")"
+  if [ "$AUTOFIX_DRY" = 1 ]; then af_emit "$(t af_plan_line "$AF_PROBLEM" "$(t af_a_tmp "$alt")")"; return 0; fi
+  export TMPDIR="$alt"
+  af_emit "$(t af_line "$AF_PROBLEM" "$(t af_a_tmp "$alt")" "$(t af_try_ok)")"
+  return 0
+}
+af_diag_tmp() {
+  local d why alt
+  d="${TMP:-${TMPDIR:-/tmp}}"
+  why="$(af_tmp_bad "$d" || true)"; [ -n "$why" ] || return 1
+  alt="$(af_pick_workdir)" || return 1
+  AF_PROBLEM="$(t af_p_tmp "$d" "$why")"; AF_PLAN="$(t af_a_tmp "$alt")"; AF_WORKDIR="$alt"
+  return 0
+}
+af_fix_tmp() { export TMPDIR="$AF_WORKDIR"; AF_ACTION="$AF_PLAN"; return 0; }
+
+# ---- disk almost full: package caches and old logs, never data
+af_disk_paths() { printf '%s\n' /var / "${DATA_DIR:-/var/lib/toutwaf}" "${BIN_DIR:-/usr/local/bin}"; }
+af_disk_worst() {   # prints "PATH PCT FREE" of the file system that is over the limit
+  local d pct free
+  while IFS= read -r d; do
+    d="$(af_p "$d")"; [ -d "$d" ] || continue
+    pct="$(af_df 5 "$d")"; free="$(af_df 4 "$d")"
+    [ "$pct" -gt 0 ] || continue
+    if [ "$pct" -ge "${AF_DISK_PCT:-95}" ] || [ "$free" -lt "${AF_DISK_MIN_MB:-200}" ]; then printf '%s %s %s' "$d" "$pct" "$free"; return 0; fi
+  done < <(af_disk_paths)
+  return 1
+}
+af_diag_disk() {
+  local w
+  if [ -n "$AF_CTX" ] && ! af_ctx_has 'No space left on device|ENOSPC|Failure writing output|curl: \(23\)|write error|disk full|Disk quota exceeded|out of space'; then return 1; fi
+  w="$(af_disk_worst)" || return 1
+  { IFS=' ' read -r AF_D_PATH AF_D_PCT AF_D_FREE; } <<<"$w"
+  AF_PROBLEM="$(t af_p_disk "$AF_D_PATH" "$AF_D_PCT" "$AF_D_FREE")"; AF_PLAN="$(t af_a_disk)"
+  return 0
+}
+af_fix_disk() {
+  local f now old
+
+  have dnf && af_bounded 120 dnf clean packages >/dev/null 2>&1 || true
+  have yum && ! have dnf && af_bounded 120 yum clean packages >/dev/null 2>&1 || true
+  have apt-get && af_bounded 120 apt-get clean >/dev/null 2>&1 || true
+  have zypper && af_bounded 120 zypper --non-interactive clean --all >/dev/null 2>&1 || true
+  if have journalctl; then
+    af_bounded 120 journalctl --vacuum-time="${AF_JOURNAL_DAYS:-14}d" >/dev/null 2>&1 || true
+    if [ "$(af_df 5 "$(af_p /var)")" -ge "${AF_DISK_PCT:-95}" ]; then af_bounded 120 journalctl --vacuum-size="${AF_JOURNAL_MB:-200}M" >/dev/null 2>&1 || true; fi
+  fi
+  now="$(date +%s)"; old=$((${AF_LOG_DAYS:-30} * 86400))
+  for f in "$(af_p /var/log)"/*.gz "$(af_p /var/log)"/*.xz "$(af_p /var/log)"/*.old "$(af_p /var/log)"/*-[0-9]*; do   # rotated logs of other programs, never ours, never the audit trail
+    [ -f "$f" ] || continue
+    case "${f##*/}" in toutwaf*|audit*) continue;; esac
+    [ $((now - $(stat -c %Y "$f" 2>/dev/null || echo "$now"))) -gt "$old" ] || continue
+    rm -f -- "$f" 2>/dev/null || true
+  done
+  AF_ACTION="$AF_PLAN"
+  if af_disk_worst >/dev/null 2>&1; then AF_ADVICE="$(t af_h_disk)"; return 1; fi   # still over the limit
+  return 0
+}
+
+# ---- a package manager that is locked (another dnf / apt / rpm, a stale lock)
+af_pkg_busy() {   # prints the name of a package program that runs
+  local n
+  have pgrep || return 1
+  for n in dnf dnf5 yum rpm apt apt-get dpkg packagekitd unattended-upgr zypper; do pgrep -x "$n" >/dev/null 2>&1 && { printf '%s' "$n"; return 0; }; done
+  return 1
+}
+af_stale_locks() {   # prints the pid / lock files whose process is gone
+  local f pid
+  for f in "$(af_p /var/run/yum.pid)" "$(af_p /var/run/dnf.pid)" "$(af_p /var/lib/dnf/rpmdb_lock.pid)" "$(af_p /var/cache/dnf)"/*_lock.pid; do
+    [ -f "$f" ] || continue
+    pid="$(tr -dc '0-9' <"$f" 2>/dev/null | head -c 10 || true)"
+    if [ -n "$pid" ] && [ ! -d "$(af_p /proc/$pid)" ] && ! kill -0 "$pid" 2>/dev/null; then printf '%s\n' "$f"; fi
+  done
+  return 0
+}
+af_diag_locks() {
+  local who stale
+  who="$(af_pkg_busy || true)"; stale="$(af_stale_locks)"
+  if [ -n "$AF_CTX" ] && ! af_ctx_has "yum\.pid|dnf\.pid|another app is currently holding|Waiting for process with pid|rpmdb.*lock|Could not get lock|Unable to acquire the dpkg|dpkg was interrupted|database is locked|unable to lock database|Failed to obtain lock|is held by process|lock-frontend"; then return 1; fi
+  [ -n "$who$stale" ] || [ -n "$AF_CTX" ] || return 1
+  AF_PROBLEM="$(t af_p_lock "${who:-?}")"; AF_PLAN="$(t af_a_lock_wait "${AF_LOCK_WAIT:-180}")"
+  return 0
+}
+af_fix_locks() {
+  local waited=0 who stale f max="${AF_LOCK_WAIT:-180}" inc="${AF_POLL:-5}" msg=""
+  [ "$inc" -gt 0 ] || inc=1
+  while who="$(af_pkg_busy || true)"; [ -n "$who" ] && [ "$waited" -lt "$max" ]; do af_poll; waited=$((waited + inc)); done
+  if [ -n "$who" ]; then AF_ADVICE="$(t af_h_lock "$who")"; AF_ACTION="$(t af_a_lock_wait "$waited")"; return 1; fi
+  [ "$waited" = 0 ] || msg="$(t af_a_lock_wait "$waited")"
+  stale="$(af_stale_locks)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    mv -f -- "$f" "$f.autofix-stale" 2>/dev/null && { msg="${msg:+$msg, }$(t af_a_lock_stale "$f")"; af_undo "mv $f.autofix-stale $f"; }
+  done <<<"$stale"
+  if [ -d "$(af_p /var/lib/rpm)" ] && ls "$(af_p /var/lib/rpm)"/__db.0* >/dev/null 2>&1; then   # Berkeley DB environment files of an interrupted rpm: rebuilt at the next use
+    rm -f "$(af_p /var/lib/rpm)"/__db.0* 2>/dev/null && msg="${msg:+$msg, }$(t af_a_lock_stale "/var/lib/rpm/__db.*")"
+  fi
+  if af_ctx_has 'dpkg was interrupted' && have dpkg; then af_bounded 300 dpkg --configure -a >/dev/null 2>&1 && msg="${msg:+$msg, }dpkg --configure -a"; fi
+  AF_ACTION="${msg:-$(t af_a_lock_none)}"
+  return 0
+}
+
+# ---- the clock (a certificate "not yet valid", a signature "expired")
+af_clock_skew() {   # seconds between this machine and the Date header of the download sources (0 when unknown)
+  local u d t now diff
+  for u in "${SRC_PRIMARY:-}" "${SRC_FALLBACK:-}"; do
+    case "$u" in http://*|https://*) ;; *) continue;; esac
+    d="$(curl -skI --max-time 8 "$u" 2>/dev/null | tr -d '\r' | sed -n 's/^[Dd]ate:[[:space:]]*//p' | head -n1 || true)"
+    [ -n "$d" ] || continue
+    t="$(date -d "$d" +%s 2>/dev/null || true)"; [ -n "$t" ] || continue
+    now="$(date +%s)"; diff=$((now - t)); [ "$diff" -ge 0 ] || diff=$((0 - diff))
+    printf '%s' "$diff"; return 0
+  done
+  printf '0'
+}
+af_diag_clock() {
+  local s
+  if [ -n "$AF_CTX" ] && ! af_ctx_has 'not yet valid|has expired|certificate (has )?expired|Signature (made|.*expired)|clock|not valid yet|NotBefore|time.*(wrong|incorrect)|SSL certificate problem'; then return 1; fi
+  s="$(af_clock_skew)"; [ "$s" -gt "${AF_CLOCK_MAX:-300}" ] || return 1
+  AF_PROBLEM="$(t af_p_clock "$s")"; AF_PLAN="$(t af_a_clock "timedatectl / chronyd")"
+  return 0
+}
+af_fix_clock() {
+  local how="" s i
+  if have timedatectl; then timedatectl set-ntp true >/dev/null 2>&1 && how="timedatectl set-ntp true"; fi
+  if have chronyc || af_unit_known chronyd.service; then
+    have systemctl && systemctl enable --now chronyd >/dev/null 2>&1 || true
+    have chronyc && af_bounded 30 chronyc makestep >/dev/null 2>&1 && how="${how:+$how, }chronyc makestep"
+  elif af_unit_known systemd-timesyncd.service; then
+    systemctl enable --now systemd-timesyncd >/dev/null 2>&1 && how="${how:+$how, }systemd-timesyncd"
+  fi
+  if [ -z "$how" ]; then AF_ADVICE="$(t af_h_clock)"; return 2; fi
+  for i in 1 2 3 4 5 6; do s="$(af_clock_skew)"; [ "$s" -le "${AF_CLOCK_MAX:-300}" ] && break; af_poll; done
+  AF_ACTION="$(t af_a_clock "$how")"
+  [ "${s:-0}" -le "${AF_CLOCK_MAX:-300}" ] && return 0
+  AF_ADVICE="$(t af_h_clock)"; return 1
+}
+
+# ---- a download source that does not answer: GitLab -> GitHub -> a mirror
+af_sources() {   # kind|url|label, in the order of preference
+  local u
+  printf 'root|%s|GitLab\n' "${SRC_PRIMARY:-}"
+  printf 'root|%s|GitHub\n' "${SRC_FALLBACK:-}"
+  u="$(sed -n 's/^BASE_URL=//p' "$(af_p "${CONF_DIR:-/etc/toutwaf}/installer.conf")" 2>/dev/null | head -n1 | tr -d '\r"'"'" || true)"; [ -z "$u" ] || printf 'base|%s|mirror\n' "$u"
+  u="$(sed -n 's/^DIRECT_URL=//p' "$(af_p "${CONF_DIR:-/etc/toutwaf}/upgrade.conf")" 2>/dev/null | head -n1 | tr -d '\r"'"'" || true)"; [ -z "$u" ] || printf 'base|%s|mirror\n' "${u%/}"
+  [ -z "${TOUTWAF_MIRROR_URL:-}" ] || printf 'base|%s|mirror\n' "${TOUTWAF_MIRROR_URL%/}"
+  return 0
+}
+af_src_probe() {   # af_src_probe KIND URL
+  local url="$2"
+  case "$url" in http://*|https://*) ;; *) return 1;; esac
+  if [ "$1" = root ]; then url="$url/$(channel_branch)/channel.json"; else url="$url/channel.json"; fi
+  curl -fsS -o /dev/null --max-time "${AF_PROBE_S:-12}" "$url" >/dev/null 2>&1
+}
+af_src_current() {   # the source in use: kind|url
+  if [ -n "${BASE_URL:-}" ]; then printf 'base|%s' "${BASE_URL%/}"; else printf 'root|%s' "${SRC_ROOT:-${SRC_PRIMARY:-}}"; fi
+}
+af_diag_source() {
+  local cur kind url label
+  case "${BASE_URL:-}" in file://*) return 1;; esac   # a local tree (the console's update): nothing to switch
+  [ -n "${TARBALL:-}" ] && return 1
+  af_ctx_has 'Could not resolve host|Connection timed out|Failed to connect|Connection refused|Couldn.t connect|curl: \((6|7|28|35|52|56)\)|SSL connect error|Operation timed out|cannot read .*channel\.json|Network is unreachable|Name or service not known' || return 1
+  AF_SRC_NEW=""
+  cur="$(af_src_current)"
+  if af_src_probe "${cur%%|*}" "${cur#*|}"; then return 1; fi   # it answers now: a passing failure, the new attempt is enough
+  while IFS='|' read -r kind url label; do
+    [ -n "$url" ] || continue
+    [ "$kind|${url%/}" != "$cur" ] || continue
+    if af_src_probe "$kind" "$url"; then AF_SRC_NEW="$kind|${url%/}"; AF_SRC_LABEL="$label ($url)"; break; fi
+  done < <(af_sources)
+  [ -n "$AF_SRC_NEW" ] || { AF_ADVICE="$(t af_h_src)"; AF_PROBLEM="$(t af_p_src "${cur#*|}")"; AF_PLAN="$(t af_h_src)"; return 0; }
+  AF_PROBLEM="$(t af_p_src "${cur#*|}")"; AF_PLAN="$(t af_a_src "$AF_SRC_LABEL")"
+  return 0
+}
+af_fix_source() {
+  [ -n "${AF_SRC_NEW:-}" ] || return 2
+  export TOUTWAF_AUTOFIX_SRC="$AF_SRC_NEW"
+  AF_ACTION="$AF_PLAN"; return 0
+}
+autofix_apply_env() {   # at the start of a new attempt: the source and the work directory chosen by the attempt before
+  case "${TOUTWAF_AUTOFIX_SRC:-}" in
+    root\|http://*|root\|https://*) SRC_ROOT="${TOUTWAF_AUTOFIX_SRC#root|}";;
+    base\|http://*|base\|https://*) BASE_URL="${TOUTWAF_AUTOFIX_SRC#base|}";;
+  esac
+  return 0
+}
+
+# ---- SELinux: wrong labels, booleans
+af_se_on() { [ "${NO_SELINUX:-0}" = 0 ] && have getenforce && have restorecon && [ "$(getenforce 2>/dev/null || echo Disabled)" != Disabled ]; }
+af_toutwaf_paths() {   # the paths ToutWAF owns (one per line)
+  local f
+  printf '%s\n' "$(af_p "${CONF_DIR:-/etc/toutwaf}")" "$(af_p "${DATA_DIR:-/var/lib/toutwaf}")" "$(af_p "${LOG_DIR:-/var/log/toutwaf}")"
+  for f in "$(af_p "${BIN_DIR:-/usr/local/bin}")"/toutwaf* "$(af_p /etc/systemd/system)"/toutwaf-*; do [ -e "$f" ] && printf '%s\n' "$f"; done
+  return 0
+}
+af_mislabelled() { local p out=""; while IFS= read -r p; do [ -e "$p" ] || continue; out+="$(restorecon -nRv "$p" 2>/dev/null | grep -i 'would relabel' | head -n 3 || true)"$'\n'; done < <(af_toutwaf_paths); printf '%s' "$out" | sed '/^$/d'; }
+af_diag_selinux() {
+  local m
+  af_se_on || return 1
+  if [ -n "$AF_CTX" ] && ! af_ctx_has 'Permission denied|AVC|avc:  *denied|SELinux|status=203/EXEC|203/EXEC|Failed to execute|code=exited, status=(13|203)|not permitted'; then return 1; fi
+  m="$(af_mislabelled)"; [ -n "$m" ] || return 1
+  AF_PROBLEM="$(t af_p_label "$(head -n1 <<<"$m" | cut -c1-120)")"; AF_PLAN="$(t af_a_label "?")"
+  return 0
+}
+af_fix_selinux() {
+  local p ps=()
+  while IFS= read -r p; do [ -n "$p" ] && ps+=("$p"); done < <(af_toutwaf_paths)
+  restorecon -R "${ps[@]}" >/dev/null 2>&1 || true
+  if declare -F selinux_label_bin >/dev/null 2>&1; then selinux_label_bin; fi
+  [ -z "$(af_mislabelled)" ] || { AF_ADVICE="$(t af_h_label)"; return 1; }
+  AF_ACTION="$(t af_a_label "${#ps[@]}")"
+  return 0
+}
+af_wl_bool() { case "$1" in httpd_can_network_connect|httpd_can_network_connect_db|nis_enabled) return 0;; esac; return 1; }
+af_bool_list() {   # the booleans the audit trail says would allow what toutwaf was refused (known ones only)
+  local out b
+  have ausearch && have audit2why || return 0
+  out="$(ausearch -m avc,user_avc -c toutwaf -ts recent 2>/dev/null | audit2why 2>/dev/null || true)"
+  [ -n "$out" ] || out="$(ausearch -m avc,user_avc -ts recent 2>/dev/null | grep -i toutwaf | audit2why 2>/dev/null || true)"
+  sed -n 's/.*setsebool -P \([A-Za-z0-9_]*\) 1.*/\1/p' <<<"$out" | while IFS= read -r b; do af_wl_bool "$b" && printf '%s\n' "$b"; done | awk '!s[$0]++'
+  return 0
+}
+af_diag_boolean() {
+  local b
+  af_se_on || return 1
+  [ "$(getenforce 2>/dev/null)" = Enforcing ] || return 1
+  have setsebool && have getsebool || return 1
+  b="$(af_bool_list | while IFS= read -r x; do [ "$(getsebool "$x" 2>/dev/null | awk '{print $NF}')" = on ] || printf '%s ' "$x"; done || true)"
+  AF_BOOLS="${b% }"; [ -n "$AF_BOOLS" ] || return 1
+  AF_PROBLEM="$(t af_p_bool "$AF_BOOLS")"; AF_PLAN="$(t af_a_bool "$AF_BOOLS")"
+  return 0
+}
+af_fix_boolean() {
+  local b done_="" IFS=' '
+
+  for b in $AF_BOOLS; do
+    if setsebool -P "$b" on >/dev/null 2>&1; then done_="${done_:+$done_ }$b"; af_undo "setsebool -P $b off"; fi
+  done
+  [ -n "$done_" ] || return 1
+  AF_ACTION="$(t af_a_bool "$done_")"; return 0
+}
+
+# ---- owner and permissions of the data directory and of the configuration (a restore or a manual run as root left files of root's)
+af_perm_issues() {   # prints one line per problem
+  local d c f own
+  d="$(af_p "${DATA_DIR:-/var/lib/toutwaf}")"; c="$(af_p "${CONF_DIR:-/etc/toutwaf}")"
+  id "${SVC_USER:-toutwaf}" >/dev/null 2>&1 || return 0
+  if [ -d "$d" ]; then
+    own="$(stat -c '%U' "$d" 2>/dev/null || true)"; [ "$own" = "${SVC_USER:-toutwaf}" ] || printf '%s (%s)\n' "$d" "$own"
+    for f in "$d"/toutwaf.db "$d"/toutwaf.db-wal "$d"/toutwaf.db-shm "$d"/ctl.sock "$d"/*.key; do
+      [ -e "$f" ] || continue
+      own="$(stat -c '%U' "$f" 2>/dev/null || true)"; [ "$own" = "${SVC_USER:-toutwaf}" ] || printf '%s (%s)\n' "$f" "$own"
+    done
+  fi
+  if [ -d "$c" ]; then
+    own="$(stat -c '%G' "$c" 2>/dev/null || true)"; [ "$own" = "${SVC_USER:-toutwaf}" ] || printf '%s (%s)\n' "$c" "$own"
+    case "$(stat -c '%a' "$c" 2>/dev/null || echo 750)" in *[1-7]) printf '%s (%s)\n' "$c" "$(stat -c '%a' "$c")";; esac
+    for f in "$c"/*.yaml "$c"/cp.env "$c"/db.dsn; do
+      [ -f "$f" ] || continue
+      own="$(stat -c '%G' "$f" 2>/dev/null || true)"; [ "$own" = "${SVC_USER:-toutwaf}" ] || printf '%s (%s)\n' "$f" "$own"
+    done
+  fi
+  return 0
+}
+af_diag_perms() {
+  local i
+  [ -z "$AF_CTX" ] || af_ctx_has 'Permission denied|EACCES|status=(13|203|200|226)|cannot open|unable to open|not permitted|readonly database|attempt to write a readonly' || return 1
+  i="$(af_perm_issues)"; [ -n "$i" ] || return 1
+  AF_PROBLEM="$(t af_p_perm "$(head -n1 <<<"$i" | cut -c1-120)")"; AF_PLAN="$(t af_a_perm "$(head -n1 <<<"$i" | cut -c1-120)")"
+  return 0
+}
+af_fix_perms() {
+  local d c f u="${SVC_USER:-toutwaf}"
+  d="$(af_p "${DATA_DIR:-/var/lib/toutwaf}")"; c="$(af_p "${CONF_DIR:-/etc/toutwaf}")"
+  if [ -d "$d" ]; then chown -R -h "$u:$u" "$d" 2>/dev/null || true; chmod 0750 "$d" 2>/dev/null || true; fi
+  if [ -d "$c" ]; then
+    chown "root:$u" "$c" 2>/dev/null || true; chmod 0750 "$c" 2>/dev/null || true
+    for f in "$c"/*.yaml "$c"/cp.env "$c"/db.dsn; do [ -f "$f" ] && { chgrp "$u" "$f" 2>/dev/null || true; chmod 0640 "$f" 2>/dev/null || true; }; done
+  fi
+  [ -z "$(af_perm_issues)" ] || { AF_ADVICE="$(t af_h_perm)"; return 1; }
+  AF_ACTION="$(t af_a_perm "$d $c")"
+  return 0
+}
+af_diag_exec() {   # a program that lost its execute bit (status=203/EXEC)
+  local f
+  [ -z "$AF_CTX" ] || af_ctx_has '203/EXEC|Failed to execute|Permission denied|cannot execute' || return 1
+  AF_EXEC_LIST=""
+  for f in "$(af_p "${BIN_DIR:-/usr/local/bin}")"/toutwaf-cp "$(af_p "${BIN_DIR:-/usr/local/bin}")"/toutwaf-dp "$(af_p "${BIN_DIR:-/usr/local/bin}")"/toutwafctl; do
+    [ -f "$f" ] && [ ! -x "$f" ] && AF_EXEC_LIST+="$f "
+  done
+  [ -n "$AF_EXEC_LIST" ] || return 1
+  AF_PROBLEM="$(t af_p_exec "${AF_EXEC_LIST% }")"; AF_PLAN="$(t af_a_exec "${AF_EXEC_LIST% }")"
+  return 0
+}
+af_fix_exec() { local f IFS=' '; for f in $AF_EXEC_LIST; do chmod 0755 "$f" 2>/dev/null || true; done; AF_ACTION="$AF_PLAN"; return 0; }
+
+# ---- IPv6 absent while the configuration listens on [::]
+af_no_ipv6() { [ ! -e "$(af_p /proc/net/if_inet6)" ] || [ "$(cat "$(af_p /proc/sys/net/ipv6/conf/all/disable_ipv6)" 2>/dev/null || echo 0)" = 1 ]; }
+af_v6_files() { local f; for f in "$(af_p "${CONF_DIR:-/etc/toutwaf}")"/*.yaml "$(af_p "${CONF_DIR:-/etc/toutwaf}")"/cp.env; do [ -f "$f" ] && grep -q '\[::\]' "$f" 2>/dev/null && printf '%s\n' "$f"; done; return 0; }
+af_diag_ipv6() {
+  local fl
+  af_no_ipv6 || return 1
+  [ -z "$AF_CTX" ] || af_ctx_has 'address family not supported|Address family|cannot assign requested address|EAFNOSUPPORT|listen tcp \[::\]|\[::\]:[0-9]+|IPv6' || return 1
+  fl="$(af_v6_files)"; [ -n "$fl" ] || return 1
+  AF_V6_FILES="$fl"; AF_PROBLEM="$(t af_p_v6)"; AF_PLAN="$(t af_a_v6 "$(wc -l <<<"$fl" | tr -d ' ')")"
+  return 0
+}
+af_fix_ipv6() {
+  local f n=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    cp -p -- "$f" "$f.autofix-bak" 2>/dev/null || continue
+    sed -i 's/\[::\]/0.0.0.0/g' "$f" 2>/dev/null || { cp -p -- "$f.autofix-bak" "$f" 2>/dev/null; continue; }
+    af_undo "cp -p $f.autofix-bak $f"; n=$((n + 1))
+  done <<<"$AF_V6_FILES"
+  [ "$n" -gt 0 ] || return 1
+  AF_ACTION="$(t af_a_v6 "$n")"; return 0
+}
+
+# ---- a port that is taken by something else
+af_listeners() {   # port|name|pid  of every TCP listener
+  have ss || return 0
+  ss -H -ltnp 2>/dev/null | awk '{ a=$4; sub(/.*:/,"",a); n=""; p=""; if (match($0,/\(\("[^"]*"/)) n=substr($0,RSTART+3,RLENGTH-4); if (match($0,/pid=[0-9]+/)) p=substr($0,RSTART+4,RLENGTH-4); print a "|" n "|" p }'
+}
+af_our_ports() {
+  af_want_dp && printf '%s\n' "${HTTP_PORT:-80}" "${HTTPS_PORT:-443}"
+  af_want_cp && printf '%s\n' "${CP_PORT:-9443}" 9444
+  return 0
+}
+af_unit_of_pid() {   # the systemd service of a process
+  local pid="$1" u
+  [ -n "$pid" ] || return 0
+  u="$(grep -o '[^/]*\.service' "$(af_p "/proc/$pid/cgroup")" 2>/dev/null | tail -n1 || true)"
+  printf '%s' "$u"
+}
+af_diag_port() {
+  local pp name pid port found="" l
+  [ -z "$AF_CTX" ] || af_ctx_has 'address already in use|bind: .*in use|EADDRINUSE|Address in use|port .*(already|in use)' || return 1
+  AF_PORT_LIST=()
+  while IFS= read -r port; do
+    [ -n "$port" ] || continue
+    while IFS='|' read -r pp name pid; do
+      [ "$pp" = "$port" ] || continue
+      case "$name" in toutwaf*) continue;; esac
+      AF_PORT_LIST+=("$port|$name|$pid|$(af_unit_of_pid "$pid")"); found=1
+    done < <(af_listeners)
+  done < <(af_our_ports)
+  [ -n "$found" ] || return 1
+  IFS='|' read -r port name pid l <<<"${AF_PORT_LIST[0]}"
+  AF_PROBLEM="$(t af_p_port "$port" "${name:-?}" "${l:-pid ${pid:-?}}")"
+  if [ "$AUTOFIX_STOP_CONFLICTS" = 1 ] && [ -n "$l" ]; then AF_PLAN="$(t af_a_port "$l")"; else AF_PLAN="$(t af_h_port "${l:-pid ${pid:-?}}")"; fi
+  return 0
+}
+af_fix_port() {
+  local e port name pid unit stopped=""
+  [ "$AUTOFIX_STOP_CONFLICTS" = 1 ] || { AF_ADVICE="$AF_PLAN"; return 2; }
+  for e in "${AF_PORT_LIST[@]}"; do
+    IFS='|' read -r port name pid unit <<<"$e"
+    [ -n "$unit" ] || continue
+    case "$unit" in toutwaf*|sshd.service|systemd*|dbus*|NetworkManager*) continue;; esac
+    if systemctl stop "$unit" >/dev/null 2>&1; then stopped="${stopped:+$stopped }$unit"; af_undo "systemctl start $unit"; fi
+  done
+  [ -n "$stopped" ] || { AF_ADVICE="$AF_PLAN"; return 2; }
+  AF_ACTION="$(t af_a_port "$stopped")"; return 0
+}
+
+# ---- the host firewall: what ToutWAF needs open (the port 9444 of the console <-> node link only from a known address)
+af_fw_backend() {
+  if have firewall-cmd && have systemctl && systemctl is-active --quiet firewalld 2>/dev/null; then printf 'firewalld'; return 0; fi
+  if have ufw && grep -qi '^status: active' <<<"$(af_out ufw status)"; then printf 'ufw'; return 0; fi
+  if have nft && grep -q 'policy drop' <<<"$(af_out nft list chain inet filter input)"; then printf 'nft'; return 0; fi
+  return 1
+}
+af_fw_open_q() {   # af_fw_open_q BACKEND PORT
+  case "$1" in
+    firewalld) firewall-cmd --query-port="$2/tcp" >/dev/null 2>&1 || { [ "$2" = 80 ] && firewall-cmd --query-service=http >/dev/null 2>&1; } || { [ "$2" = 443 ] && firewall-cmd --query-service=https >/dev/null 2>&1; };;
+    ufw) grep -Eq "^$2(/tcp)?[[:space:]]+ALLOW" <<<"$(af_out ufw status)";;
+    nft) grep -Eq "dport[^;]*[^0-9]$2([^0-9]|$)" <<<"$(af_out nft list ruleset)";;
+  esac
+}
+af_fw_needed() {   # the ports of this installation, one per line (public ones; 9444 only when a source is known)
+  [ "${OPEN_FW:-1}" != 0 ] || return 0
+  af_want_dp && printf '%s\n' "${HTTP_PORT:-80}" "${HTTPS_PORT:-443}"
+  af_want_cp && [ "${OPEN_CP_PORT:-1}" != 0 ] && printf '%s\n' "${CP_PORT:-9443}"
+  return 0
+}
+af_diag_firewall() {
+  local be p miss=""
+  [ "${OPEN_FW:-1}" != 0 ] || return 1
+  [ -z "$AF_CTX" ] || af_ctx_has 'timed out|Connection refused|No route to host|unreachable|TW-9028|9444|firewall|curl: \((7|28)\)' || return 1
+  be="$(af_fw_backend)" || return 1
+  while IFS= read -r p; do [ -n "$p" ] && { af_fw_open_q "$be" "$p" || miss+="$p "; }; done < <(af_fw_needed)
+  AF_FW_9444=0
+  if af_want_cp && { [ -z "$AF_CTX" ] || af_ctx_has 'TW-9028|9444'; } && ! af_fw_open_q "$be" 9444; then AF_FW_9444=1; fi
+  [ -n "$miss" ] || [ "$AF_FW_9444" = 1 ] || return 1
+  AF_FW_BE="$be"; AF_FW_MISS="${miss% }"
+  AF_PROBLEM="$(t af_p_fw "$be" "${AF_FW_MISS:-9444}")"
+  if [ -z "$AF_FW_MISS" ] && [ -z "${AUTOFIX_AGENT_FROM:-}" ]; then AF_PLAN="$(t af_h_fw9444 "$be")"; else AF_PLAN="$(t af_a_fw "${AF_FW_MISS:-9444}" "$be")"; fi
+  return 0
+}
+af_fw_run() {   # af_fw_run PORT [FROM]
+  local port="$1" from="${2:-}" be="$AF_FW_BE" fam=ipv4
+  case "$be" in
+    firewalld)
+      if [ -n "$from" ]; then case "$from" in *:*) fam=ipv6;; esac
+        firewall-cmd --permanent --add-rich-rule="rule family=\"$fam\" source address=\"$from\" port port=\"$port\" protocol=\"tcp\" accept" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 \
+          && af_undo "firewall-cmd --permanent --remove-rich-rule='rule family=\"$fam\" source address=\"$from\" port port=\"$port\" protocol=\"tcp\" accept' && firewall-cmd --reload"
+      else
+        firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 && af_undo "firewall-cmd --permanent --remove-port=$port/tcp && firewall-cmd --reload"
+      fi;;
+    ufw)
+      if [ -n "$from" ]; then ufw allow proto tcp from "$from" to any port "$port" >/dev/null 2>&1 && af_undo "ufw delete allow proto tcp from $from to any port $port"
+      else ufw allow "$port/tcp" >/dev/null 2>&1 && af_undo "ufw delete allow $port/tcp"; fi;;
+    nft)
+      # the rule is added to the running table only: it is NOT kept at a reboot (the exact line to keep it is said)
+      if [ -n "$from" ]; then nft add rule inet filter input ip saddr "$from" tcp dport "$port" accept >/dev/null 2>&1; else nft add rule inet filter input tcp dport "$port" accept >/dev/null 2>&1; fi \
+        && af_undo "nft -a list chain inet filter input   # then: nft delete rule inet filter input handle <the handle of the tcp dport $port rule>" \
+        && af_emit "$(t af_h_nftkeep "$port")";;
+  esac
+}
+af_fix_firewall() {
+  local p done_="" bad="" IFS=' '
+  for p in $AF_FW_MISS; do
+    if [ "$p" = "${CP_PORT:-9443}" ] && [ -n "${CONSOLE_FROM:-}" ]; then af_fw_run "$p" "$CONSOLE_FROM" && done_="$done_$p " || bad="$bad$p "
+    else af_fw_run "$p" && done_="$done_$p " || bad="$bad$p "; fi
+  done
+  if [ "${AF_FW_9444:-0}" = 1 ]; then   # the link console <-> node: never to everyone, only from the address the owner gave
+    if [ -n "${AUTOFIX_AGENT_FROM:-}" ]; then af_fw_run 9444 "$AUTOFIX_AGENT_FROM" && done_="${done_}9444 " || bad="${bad}9444 "
+    else AF_ADVICE="$(t af_h_fw9444 "$AF_FW_BE")"; fi
+  fi
+  [ -z "$bad" ] || { AF_ADVICE="${AF_ADVICE:-$(t af_h_fw "${bad% }")}"; [ -n "$done_" ] || return 1; }
+  [ -n "$done_" ] || return 2
+  AF_ACTION="$(t af_a_fw "${done_% }" "$AF_FW_BE")"; return 0
+}
+
+# ---- package key or repository expired
+af_pkg_pm() { if have dnf; then printf dnf; elif have yum; then printf yum; elif have apt-get; then printf apt; elif have zypper; then printf zypper; fi; }
+af_toutwaf_repos() { local f; for f in "$(af_p /etc/yum.repos.d)"/toutwaf*.repo "$(af_p /etc/apt/sources.list.d)"/toutwaf*.list "$(af_p /etc/zypp/repos.d)"/toutwaf*.repo; do [ -f "$f" ] && printf '%s\n' "$f"; done; return 0; }
+af_diag_pkgkey() {
+  local pm
+  af_ctx_has 'GPG key.*(expired|not|invalid)|public key is not installed|NO_PUBKEY|EXPKEYSIG|repository .* is not signed|GPG check FAILED|Failed to download metadata|repomd\.xml|Cannot download repodata|Signature .*expired|KEYEXPIRED|Release file .* expired|Cannot prepare internal mirrorlist|Status code: 404|Failed to synchronize cache' || return 1
+  pm="$(af_pkg_pm)"; [ -n "$pm" ] || return 1
+  AF_PM="$pm"; AF_PROBLEM="$(t af_p_key "$(af_ctx_first 'GPG key[^;]*|NO_PUBKEY [0-9A-F]+|EXPKEYSIG [0-9A-F]+|repomd\.xml|Failed to download metadata[^;]*|KEYEXPIRED' | cut -c1-80)")"
+  AF_PLAN="$(t af_a_key_cache)"
+  return 0
+}
+af_refresh_cache() {
+  case "$AF_PM" in
+    dnf|yum) af_bounded 120 "$AF_PM" clean metadata >/dev/null 2>&1 || true; af_bounded 180 "$AF_PM" -y makecache >/dev/null 2>&1;;
+    apt) af_bounded 180 apt-get update -qq >/dev/null 2>&1;;
+    zypper) af_bounded 180 zypper --non-interactive refresh >/dev/null 2>&1;;
+  esac
+}
+af_fix_pkgkey() {
+  local f off=""
+  if af_refresh_cache; then AF_ACTION="$(t af_a_key_cache)"; return 0; fi
+  while IFS= read -r f; do   # the repository of the ToutWAF mirror is never a reason to stop: the distribution's own repositories stay
+    [ -n "$f" ] || continue
+    mv -f -- "$f" "$f.autofix-disabled" 2>/dev/null && { off="${off:+$off }$f"; af_undo "mv $f.autofix-disabled $f"; }
+  done < <(af_toutwaf_repos)
+  if [ -n "$off" ] && af_refresh_cache; then AF_ACTION="$(t af_a_key_off "$off")"; return 0; fi
+  AF_ADVICE="$(t af_h_key)"; return 1
+}
+
+# ---- systemd: unit not reloaded, start limit, files limit
+af_diag_unitload() {
+  local u need=0 IFS=' '
+  [ "${HAS_SYSTEMD:-0}" = 1 ] || return 1
+  for u in ${AF_UNIT:-toutwaf-dp toutwaf-cp}; do [ "$(systemctl show "$u" -p NeedDaemonReload --value 2>/dev/null)" = yes ] && need=1; done
+  af_ctx_has "changed on disk|daemon-reload" && need=1
+  [ "$need" = 1 ] || return 1
+  AF_PROBLEM="$(t af_p_unitload)"; AF_PLAN="$(t af_a_unitload)"; return 0
+}
+af_fix_unitload() { systemctl daemon-reload >/dev/null 2>&1 || return 1; AF_ACTION="$AF_PLAN"; return 0; }
+af_diag_startlimit() {
+  [ "${HAS_SYSTEMD:-0}" = 1 ] && [ -n "$AF_UNIT" ] || return 1
+  af_ctx_has 'start-limit-hit|Start request repeated too quickly|start limit' || return 1
+  AF_PROBLEM="$(t af_p_startlimit "$AF_UNIT")"; AF_PLAN="$(t af_a_startlimit "$AF_UNIT")"; return 0
+}
+af_fix_startlimit() { systemctl reset-failed "$AF_UNIT" >/dev/null 2>&1 || return 1; AF_ACTION="$AF_PLAN"; return 0; }
+af_diag_nofile() {
+  local d
+  [ "${HAS_SYSTEMD:-0}" = 1 ] && [ -n "$AF_UNIT" ] || return 1
+  af_ctx_has 'Too many open files|EMFILE|too many files' || return 1
+  d="$(af_p "/etc/systemd/system/$AF_UNIT.service.d")"; [ ! -f "$d/autofix-nofile.conf" ] || return 1
+  AF_PROBLEM="$(t af_p_nofile "$AF_UNIT")"; AF_PLAN="$(t af_a_nofile "$AF_UNIT")"; return 0
+}
+af_fix_nofile() {
+  local d; d="$(af_p "/etc/systemd/system/$AF_UNIT.service.d")"
+  mkdir -p "$d" 2>/dev/null && printf '[Service]\nLimitNOFILE=262144\n' >"$d/autofix-nofile.conf" || return 1
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  af_undo "rm -f $d/autofix-nofile.conf && systemctl daemon-reload"
+  AF_ACTION="$AF_PLAN"; return 0
+}
+
+# ---- the engine
+af_context() {   # af_context MESSAGE: what the failure says (the message and the end of the installer log)
+  { printf '%s\n' "$1"; [ -n "${LOG:-}" ] && [ -f "$LOG" ] && tail -n 300 "$LOG" 2>/dev/null; } | cut -c1-400
+}
+af_apply() {   # af_apply "ID ID ...": diagnoses and corrects; the number of corrections made is in AF_N
+  local id rc IFS=' '
+  AF_N=0
+  for id in $1; do
+    af_known "$id" && continue
+    declare -F "af_diag_$id" >/dev/null 2>&1 || continue
+    AF_PROBLEM=""; AF_PLAN=""; AF_ACTION=""; AF_ADVICE=""
+    "af_diag_$id" || continue
+    if [ "$AUTOFIX_DRY" = 1 ]; then af_emit "$(t af_plan_line "$AF_PROBLEM" "$AF_PLAN")"; AF_FAILED+=("$id"); continue; fi
+    rc=0; "af_fix_$id" || rc=$?
+    case "$rc" in
+      0) AF_REC+=("$id$AF_US$AF_PROBLEM$AF_US$AF_ACTION"); AF_N=$((AF_N + 1));;
+      2) af_emit "$(t af_manual_line "$AF_PROBLEM" "${AF_ADVICE:-$AF_PLAN}")"; AF_FAILED+=("$id");;
+      *) af_emit "$(t af_failed_line "$AF_PROBLEM" "${AF_ACTION:+$AF_ACTION; }${AF_ADVICE:-?}")"; AF_FAILED+=("$id");;
+    esac
+  done
+  return 0
+}
+af_state_vars="ACTION COMPONENT VERSION CHANNEL TARBALL BASE_URL CP_URL ENROLL_TOKEN NODE_TOKEN CP_CA NODE_GROUP CP_PORT HTTP_PORT HTTPS_PORT PUBLIC_HOST PRIVATE_HOST OPEN_FW OPEN_CP_PORT CONSOLE_FROM HTTP3 FW_MODULE NO_ENABLE NO_START SKIP_SYSUPDATE DB_ENGINE DB_DSN DB_DSN_FILE DB_LOCAL DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD_FILE DB_TLS_MODE DB_CA DB_ADMIN_DSN_FILE BIN_DIR HOME_DIR LAYOUT LANG_CODE FORCE NO_EXTRAS NO_TELEMETRY CLOUD_URL"
+af_save_state() {   # an interactive run: what was answered, for the new attempt (a private file; removed when read)
+  local f v IFS=' '
+  f="$(mktemp "$(af_p /run)/toutwaf-autofix.XXXXXX" 2>/dev/null || mktemp)"; chmod 0600 "$f"
+  for v in $af_state_vars; do if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}"; fi; done >"$f"
+  [ -z "${HOME_DIR:-}" ] || printf 'HOME_EXPLICIT=1\n' >>"$f"
+  printf 'ASSUME_YES=1\n' >>"$f"
+  printf '%s' "$f"
+}
+autofix_resume_load() {   # at the start of a new attempt of an interactive run
+  [ -n "$AF_RESUME" ] && [ -f "$AF_RESUME" ] && [ -O "$AF_RESUME" ] || return 0   # only a file this very user wrote
+  # shellcheck disable=SC1090
+  . "$AF_RESUME" 2>/dev/null || true
+  rm -f -- "$AF_RESUME"; AF_RESUME=""
+  return 0
+}
+af_reexec() {   # a new attempt: the installer starts again from its own file; returns only when it cannot
+  local recs="$AF_PREV" r rp ra args=() st=""
+  if [ -z "$AF_SELF" ] || [ ! -r "$AF_SELF" ]; then   # read from a pipe: nothing to start again from; what was corrected is said, the command is to be run again
+    for r in ${AF_REC[@]+"${AF_REC[@]}"}; do IFS="$AF_US" read -r _ rp ra <<<"$r"; af_emit "$(t af_line "$rp" "$ra" "$(t af_try_manual)")"; done
+    af_emit "$(t af_noself)"; return 1
+  fi
+  for r in ${AF_REC[@]+"${AF_REC[@]}"}; do
+    recs+="${recs:+$AF_RS}$r"
+    IFS="$AF_US" read -r _ rp ra <<<"$r"
+    af_emit "$(t af_line "$rp" "$ra" "$(t af_try_run)")"
+  done
+  export TOUTWAF_AUTOFIX_TRY=$((AF_TRY + 1)) TOUTWAF_AUTOFIX_APPLIED="$recs"
+  if declare -F interactive >/dev/null 2>&1 && interactive; then st="$(af_save_state)"; args=(--autofix-resume "$st")   # answered at the keyboard: the answers go with it
+  else args=("${AF_ARGS[@]+"${AF_ARGS[@]}"}"); fi
+  spin_kill 2>/dev/null || true
+  [ "${UI_COLOR:-0}" = 1 ] && printf '\033[?25h' >&3 2>/dev/null
+  [ -z "${TMP:-}" ] || rm -rf "$TMP"
+  exec bash "$AF_SELF" "${args[@]+"${args[@]}"}"
+}
+# autofix_failure MESSAGE: called by die and by the ERR trap before the failure is reported; may start the installer again (it then does not return)
+autofix_failure() {
+  local rc=0
+  [ "${BASHPID:-$$}" = "$$" ] && [ "$AF_FLOW" = 1 ] && [ -z "$AF_ACTIVE" ] && af_enabled || return 1
+  AF_ACTIVE=1; af_guard_begin
+  AF_UNIT=""; AF_CTX="$(af_context "$1")"
+  af_apply "$AF_CATALOG"
+  if [ "$AF_N" -gt 0 ] && [ "$AF_TRY" -lt "$AF_MAX_TRIES" ]; then af_reexec || rc=1; else rc=1; fi
+  [ "$AF_N" -gt 0 ] && [ "$AF_TRY" -ge "$AF_MAX_TRIES" ] && af_emit "$(t af_giveup "$AF_MAX_TRIES")"
+  autofix_diagnostic "$1"
+  af_guard_end; AF_ACTIVE=""
+  return "$rc"
+}
+# autofix_service UNIT WAITFN: UNIT did not start or did not become healthy: reads what the system says, corrects the known causes, starts it
+# again and waits with WAITFN. True when it is healthy. Called before the rollback, so that a cause that can be corrected does not cost the update.
+autofix_service() {
+  local unit="$1" waitfn="$2" ok=1 r problem action first i
+  af_enabled && [ "${HAS_SYSTEMD:-0}" = 1 ] || return 1
+  case " ${AF_SVC_DONE:-} " in *" $unit "*) return 1;; esac
+  AF_SVC_DONE="${AF_SVC_DONE:-} $unit"
+  af_guard_begin
+  AF_UNIT="$unit"
+  AF_CTX="$({ journalctl -u "$unit" -n 80 --no-pager; systemctl status "$unit" --no-pager -l; systemctl show "$unit" -p Result -p ExecMainStatus; } 2>&1 | diag_redact | tail -n 200)"
+  if ! af_ctx_has "status=|Result=|exit-code|failed|denied|error" ; then AF_CTX="$AF_CTX"$'\n'"unit $unit failed"; fi
+  first=${#AF_REC[@]}
+  af_apply "$AF_SVC_CATALOG"
+  if [ "$AF_N" -gt 0 ]; then
+    systemctl restart "$unit" >>"${LOG:-/dev/null}" 2>&1 || true
+    if "$waitfn"; then ok=0; fi
+    for ((i = first; i < ${#AF_REC[@]}; i++)); do
+      IFS="$AF_US" read -r _ problem action <<<"${AF_REC[$i]}"
+      if [ "$ok" = 0 ]; then af_emit "$(t af_line "$problem" "$action" "$(t af_try_ok)")"; else af_emit "$(t af_line "$problem" "$action" "$(t af_try_ko)")"; fi
+    done
+  fi
+  AF_UNIT=""
+  af_guard_end
+  return "$ok"
+}
+# autofix_slow_health UNIT WAITFN: a service that is still starting: wait on while it progresses (its processor time or its journal move), within a limit
+autofix_slow_health() {
+  local unit="$1" waitfn="$2" max="${AF_HEALTH_MAX:-240}" waited=0 idle=0 last cur pid nr0 nr t0
+  af_enabled && [ "${HAS_SYSTEMD:-0}" = 1 ] || return 1
+  af_guard_begin
+  t0="$(af_now)"
+  nr0="$(systemctl show "$unit" -p NRestarts --value 2>/dev/null || echo 0)"
+  last=""
+  while [ "$waited" -lt "$max" ]; do
+    systemctl is-active --quiet "$unit" 2>/dev/null || [ "$(af_out systemctl show "$unit" -p ActiveState --value)" = activating ] || break
+    nr="$(systemctl show "$unit" -p NRestarts --value 2>/dev/null || echo 0)"; [ "$nr" = "$nr0" ] || break   # restarting in a loop is not progress
+    pid="$(systemctl show "$unit" -p MainPID --value 2>/dev/null || echo 0)"
+    cur="$(awk '{print $14 + $15}' "$(af_p "/proc/$pid/stat")" 2>/dev/null || true)|$(journalctl -u "$unit" -n 200 --no-pager 2>/dev/null | wc -l)"
+    if [ -n "$last" ] && [ "$cur" = "$last" ]; then idle=$((idle + 1)); else idle=0; fi
+    last="$cur"
+    [ "$idle" -lt 3 ] || break
+    if "$waitfn"; then
+      af_emit "$(t af_line "$(t af_p_slow "$unit")" "$(t af_a_slow "$waited")" "$(t af_try_ok)")"
+      af_guard_end; return 0
+    fi
+    waited=$(($(af_now) - t0))
+  done
+  [ "$waited" = 0 ] || af_emit "$(t af_line "$(t af_p_slow "$unit")" "$(t af_a_slow "$waited")" "$(t af_try_ko)")"
+  af_guard_end
+  return 1
+}
+# autofix_unhealthy UNIT WAITFN [noslow]: after a failed start: wait more while it progresses, then diagnose and correct
+autofix_unhealthy() {
+  af_enabled || return 1
+  if [ "${3:-}" != noslow ] && autofix_slow_health "$1" "$2"; then return 0; fi
+  autofix_service "$1" "$2"
+}
+# the diagnostic ready to be sent: what failed, what was tried, the state of the machine, the end of the log (secrets hidden)
+autofix_diagnostic() {
+  local f msg="$1" r pr ac
+  [ "$AUTOFIX" = 1 ] && [ "${STAGING:-0}" = 0 ] || return 0
+  f="$(af_p /var/log/toutwaf-install-diagnostic.txt)"
+  {
+    printf 'ToutWAF installer %s - diagnostic %s\nstep: %s\nmessage: %s\n' "${INSTALLER_VERSION:-?}" "$(date -u +%FT%TZ 2>/dev/null || echo now)" "${CUR_STEP:-?}" "$msg"
+    printf 'action=%s component=%s channel=%s os=%s %s arch=%s\n' "${ACTION:-?}" "${COMPONENT:-?}" "${CHANNEL:-?}" "${OS_ID:-?}" "${OS_VER:-}" "${ARCH:-?}"
+    printf '\n== automatic corrections\n'
+    printf '%s\n' "$AF_PREV" | tr "$AF_RS$AF_US" '\n;'
+
+    for r in ${AF_REC[@]+"${AF_REC[@]}"}; do IFS="$AF_US" read -r _ pr ac <<<"$r"; printf '%s -> %s\n' "$pr" "$ac"; done
+    printf '\n== system\n'; uname -a 2>&1; df -h 2>&1 | head -n 15; free -m 2>&1 | head -n 3
+    have getenforce && getenforce 2>&1
+    if [ "${HAS_SYSTEMD:-0}" = 1 ]; then
+      systemctl --no-pager --failed 2>&1 | head -n 15
+      for r in toutwaf-dp toutwaf-cp; do systemctl cat "$r" >/dev/null 2>&1 || continue; printf '\n== %s\n' "$r"; systemctl status "$r" --no-pager -l 2>&1 | tail -n 15; journalctl -u "$r" -n 50 --no-pager 2>&1; done
+    fi
+    printf '\n== end of the installer log\n'; [ -n "${LOG:-}" ] && [ -f "$LOG" ] && tail -n 150 "$LOG"
+  } 2>&1 | diag_redact >"$f" 2>/dev/null || true
+  if [ -s "$f" ]; then chmod 0600 "$f" 2>/dev/null || true; AF_DIAG_PATH="$f"; fi
+  return 0
+}
+af_each_prev() {   # af_each_prev OUTCOME-KEY: one line per correction of the earlier attempts
+  local one pr ac recs=()
+  [ -n "$AF_PREV" ] || return 0
+  IFS="$AF_RS" read -r -a recs <<<"$AF_PREV"
+  for one in "${recs[@]}"; do
+    [ -n "$one" ] || continue
+    IFS="$AF_US" read -r _ pr ac <<<"$one"
+    af_emit "$(t af_line "$pr" "$ac" "$(t "$1")")"
+  done
+  return 0
+}
+autofix_report_tail() {   # at the end of a failure report: the earlier corrections did not cure it, and where the diagnostic is
+  [ "$AUTOFIX" = 1 ] || return 0
+  af_each_prev af_try_ko
+  AF_PREV=""
+  [ -z "$AF_DIAG_PATH" ] || { printf '    %s\n' "$(t af_diag_ready "$AF_DIAG_PATH")" >&3 2>/dev/null || true; log "$(t af_diag_ready "$AF_DIAG_PATH")"; }
+  return 0
+}
+autofix_report_success() {   # the installation went through after a new attempt: each correction says so
+  [ "$AUTOFIX" = 1 ] && [ -n "$AF_PREV" ] || return 0
+  af_each_prev af_try_ok
+  AF_PREV=""
+  return 0
+}
+af_check_options() {
+  [ -z "$AUTOFIX_AGENT_FROM" ] && return 0
+  if ! [[ "$AUTOFIX_AGENT_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$AUTOFIX_AGENT_FROM" == */0 ]]; then die "--autofix-agent-from must be an address or a CIDR such as 203.0.113.0/24 (not 0.0.0.0/0)"; fi
+  return 0
+}
+# autofix_preflight: --autofix-dry-run, before anything is changed: what the corrections would do to this machine now
+autofix_preflight() {
+  [ "$AUTOFIX_DRY" = 1 ] && [ "$AUTOFIX" = 1 ] || return 0
+  AF_CTX=""; AF_UNIT=""
+  af_guard_begin
+  AF_N=0; af_apply "tmp disk locks clock selinux perms exec ipv6 port firewall"
+  [ "${#AF_FAILED[@]}" -gt 0 ] || af_emit "$(t af_none)"
+  AF_FAILED=()
+  af_guard_end
+  return 0
+}
+# END autofix
 interactive() { [ -n "$TTY_DEV" ] && [ "$ASSUME_YES" = 0 ] && [ "$ACCEPT_DEFAULTS" = 0 ]; }
 
 ask() {   # VAR label default [secret]
@@ -4539,6 +5979,16 @@ Options:
                              exit 0 when nothing refuses, 4 when the installation would be refused
   --check-prereq             check the disk space, DNS and the clock (cause and fix of each problem), change nothing; exit 0, or 4 when the disk is full
   --skip-env-check           install although that check refuses (at your own risk: what is in the way fails later)
+  --no-autofix               do not correct problems automatically (also TOUTWAF_NO_AUTOFIX=1). By default every failure of a step is diagnosed and the known causes
+                             are corrected, then the step is tried again: SELinux labels, owner and permissions of the data and configuration, a locked package
+                             manager (waits), a nearly full disk (package caches and old logs only), a full or noexec /tmp (another work directory), an
+                             unreachable download source (GitLab, GitHub, a mirror), the clock, the firewall, a service that does not start, a slow start,
+                             an expired package key, IPv6 missing. Each correction is told in one line (also in /var/log/toutwaf-install.log and in the result of
+                             the console's update task) and written with the command that undoes it (/var/log/toutwaf-autofix.undo); a failure that nothing corrects
+                             is rolled back as before and a diagnostic ready to send is written (/var/log/toutwaf-install-diagnostic.txt)
+  --autofix-dry-run          say what the automatic corrections would do (now, and at every failure) without changing anything
+  --autofix-stop-conflicts   let a correction STOP (not disable, not kill) a third-party service that holds a port ToutWAF needs (otherwise it only says which)
+  --autofix-agent-from ADDR  the address (or CIDR, never /0) that may reach port 9444 (console <-> node link) when the firewall blocks it: 9444 is never opened to everyone
   --skip-sysupdate           do not update the system packages first (same as TOUTWAF_SKIP_SYSUPDATE=1); the update is never blocking: a failure is a warning.
                              Disk space, DNS and the clock are checked first; only a full disk stops (TOUTWAF_SKIP_PREREQ=1 goes on anyway)
   --home DIR                 installation home (default /var/toutwaf, or TOUTWAF_HOME): bin/ conf/ data/ logs/ below it; CLIs are linked in
@@ -4788,6 +6238,11 @@ while [ $# -gt 0 ]; do
     --check-prereq) ACTION=checkprereq; shift;;
     --skip-env-check) SKIP_ENV_CHECK=1; shift;;
     --skip-sysupdate) SKIP_SYSUPDATE=1; shift;;
+    --no-autofix) AUTOFIX=0; shift;;
+    --autofix-dry-run) AUTOFIX_DRY=1; shift;;
+    --autofix-stop-conflicts) AUTOFIX_STOP_CONFLICTS=1; shift;;
+    --autofix-agent-from) AUTOFIX_AGENT_FROM="$2"; shift 2;;
+    --autofix-resume) AF_RESUME="$2"; shift 2;;
     --home) HOME_DIR="$2"; HOME_EXPLICIT=1; shift 2;;
     --bin-dir|--install-dir) BIN_DIR="$2"; BIN_EXPLICIT=1; shift 2;;
     --force) FORCE=1; shift;;
@@ -4804,7 +6259,9 @@ while [ $# -gt 0 ]; do
     *) printf '[error] unknown option: %s (see --help)\n' "$1" >&2; exit 1;;
   esac
 done
+autofix_resume_load; autofix_apply_env
 detect_lang; detect_ui
+af_check_options
 db_check_options
 licence_check_options
 private_host_options
@@ -4852,7 +6309,7 @@ if [ "$CHECK_COMPAT" = 1 ]; then
   exit 0
 fi
 if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ "$ACTION" != checkenv ] && [ "$ACTION" != checkprereq ] && [ "$(id -u)" -ne 0 ]; then die "$(t root_required)"; fi
-TMP="$(mktemp -d)"; LOG="$TMP/install.log"
+autofix_prepare_tmp; TMP="$(mktemp -d)"; LOG="$TMP/install.log"; autofix_flush_pending
 # persist_log: from now on the log goes to /var/log/toutwaf-install.log (called once the compatibility gate has passed, so that a refused
 # run leaves nothing behind)
 persist_log() {
@@ -5561,15 +7018,15 @@ cmd_uninstall() {
   # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
-  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-netif-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-time.path toutwaf-time.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-netif-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-time.path toutwaf-time.service toutwaf-relay.path toutwaf-relay.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
     if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
     run rm -f "$(p /etc/systemd/system/$s)"
   done
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl stop toutwaf-upgrade-rollback.timer toutwaf-upgrade-rollback.service >>"$LOG" 2>&1 || true; fi   # transient units of an update in progress
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl daemon-reload; fi
-  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-cloudlink; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
+  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-relay toutwaf-cloudlink; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
   run rm -f "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"
-  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time; do
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-relay; do
     for d in /usr/local/bin "$(secure_link_dir)"; do
       [ -n "$d" ] || continue
       l="$(p "$d/$b")"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
@@ -6157,7 +7614,7 @@ link_cli() {
   if [ -n "$sd" ] && [ "$sd" != "$BIN_DIR" ] && [ "$sd" != /usr/local/bin ]; then dirs="$dirs $sd"; fi
   for d in $dirs; do
     run install -d -m 0755 "$(p "$d")"
-    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time; do
+    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-relay; do
       [ -e "$(p "$BIN_DIR/$b")" ] || continue
       l="$(p "$d/$b")"
       if [ -L "$l" ] || [ ! -e "$l" ]; then run ln -sfn "$BIN_DIR/$b" "$l"; fi
@@ -6451,6 +7908,7 @@ EOF
 #   toutwaf-vpn       put the files of the VPN module on the machine, start / stop the tunnels, read their state (console: VPN)
 #   toutwaf-fw        load the nftables rules of the Firewall module with a root rollback timer, read them back (console: Firewall)
 #   toutwaf-jobs      run the privileged jobs of the scheduled tasks: a FIXED list (log rotation, journal vacuum; the power menu and self-repair verbs), no command from the request (console: Scheduled tasks, power menu)
+#   toutwaf-relay     rewrite control_plane.relay of toutwaf-dp.yaml (atomic, checked, rolled back on failure) for the console: Nodes > Relays
 #   toutwaf-time      show and change the clock of the machine: time zone, NTP on/off, NTP servers, the date and time themselves; five fixed actions, every value checked again (console: Settings > Date, time and time zone)
 # The scripts carry a "toutwaf-<name>-proto: N" marker that the control plane checks before offering the button.
 emit_helper() {   # NAME  (template on stdin)
@@ -6690,12 +8148,17 @@ case "${1:-request}" in
     # the installer's own messages (errors, rollback notices) go to the log too
     sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -v '^[[:space:]]*$' | tail -n 40 | while IFS= read -r l; do plog "$l"; printf '%s\n' "$l" >>"$pinst"; done
     put_file "$INSTLOG" <"$pinst" 2>/dev/null || true
+    # what the installer corrected by itself ("[autofix] Problem detected: ...; correction applied: ...; new attempt: ..."): said in the log of the update
+    # and, for a success, in its message: an update that had to correct something is never silent about it
+    afl="$(sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$pinst" "$out" 2>/dev/null | grep -F '[autofix] ' | sed 's/^[^[]*\[autofix\] /[autofix] /' | awk '!s[$0]++' | tail -n 20 || true)"
+    [ -z "$afl" ] || while IFS= read -r l; do plog "installer: $l"; done <<<"$afl"
     S_TO="$(cur_version)"; [ -n "$S_TO" ] || S_TO="$ver"
     S_TO_BUILD="$(cur_build)"
     S_FINISHED="$(date +%s)"
     FINAL=1
     if [ "$rc" -eq 0 ]; then
       S_STATE=succeeded; S_PHASE="Done"; S_MSG=""; plog "update finished: now running ${S_TO} (build ${S_TO_BUILD})"
+      [ -z "$afl" ] || S_MSG="the installer corrected $(printf '%s\n' "$afl" | grep -c .) problem(s) by itself (see the log of the update)"
     else
       msg="$(sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -iE 'error|fail|did not|refus|downgrad|checksum|signature|withdrawn|yanked' | tail -n1 | sed 's/^[^[:alnum:]]*//')"
       [ "$rc" -ne 124 ] || msg="the installer did not finish within 20 minutes"
@@ -7704,6 +9167,304 @@ case "${1:-}" in
   *) echo "usage: toutwaf-time apply|status|set-timezone ZONE|set-ntp on|off|set-ntp-servers [HOST...]|set-time RFC3339" >&2; exit 2;;
 esac
 TW_TIME_TPL
+  emit_helper toutwaf-relay <<'TW_RELAY_TPL'
+#!/usr/bin/env bash
+# toutwaf-relay-proto: 1
+#
+# toutwaf-relay apply   (root; toutwaf-relay.service) perform the pending @DATA_DIR@/relay-request, answer in @DATA_DIR@/relay-status
+# toutwaf-relay show    print the control_plane.relay block of @CONF_DIR@/toutwaf-dp.yaml (reads only)
+#
+# The console of ToutWAF can switch the relays of this node on or off (console: Nodes > Relays). The data plane runs without privilege in a read-only
+# sandbox, so it checks the order of the console (bounds, lists) and leaves a small request file; this helper does the work. The request is written
+# by the service account, so for root it is untrusted input and is checked again here, value by value:
+#   * the request is KEY=VALUE lines of a fixed list of keys, nothing else; the ACTION is "set"; there is no command line in a request;
+#   * allow is 0 or 1; max_sessions 1..16, max_seconds 60..3600, max_renewals 0..12; extra_allow at most 32 networks, each with a prefix of at
+#     least /16 (IPv4) or /48 (IPv6) and never loopback, link-local, multicast or unspecified; deny at most 32 networks. These are the bounds of the data
+#     plane (relaycfg.rs) and of the console: a value outside them is refused, never rounded;
+#   * only the `relay:` block under `control_plane:` of the configuration is rewritten, with a fixed shape built from the checked values; the rest of
+#     the file is copied as it is;
+#   * the new file is written next to the old one (same owner and mode), checked with `toutwaf-dp check-config`, put in place with one rename, the
+#     old file is kept (toutwaf-dp.yaml.relay-bak.<time>, the five newest), the service is restarted, and the old file is put back if the check or the
+#     restart fails. A request that changes nothing restarts nothing.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; BIN_DIR='@BIN_DIR@'
+REQ="$DATA_DIR/relay-request"; STATUS="$DATA_DIR/relay-status"; CONF="${TOUTWAF_DP_CONF:-$CONF_DIR/toutwaf-dp.yaml}"
+DP_UNIT="${TOUTWAF_DP_UNIT:-toutwaf-dp}"; DP_BIN="$BIN_DIR/toutwaf-dp"
+KEEP=5
+have() { command -v "$1" >/dev/null 2>&1; }
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
+
+# ---- the answer ----------------------------------------------------------------------------------------------------------------
+R_ID=""; R_ALLOW=""
+one_line() { printf '%s' "$1" | tr -d '\000-\037\177' | cut -c1-200; }
+write_status() {   # STATE MESSAGE
+  { printf 'ID=%s\nSTATE=%s\nMESSAGE=%s\nALLOW=%s\nFINISHED=%s\n' "$R_ID" "$1" "$(one_line "$2")" "$R_ALLOW" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; } | put_file "$STATUS"
+}
+
+# ---- validation (the request file is writable by the service account: never trust it) -----------------------------------------------
+valid_id() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
+in_range() {   # VALUE LOW HIGH
+  [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$((10#$1))" -ge "$2" ] && [ "$((10#$1))" -le "$3" ]
+}
+valid_v4() {   # ADDRESS  (canonical: no leading zeros), sets O1 O2
+  local a="$1" o; local -a p
+  [[ "$a" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+  IFS=. read -ra p <<<"$a"
+  for o in "${p[@]}"; do [[ "$o" =~ ^(0|[1-9][0-9]{0,2})$ ]] && [ "$o" -le 255 ] || return 1; done
+  O1="${p[0]}"; O2="${p[1]}"
+}
+valid_v6() {   # ADDRESS (lower case, as the data plane writes it), sets G1 to the value of the first group
+  local a="$1" g n=0; local -a p
+  [[ "$a" =~ ^[0-9a-f:]{2,39}$ ]] && [[ "$a" == *:*:* ]] && [[ "$a" != *:::* ]] && [[ "$a" != *::*::* ]] || return 1
+  case "$a" in :[!:]*|*[!:]:) return 1;; esac
+  IFS=: read -ra p <<<"$a"
+  for g in "${p[@]}"; do
+    [ -z "$g" ] && continue
+    [[ "$g" =~ ^[0-9a-f]{1,4}$ ]] || return 1
+    n=$((n + 1))
+  done
+  if [[ "$a" == *::* ]]; then [ "$n" -le 7 ] || return 1; else [ "$n" = 8 ] || return 1; fi
+  g="${p[0]:-}"; G1=0; [ -z "$g" ] || G1=$((16#$g))
+}
+valid_net() {   # NETWORK EXTRA(1 = an extra_allow entry: bounded, 0 = a deny entry)
+  local n="$1" extra="$2" a pre
+  [[ "$n" =~ ^[0-9a-f:.]{2,45}/[0-9]{1,3}$ ]] || return 1
+  a="${n%/*}"; pre="${n##*/}"
+  [[ "$pre" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+  if [[ "$a" == *:* ]]; then
+    valid_v6 "$a" && [ "$pre" -le 128 ] || return 1
+    if [ "$extra" = 1 ]; then
+      [ "$pre" -ge 48 ] || return 1
+      # ::/8 (unspecified, loopback, IPv4-mapped), fe80::/10 link-local, ff00::/8 multicast
+      [ "$G1" -gt 255 ] && { [ "$G1" -lt 65152 ] || [ "$G1" -gt 65215 ]; } && [ "$G1" -lt 65280 ] || return 1   # 65152 = 0xfe80, 65215 = 0xfebf, 65280 = 0xff00
+    fi
+  else
+    valid_v4 "$a" && [ "$pre" -le 32 ] || return 1
+    if [ "$extra" = 1 ]; then
+      [ "$pre" -ge 16 ] || return 1
+      [ "$O1" != 0 ] && [ "$O1" != 127 ] && [ "$O1" -lt 224 ] && ! { [ "$O1" = 169 ] && [ "$O2" = 254 ]; } || return 1
+    fi
+  fi
+  return 0
+}
+valid_list() {   # LIST(comma separated, may be empty) EXTRA
+  local l="$1" extra="$2" n=0 x; local -a items
+  [ -n "$l" ] || return 0
+  [[ "$l" != ,* && "$l" != *, && "$l" != *,,* ]] || return 1
+  IFS=, read -ra items <<<"$l"
+  for x in "${items[@]}"; do
+    valid_net "$x" "$extra" || return 1
+    n=$((n + 1))
+  done
+  [ "$n" -le 32 ]
+}
+
+# ---- the configuration ------------------------------------------------------------------------------------------------------------
+# new_config OUT: the current file with its control_plane.relay block replaced by the one of the request (or added at the end of control_plane).
+# 0 done; 3 the file has no control_plane block (the node is not linked to a console); 4 a shape this helper does not rewrite.
+new_config() {
+  local out="$1" top
+  top="$(grep -c '^control_plane:' "$CONF" 2>/dev/null)"
+  [ "${top:-0}" -ge 1 ] || return 3
+  [ "$top" = 1 ] || return 4
+  grep -q '^control_plane:[[:space:]]*\(#.*\)\{0,1\}$' "$CONF" || return 4   # control_plane: { ... } on one line
+  awk -v allow="$A_ALLOW" -v ms="$A_SESSIONS" -v sec="$A_SECONDS" -v ren="$A_RENEWALS" -v extra="$A_EXTRA" -v deny="$A_DENY" '
+    function ind(s) { match(s, /^ */); return RLENGTH }
+    function qlist(csv,   n, a, i, o) {
+      if (csv == "") return "[]"
+      n = split(csv, a, ","); o = "["
+      for (i = 1; i <= n; i++) o = o (i > 1 ? ", " : "") "\"" a[i] "\""
+      return o "]"
+    }
+    function emit(ci,   p, q) {
+      p = sprintf("%" ci "s", ""); q = sprintf("%" (ci + 2) "s", "")
+      print p "relay:                      # set from the console (Nodes > Relays) by toutwaf-relay"
+      print q "allow: " (allow == 1 ? "true" : "false")
+      print q "max_sessions: " ms + 0
+      print q "max_seconds: " sec + 0
+      print q "max_renewals: " ren + 0
+      print q "extra_allow: " qlist(extra)
+      print q "deny: " qlist(deny)
+    }
+    function flush_blanks(   i) { for (i = 1; i <= nb; i++) print blank[i]; nb = 0 }
+    function leave() { if (inblock && !done) { emit(ci ? ci : 2); done = 1 } flush_blanks(); inblock = 0 }
+    BEGIN { inblock = 0; done = 0; skipping = 0; ci = 0; nb = 0 }
+    {
+      line = $0
+      blankline = (line ~ /^[ \t]*$/)
+      if (!inblock && !seen && line ~ /^control_plane:/) { seen = 1; inblock = 1; print line; next }
+      if (inblock) {
+        if (!blankline && ind(line) == 0) { leave(); print line; next }   # the next top-level key (or comment): the block is over
+        if (blankline) { blank[++nb] = line; next }
+        if (ci == 0 && line !~ /^[ ]*#/) ci = ind(line)
+        if (skipping) {
+          if (ind(line) > rind) { nb = 0; next }   # a line of the old relay block (the blank lines inside it go with it)
+          skipping = 0
+        }
+        if (line ~ /^[ ]*relay:/ && ind(line) == (ci ? ci : 2)) {
+          rind = ind(line); skipping = 1
+          flush_blanks()
+          if (!done) { emit(rind); done = 1 }
+          next
+        }
+        flush_blanks(); print line; next
+      }
+      print line
+    }
+    END { leave() }
+  ' "$CONF" >"$out" 2>/dev/null
+}
+current_block() { awk '/^control_plane:/{c=1;next} c&&/^[^ \t#]/{c=0} c&&/^[ ]*relay:/{r=1;ri=match($0,/[^ ]/);print;next} r{m=match($0,/[^ ]/); if($0~/^[ \t]*$/||m>ri){print;next} r=0}' "$CONF" 2>/dev/null; }
+
+dp_active() { have systemctl && systemctl is-active --quiet "$DP_UNIT" 2>/dev/null; }
+dp_restart() {
+  _bounded 150 systemctl restart "$DP_UNIT" >/dev/null 2>&1 || return 1
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do dp_active && break; sleep "${TOUTWAF_RELAY_WAIT:-5}"; done
+  dp_active || return 1
+  sleep "${TOUTWAF_RELAY_SETTLE:-3}"; dp_active   # still up a moment later (a configuration that crashes it shows now)
+}
+# put_conf SRC: SRC (a file of root's next to the configuration) replaces it with one rename; the owner and mode are those of the old file
+put_conf() {
+  local src="$1"
+  if have chcon && have stat; then chcon --reference="$CONF" "$src" 2>/dev/null || true; fi
+  mv -f -- "$src" "$CONF"
+}
+prune_backups() {
+  local f n=0
+  # shellcheck disable=SC2012
+  for f in $(ls -1t -- "$CONF".relay-bak.* 2>/dev/null); do
+    n=$((n + 1)); [ "$n" -le "$KEEP" ] || rm -f -- "$f"
+  done
+}
+
+do_apply() {
+  local tmp rc line key val R_PROTO="" R_ACTION="" R_SESS="" R_SECS="" R_REN="" R_EXTRA="" R_DENY="" seen=" "
+  tmp="$(mktemp)" || return 1
+  take_request "$REQ" "$tmp" 4096; rc=$?
+  if [ "$rc" = 1 ]; then rm -f -- "$tmp"; return 0; fi
+  if [ "$rc" != 0 ]; then rm -f -- "$tmp"; write_status refused "the request is not a plain file of the service account"; return 2; fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[A-Z_]+=[0-9A-Za-z:./,_-]*$ ]] || { rm -f -- "$tmp"; write_status refused "the request has a line this helper does not read"; return 2; }
+    key="${line%%=*}"; val="${line#*=}"
+    case "$seen" in *" $key "*) rm -f -- "$tmp"; write_status refused "the request names $key twice"; return 2;; esac
+    seen="$seen$key "
+    case "$key" in
+      PROTO) R_PROTO="$val";; ACTION) R_ACTION="$val";; ID) R_ID="$val";; ALLOW) R_ALLOW="$val";;
+      MAX_SESSIONS) R_SESS="$val";; MAX_SECONDS) R_SECS="$val";; MAX_RENEWALS) R_REN="$val";; EXTRA_ALLOW) R_EXTRA="$val";; DENY) R_DENY="$val";;
+      *) rm -f -- "$tmp"; write_status refused "the request names a key this helper does not know"; return 2;;
+    esac
+  done <"$tmp"
+  rm -f -- "$tmp"
+  valid_id "$R_ID" || { R_ID=""; R_ALLOW=""; write_status refused "invalid request id"; return 2; }
+  [ "$R_PROTO" = 1 ] || { R_ALLOW=""; write_status refused "unknown request version"; return 2; }
+  [ "$R_ACTION" = set ] || { R_ALLOW=""; write_status refused "unknown action"; return 2; }
+  [ "$R_ALLOW" = 0 ] || [ "$R_ALLOW" = 1 ] || { R_ALLOW=""; write_status refused "allow must be 0 or 1"; return 2; }
+  in_range "$R_SESS" 1 16 || { write_status refused "max_sessions is outside 1..16"; return 2; }
+  in_range "$R_SECS" 60 3600 || { write_status refused "max_seconds is outside 60..3600"; return 2; }
+  in_range "$R_REN" 0 12 || { write_status refused "max_renewals is outside 0..12"; return 2; }
+  valid_list "$R_EXTRA" 1 || { write_status refused "extra_allow: a network is invalid, too wide (at least /16 or /48) or never reachable, or there are more than 32"; return 2; }
+  valid_list "$R_DENY" 0 || { write_status refused "deny: a network is invalid or there are more than 32"; return 2; }
+  A_ALLOW="$R_ALLOW"; A_SESSIONS="$((10#$R_SESS))"; A_SECONDS="$((10#$R_SECS))"; A_RENEWALS="$((10#$R_REN))"; A_EXTRA="$R_EXTRA"; A_DENY="$R_DENY"
+
+  [ -f "$CONF" ] && [ ! -L "$CONF" ] || { write_status failed "the configuration file $CONF is missing"; return 1; }
+  write_status applying "the relay settings are being written"
+  local new bak stamp
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"; bak="$CONF.relay-bak.$stamp"
+  new="$(mktemp -u -- "$CONF.relay-new.XXXXXX")" || { write_status failed "no temporary file"; return 1; }
+  # same owner, mode and context as the old file, then its content
+  cp -p -- "$CONF" "$new" 2>/dev/null || { rm -f -- "$new"; write_status failed "could not prepare the new configuration next to the old one"; return 1; }
+  new_config "$new.body"; rc=$?
+  case "$rc" in
+    0) ;;
+    3) rm -f -- "$new" "$new.body"; write_status failed "this node is not linked to a console: its configuration has no control_plane block"; return 1;;
+    *) rm -f -- "$new" "$new.body"; write_status failed "the control_plane block of the configuration has a shape this helper does not rewrite (one line, or more than one block): update the node with the installer, or edit control_plane.relay by hand"; return 1;;
+  esac
+  cat -- "$new.body" >"$new" 2>/dev/null || { rm -f -- "$new" "$new.body"; write_status failed "could not write the new configuration"; return 1; }
+  rm -f -- "$new.body"
+  if cmp -s -- "$CONF" "$new"; then
+    rm -f -- "$new"; write_status unchanged "the relay settings of this node already are what the console asked for"; return 0
+  fi
+  if [ -x "$DP_BIN" ]; then
+    out="$(_bounded 60 "$DP_BIN" --config "$new" check-config 2>&1)"; rc=$?
+    if [ "$rc" != 0 ]; then
+      rm -f -- "$new"
+      write_status failed "the new configuration was refused by check-config, nothing was changed: $(printf '%s' "$out" | tail -n1)"
+      return 1
+    fi
+  fi
+  cp -p -- "$CONF" "$bak" 2>/dev/null || { rm -f -- "$new"; write_status failed "could not keep a copy of the old configuration"; return 1; }
+  put_conf "$new" || { rm -f -- "$new"; write_status failed "could not put the new configuration in place (the old one is untouched)"; return 1; }
+  prune_backups
+  if dp_restart; then
+    if [ "$A_ALLOW" = 1 ]; then write_status ok "relays are switched on in the configuration of the node; the data plane was restarted"
+    else write_status ok "relays are switched off in the configuration of the node; the data plane was restarted"; fi
+    return 0
+  fi
+  # the service did not come back with the new file: put the old one back
+  local back; back="$(mktemp -u -- "$CONF.relay-new.XXXXXX")"
+  if cp -p -- "$bak" "$back" 2>/dev/null && put_conf "$back"; then
+    if dp_restart; then write_status rolled_back "the data plane did not start with the new settings: the previous configuration was put back and runs"; return 1; fi
+    write_status failed "the data plane did not start with the new settings and does not start with the previous configuration either: see journalctl -u $DP_UNIT (copy: $bak)"; return 1
+  fi
+  rm -f -- "$back"
+  write_status failed "the data plane did not start with the new settings and the previous configuration could not be put back: copy at $bak"
+  return 1
+}
+
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-relay must run as root" >&2; exit 1; }
+case "${1:-}" in
+  apply) do_apply; exit $?;;
+  show) current_block; exit 0;;
+  *) echo "usage: toutwaf-relay apply|show" >&2; exit 2;;
+esac
+TW_RELAY_TPL
   cat >"$sd/toutwaf-upgrade.path" <<EOF
 [Unit]
 Description=ToutWAF upgrade requests (data plane update_engine, console Updates page)
@@ -7746,6 +9507,34 @@ TimeoutStartSec=10min
 [Install]
 WantedBy=multi-user.target
 EOF
+  # the relay settings of THIS node, changed from the console (Nodes > Relays): the data plane leaves relay-request, this helper rewrites control_plane.relay
+  if want_dp; then
+    cat >"$sd/toutwaf-relay.path" <<EOF
+[Unit]
+Description=ToutWAF relay settings requests (console Nodes > Relays)
+
+[Path]
+PathExists=$DATA_DIR/relay-request
+Unit=toutwaf-relay.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-relay.service" <<EOF
+[Unit]
+Description=ToutWAF relay settings helper (requested by the data plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-relay apply
+TimeoutStartSec=6min
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+EOF
+  fi
   if want_cp; then
     cat >"$sd/toutwaf-firewall.path" <<EOF
 [Unit]
@@ -8396,7 +10185,7 @@ rollback_cp() {
   systemctl stop toutwaf-cp 2>/dev/null || true
   if [ -x "$BIN_DIR/toutwaf-cp.prev" ]; then
     mv -f "$BIN_DIR/toutwaf-cp.prev" "$BIN_DIR/toutwaf-cp"
-    if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then [ -e "$DB_BACKUP_DIR/toutwaf.db-wal" ] || rm -f "$DATA_DIR/toutwaf.db-wal" "$DATA_DIR/toutwaf.db-shm"; cp -a "$DB_BACKUP_DIR"/. "$DATA_DIR"/ 2>/dev/null && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; selinux_restore "$DATA_DIR"; fi
+    if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then [ -e "$DB_BACKUP_DIR/toutwaf.db-wal" ] || rm -f "$DATA_DIR/toutwaf.db-wal" "$DATA_DIR/toutwaf.db-shm"; cp -dR --preserve=mode,timestamps --no-preserve=context,ownership "$DB_BACKUP_DIR"/. "$DATA_DIR"/ 2>/dev/null && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; selinux_restore "$DATA_DIR"; fi
     selinux_label_bin   # before the start: a restored program without bin_t cannot be executed by systemd
     systemctl restart toutwaf-cp || true
     # (never handed over to the update assistant here: the verdict on the restored version is this one's)
@@ -9175,6 +10964,7 @@ start_services() {
   if want_dp || want_cp; then systemctl enable --now toutwaf-upgrade.path >/dev/null 2>&1 || warn "could not enable toutwaf-upgrade.path"; fi
   # enabled, never started now: this installer may be running under the update helper, whose journal is still open
   if want_dp || want_cp; then systemctl enable toutwaf-upgrade-guard.service >/dev/null 2>&1 || warn "could not enable toutwaf-upgrade-guard.service"; fi
+  if want_dp; then systemctl enable --now toutwaf-relay.path >/dev/null 2>&1 || warn "could not enable toutwaf-relay.path"; fi
   if want_cp; then systemctl enable --now toutwaf-firewall.path >/dev/null 2>&1 || warn "could not enable toutwaf-firewall.path"; fi
   if want_cp; then systemctl enable --now toutwaf-blocklist.path >/dev/null 2>&1 || warn "could not enable toutwaf-blocklist.path"; fi
   if want_cp; then systemctl enable --now toutwaf-vpn.path >/dev/null 2>&1 || warn "could not enable toutwaf-vpn.path"; fi
@@ -9186,7 +10976,7 @@ start_services() {
     if svc_active toutwaf-cp && [ "$CHANGED" = 0 ]; then :; else
       log "(Re)starting toutwaf-cp"
       systemctl restart toutwaf-cp >>"$LOG" 2>&1 || true
-      if ! wait_cp_healthy; then
+      if ! wait_cp_healthy && ! autofix_unhealthy toutwaf-cp wait_cp_healthy noslow; then
         if [ "$ACTION" = update ]; then rollback_cp; fi
         svc_diag toutwaf-cp
         warn "toutwaf-cp does not answer on :$CP_PORT yet (journalctl -u toutwaf-cp)"
@@ -9202,8 +10992,8 @@ start_services() {
     if svc_active toutwaf-dp && [ "$CHANGED" = 0 ] && [ "$DP_CFG_CHANGED" = 0 ]; then log "data plane unchanged; reloading configuration"; systemctl reload toutwaf-dp || true
     else
       log "(Re)starting toutwaf-dp"
-      systemctl restart toutwaf-dp >>"$LOG" 2>&1 || rollback_dp
-      wait_healthy || rollback_dp
+      systemctl restart toutwaf-dp >>"$LOG" 2>&1 || autofix_service toutwaf-dp wait_healthy || rollback_dp   # (autofix block: corrects the known causes before the rollback)
+      wait_healthy || autofix_unhealthy toutwaf-dp wait_healthy || rollback_dp
     fi
   fi
   update_confirmed_cleanup
@@ -9292,7 +11082,7 @@ do_install_flow() {
       say "  $BUL services installed but not started (--no-start)"
     fi
     if [ "$NO_ENABLE" = 1 ]; then
-      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path toutwaf-time.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
+      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path toutwaf-time.path toutwaf-relay.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
     fi
   fi
   record_installed_now
@@ -9436,7 +11226,9 @@ if [ "$ACTION" = install ]; then env_gate; fi   # what is in the way is said now
 prereq_gate          # disk space, DNS and clock, with the fix of each problem (only a full disk refuses, exit 4)
 sysupdate_run        # then the system packages (an installation or an update; TOUTWAF_SKIP_SYSUPDATE=1 skips it; a failure is a warning)
 if want_cp && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; then detect_public_ip; fi
+AF_FLOW=1; autofix_preflight    # from here a failure is diagnosed and corrected; --autofix-dry-run: what the corrections would do now
 do_install_flow
+autofix_report_success   # a new attempt that went through: each correction of the earlier attempts says so
 if [ "$RESTORE" = 1 ]; then restore_fresh; fi
 
 new_dp="$(installed_label "$(p "$BIN_DIR/toutwaf-dp")" 2>/dev/null || true)"; [ "$new_dp" != "?" ] || new_dp=""
