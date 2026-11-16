@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "version": "0.5.8",
+  "build": "bb97959f653a",
+  "channel": "stable",
+  "released_at": "2026-11-16T00:24:15Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 72970764,
+      "sha256": "8c576f3dd3f37734d9211cdf7c3390b4d83a21eb97181c6332ba2f4391bc30ff"
+    },
+    {
+      "name": "toutwaf-extras.tar.gz",
+      "os": "any",
+      "arch": "any",
+      "size": 19739424,
+      "sha256": "f9a1b7e4041463730c75af260dbe62c9fba2e9b44581d54ac7d82f7f8ffee9e3",
+      "kind": "extras",
+      "part": 1,
+      "parts": 1
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-arm64",
+      "reason": "disabled in settings"
+    }
+  ],
+  "notes": "## ToutWAF 0.5.8 — correctif des mises à jour\n\n- **Mises à jour et installations :** l'installateur attend maintenant le nœud sur `/readyz` (réponse immédiate) au lieu de `/healthz`, qui teste les serveurs d'origine de chaque site l'un après l'autre. Avec beaucoup de sites, un nœud sain était annulé à tort (« la nouvelle version n'est pas saine »).\n- Nouveau test `deploy/tests/wait-healthy-test.sh` qui reproduit ce cas."
+}
