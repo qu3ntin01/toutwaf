@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "version": "0.6.0",
+  "build": "8530e88d0ca4",
+  "channel": "stable",
+  "released_at": "2026-11-16T17:24:34Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 93492740,
+      "sha256": "29b03785c66981151a0f51a4612d96847dd573e8e572863759356b08f5589fd2"
+    },
+    {
+      "name": "toutwaf-extras.tar.gz",
+      "os": "any",
+      "arch": "any",
+      "size": 19781958,
+      "sha256": "cb5d45b720ce89948a6185644008acf6455ef7ceb32666c61a5667166d8c60b1",
+      "kind": "extras",
+      "part": 1,
+      "parts": 1
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "freebsd-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "freebsd-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-arm64",
+      "reason": "disabled in settings"
+    }
+  ],
+  "notes": "## ToutWAF 0.6.0\n\n- **Serveurs web (ToutPanel) : plus de faux « Injoignable ».** Le statut ne dépendait que du battement de cœur envoyé par le panel vers la console. Si ce sens-là est coupé (adresse ou certificat de la console, pare-feu) alors que le panel fonctionne, la console affichait « Injoignable ». Elle interroge maintenant elle-même le panel : s'il répond, le serveur reste « Lié ». Le diagnostic du lien indique le sens fermé.\n- Reprend tout le contenu de la 0.5.9."
+}
