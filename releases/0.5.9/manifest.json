@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "version": "0.5.9",
+  "build": "4c688d923bc8",
+  "channel": "stable",
+  "released_at": "2026-11-16T12:06:04Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 93582970,
+      "sha256": "4b778ee55d3cf0231f294cad45bca36de03f099572840e2c3ea6197678111a61"
+    },
+    {
+      "name": "toutwaf-extras.tar.gz",
+      "os": "any",
+      "arch": "any",
+      "size": 19860752,
+      "sha256": "3ec7e2ef08bd8faddff93863ecf90e8006d103592f6fc8c5e3162112cad526a5",
+      "kind": "extras",
+      "part": 1,
+      "parts": 1
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "freebsd-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "freebsd-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "windows-arm64",
+      "reason": "disabled in settings"
+    }
+  ],
+  "notes": "## ToutWAF 0.5.9 — version complète\n\n**Mises à jour et installation**\n- **Correction automatique de l'installateur** : en cas de problème (ports, paquets, pare-feu, services), il diagnostique et corrige seul, avec journal et annulation (`--no-autofix` pour le désactiver, `--autofix-dry-run` pour simuler).\n- **Campagne de mise à jour robuste** : la console relance les nœuds qui ne bougent pas, affiche pourquoi, et le nettoyage d'une mise à jour abandonnée ferme maintenant toujours la tâche (course corrigée).\n- **Relais entre nœuds activable depuis la console** (« Activer le relais »), sans toucher au fichier de configuration du nœud.\n- L'installateur attend le nœud sur `/readyz` (0.5.8).\n\n**Nouveautés**\n- **Application mobile et PWA** : jetons limités par appareil, écran de connexion, pas de mise en cache de l'API.\n- **FreeBSD** : essai réel sur FreeBSD 14.5 (installateur, services, pf, WireGuard, agent, mise à jour avec retour arrière, désinstallation) ; 14 défauts corrigés. Voir `docs/design/freebsd-essai-reel.md`.\n- Pivot : ajout d'un serveur ToutWAF ou d'un serveur web joignable seulement par un nœud.\n- Pare-feu, sondes réseau, profils d'applications (dont Gitea), nombreux points du TODO.\n\n**Limites connues**\n- FreeBSD : une interface apparue après le chargement des règles pf n'est pas couverte ; arm64, ZFS, OpenVPN/IPsec, antivirus non essayés.\n- Binaires de cette version : Linux amd64."
+}
