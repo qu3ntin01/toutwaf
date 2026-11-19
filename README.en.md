@@ -8,7 +8,7 @@ Firewall · WAF · WAAP · API protection · anti-bot · anti-DDoS · multi-node
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.6.0** · build `8530e88d0ca4` · channel **stable** · 2026-11-16
+**Version 0.6.1** · build `77900206a7f1` · channel **stable** · 2026-11-19
 
 </div>
 
@@ -244,19 +244,20 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.6.0**
+**Version 0.6.1**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 89.2 MiB | `29b03785c66981151a0f51a4612d96847dd573e8e572863759356b08f5589fd2` |
-| `toutwaf-extras.tar.gz` | any | any | 18.9 MiB | `cb5d45b720ce89948a6185644008acf6455ef7ceb32666c61a5667166d8c60b1` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 81.9 MiB | `ce692ec30fe3eb4c6ebefe8dacc4298465715d433695323225b620208fb5fcea` |
+| `toutwaf-extras.tar.gz` | any | any | 20.5 MiB | `48fb8f59cf2955ac1b9720f92d4d5b015bdb48045a2a6e26a6ccb7ac40aed7ac` |
 
 The `toutwaf-extras*.tar.gz` files (OS and architecture `any`) are the extras of the release: the host agent for Windows, which a console hands to other machines. The installer downloads, checks (SHA-256 and signature) and installs them with the archive of the platform; an installation without them works and does not offer Windows.
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.6.0` | 2026-11-16T17:24:34Z | **current** | `releases/0.6.0/` |
+| `0.6.1` | 2026-11-19T17:17:35Z | **current** | `releases/0.6.1/` |
+| `0.6.0` | 2026-11-16T17:24:34Z | available | `releases/0.6.0/` |
 | `0.5.9` | 2026-11-16T12:06:04Z | available | `releases/0.5.9/` |
 | `0.5.8` | 2026-11-16T00:24:15Z | available | `releases/0.5.8/` |
 | `0.5.7` | 2026-11-15T20:47:03Z | available | `releases/0.5.7/` |
@@ -283,7 +284,7 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.6.0 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.6.1 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Verify a release
@@ -291,7 +292,7 @@ cd releases/0.6.0 && sha256sum -c SHA256SUMS --ignore-missing
 From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `f8fc98e4c6e364fa`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. To verify by hand (OpenSSL 3 or later):
 
 ```sh
-V=0.6.0; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+V=0.6.1; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
 { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin

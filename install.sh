@@ -55,6 +55,11 @@ CLOUDLINK_PORT=9544
 CP_PORT=9443; HTTP_PORT=80; HTTPS_PORT=443; PUBLIC_HOST=""; PRIVATE_HOST=""; CHANNEL="${TOUTWAF_CHANNEL:-}"
 HTTP3="${TOUTWAF_HTTP3:-}"                      # "" = keep what toutwaf-dp.yaml says (default OFF); 1 = --http3 (HTTP/3 over UDP, opens UDP on the HTTPS port); 0 = --no-http3
 case "$HTTP3" in 1|true|yes|on) HTTP3=1;; 0|false|no|off) HTTP3=0;; *) HTTP3="";; esac
+# The authoritative DNS server of the console (port 53, docs/design/dns-autoritatif.md): "" = keep what the installation says (default OFF: nothing changes
+# for an existing or unattended installation); 1 = --dns-server (the cp unit may bind port 53 without root, the systemd-resolved stub is freed when it is the only
+# thing in the way, port 53 is opened in firewalld / ufw); 0 = --no-dns-server (what this installer did for it is undone). The role itself is given in the console.
+DNS_SERVER="${TOUTWAF_DNS_SERVER:-}"; DNS_FREE=1
+case "$DNS_SERVER" in 1|true|yes|on) DNS_SERVER=1;; 0|false|no|off) DNS_SERVER=0;; *) DNS_SERVER="";; esac
 OPEN_FW=""                                      # "" = default: open what is needed when firewalld / ufw is active; 1 = same, explicit; 0 = never touch the firewall
 CONSOLE_FROM=""                                 # restrict the console port to this address / CIDR ("" = reachable from anywhere)
 # The firewall MODULE (ToutWAF manages this machine's nftables rules) is NOT the system-firewall option above (OPEN_FW opens the ports ToutWAF needs
@@ -385,6 +390,136 @@ nl|q_public_host|Publieke hostnaam of IP-adres (leeg = automatisch)
 ru|q_public_host|Публичное имя хоста или IP (пусто = автоопределение)
 zh|q_public_host|公网主机名或 IP 地址（留空 = 自动检测）
 ar|q_public_host|اسم المضيف أو عنوان IP العام (فارغ = اكتشاف تلقائي)
+en|q_dns|Enable the authoritative DNS server of the console (port 53)?
+fr|q_dns|Activer le serveur DNS autoritatif de la console (port 53) ?
+es|q_dns|¿Activar el servidor DNS autoritativo de la consola (puerto 53)?
+de|q_dns|Autoritativen DNS-Server der Konsole aktivieren (Port 53)?
+it|q_dns|Attivare il server DNS autorevole della console (porta 53)?
+pt|q_dns|Ativar o servidor DNS autoritativo da consola (porta 53)?
+nl|q_dns|De gezaghebbende DNS-server van de console inschakelen (poort 53)?
+ru|q_dns|Включить авторитетный DNS-сервер консоли (порт 53)?
+zh|q_dns|是否启用控制台的权威 DNS 服务器（端口 53）？
+ar|q_dns|تفعيل خادم DNS الموثوق الخاص بلوحة التحكم (المنفذ 53)؟
+en|dns_n1|ToutWAF can answer the DNS of your domains itself (zones, failover, protection). Recommended when no other DNS server runs here. It needs port 53 and the right to bind it without root.
+fr|dns_n1|ToutWAF peut répondre lui-même au DNS de vos domaines (zones, bascule, protection). Recommandé quand aucun autre serveur DNS ne tourne ici. Il lui faut le port 53 et le droit de l'ouvrir sans root.
+es|dns_n1|ToutWAF puede responder él mismo al DNS de sus dominios (zonas, conmutación, protección). Recomendado cuando aquí no funciona otro servidor DNS. Necesita el puerto 53 y el derecho a abrirlo sin root.
+de|dns_n1|ToutWAF kann das DNS Ihrer Domains selbst beantworten (Zonen, Failover, Schutz). Empfohlen, wenn hier kein anderer DNS-Server läuft. Es braucht Port 53 und das Recht, ihn ohne root zu öffnen.
+it|dns_n1|ToutWAF può rispondere da solo al DNS dei tuoi domini (zone, failover, protezione). Consigliato quando qui non gira un altro server DNS. Gli servono la porta 53 e il diritto di aprirla senza root.
+pt|dns_n1|O ToutWAF pode responder ele próprio ao DNS dos seus domínios (zonas, comutação, proteção). Recomendado quando aqui não corre outro servidor DNS. Precisa da porta 53 e do direito de a abrir sem root.
+nl|dns_n1|ToutWAF kan zelf de DNS van uw domeinen beantwoorden (zones, failover, bescherming). Aanbevolen als hier geen andere DNS-server draait. Het heeft poort 53 nodig en het recht die zonder root te openen.
+ru|dns_n1|ToutWAF может сам отвечать на DNS-запросы ваших доменов (зоны, переключение, защита). Рекомендуется, если здесь не работает другой DNS-сервер. Нужны порт 53 и право открыть его без root.
+zh|dns_n1|ToutWAF 可以自行应答您域名的 DNS（区域、故障切换、防护）。如果这台机器上没有其他 DNS 服务器，建议启用。它需要 53 端口以及无需 root 即可绑定该端口的权限。
+ar|dns_n1|يستطيع ToutWAF الرد بنفسه على DNS نطاقاتك (المناطق والتحويل التلقائي والحماية). يُنصح به عندما لا يعمل هنا خادم DNS آخر. يحتاج إلى المنفذ 53 وإلى حق فتحه دون root.
+en|dns_n2|No other program is ever stopped. The role itself is given later, in the console (DNS > Servers). You can switch this off again with --no-dns-server.
+fr|dns_n2|Aucun autre programme n'est jamais arrêté. Le rôle lui-même se donne ensuite dans la console (DNS > Serveurs). Vous pouvez le désactiver avec --no-dns-server.
+es|dns_n2|Nunca se detiene ningún otro programa. El rol se asigna después, en la consola (DNS > Servidores). Puede desactivarlo con --no-dns-server.
+de|dns_n2|Kein anderes Programm wird je angehalten. Die Rolle selbst vergeben Sie danach in der Konsole (DNS > Server). Mit --no-dns-server schalten Sie es wieder ab.
+it|dns_n2|Nessun altro programma viene mai fermato. Il ruolo si assegna poi nella console (DNS > Server). Puoi disattivarlo con --no-dns-server.
+pt|dns_n2|Nenhum outro programa é alguma vez parado. A função atribui-se depois, na consola (DNS > Servidores). Pode desativá-la com --no-dns-server.
+nl|dns_n2|Er wordt nooit een ander programma gestopt. De rol zelf geeft u daarna in de console (DNS > Servers). U kunt het weer uitschakelen met --no-dns-server.
+ru|dns_n2|Никакая другая программа никогда не останавливается. Саму роль вы назначите позже в консоли (DNS > Серверы). Отключить можно параметром --no-dns-server.
+zh|dns_n2|绝不会停止其他程序。角色本身稍后在控制台中授予（DNS > 服务器）。可以用 --no-dns-server 再次关闭。
+ar|dns_n2|لا يُوقَف أي برنامج آخر أبدا. يُمنح الدور نفسه لاحقا من لوحة التحكم (DNS > الخوادم). يمكنك إيقافه بالخيار --no-dns-server.
+en|q_dns_free|Free port 53 by switching off the local stub resolver of systemd-resolved (reversible)?
+fr|q_dns_free|Libérer le port 53 en coupant le résolveur local (stub) de systemd-resolved (réversible) ?
+es|q_dns_free|¿Liberar el puerto 53 desactivando el resolvedor local (stub) de systemd-resolved (reversible)?
+de|q_dns_free|Port 53 freigeben, indem der lokale Stub-Resolver von systemd-resolved abgeschaltet wird (umkehrbar)?
+it|q_dns_free|Liberare la porta 53 disattivando il resolver locale (stub) di systemd-resolved (reversibile)?
+pt|q_dns_free|Libertar a porta 53 desligando o resolvedor local (stub) do systemd-resolved (reversível)?
+nl|q_dns_free|Poort 53 vrijmaken door de lokale stub-resolver van systemd-resolved uit te schakelen (omkeerbaar)?
+ru|q_dns_free|Освободить порт 53, отключив локальный stub-резолвер systemd-resolved (обратимо)?
+zh|q_dns_free|是否通过关闭 systemd-resolved 的本地 stub 解析器来释放 53 端口（可恢复）？
+ar|q_dns_free|تحرير المنفذ 53 بإيقاف المحلّل المحلي (stub) في systemd-resolved (قابل للتراجع)؟
+en|s_dns|DNS server of the console
+fr|s_dns|Serveur DNS de la console
+es|s_dns|Servidor DNS de la consola
+de|s_dns|DNS-Server der Konsole
+it|s_dns|Server DNS della console
+pt|s_dns|Servidor DNS da consola
+nl|s_dns|DNS-server van de console
+ru|s_dns|DNS-сервер консоли
+zh|s_dns|控制台的 DNS 服务器
+ar|s_dns|خادم DNS الخاص بلوحة التحكم
+en|dns_ready|DNS server of the console prepared: port 53 can be bound without root. Give it the DNS role in the console (DNS > Servers).
+fr|dns_ready|Serveur DNS de la console préparé : le port 53 peut être ouvert sans root. Donnez-lui le rôle DNS dans la console (DNS > Serveurs).
+es|dns_ready|Servidor DNS de la consola preparado: el puerto 53 puede abrirse sin root. Asígnele el rol DNS en la consola (DNS > Servidores).
+de|dns_ready|DNS-Server der Konsole vorbereitet: Port 53 kann ohne root geöffnet werden. Vergeben Sie ihm die DNS-Rolle in der Konsole (DNS > Server).
+it|dns_ready|Server DNS della console preparato: la porta 53 può essere aperta senza root. Assegnagli il ruolo DNS nella console (DNS > Server).
+pt|dns_ready|Servidor DNS da consola preparado: a porta 53 pode ser aberta sem root. Atribua-lhe a função DNS na consola (DNS > Servidores).
+nl|dns_ready|DNS-server van de console voorbereid: poort 53 kan zonder root worden geopend. Geef hem de DNS-rol in de console (DNS > Servers).
+ru|dns_ready|DNS-сервер консоли подготовлен: порт 53 можно открыть без root. Назначьте ему роль DNS в консоли (DNS > Серверы).
+zh|dns_ready|控制台的 DNS 服务器已准备好：无需 root 即可绑定 53 端口。请在控制台中授予其 DNS 角色（DNS > 服务器）。
+ar|dns_ready|تم تجهيز خادم DNS الخاص بلوحة التحكم: يمكن فتح المنفذ 53 دون root. امنحه دور DNS من لوحة التحكم (DNS > الخوادم).
+en|dns_stub_released|Port 53 freed: the local stub resolver of systemd-resolved is switched off (reversible: %s)
+fr|dns_stub_released|Port 53 libéré : le résolveur local (stub) de systemd-resolved est coupé (réversible : %s)
+es|dns_stub_released|Puerto 53 liberado: el resolvedor local (stub) de systemd-resolved está desactivado (reversible: %s)
+de|dns_stub_released|Port 53 freigegeben: der lokale Stub-Resolver von systemd-resolved ist abgeschaltet (umkehrbar: %s)
+it|dns_stub_released|Porta 53 liberata: il resolver locale (stub) di systemd-resolved è disattivato (reversibile: %s)
+pt|dns_stub_released|Porta 53 libertada: o resolvedor local (stub) do systemd-resolved está desligado (reversível: %s)
+nl|dns_stub_released|Poort 53 vrijgemaakt: de lokale stub-resolver van systemd-resolved is uitgeschakeld (omkeerbaar: %s)
+ru|dns_stub_released|Порт 53 освобождён: локальный stub-резолвер systemd-resolved отключён (обратимо: %s)
+zh|dns_stub_released|53 端口已释放：systemd-resolved 的本地 stub 解析器已关闭（可恢复：%s）
+ar|dns_stub_released|تم تحرير المنفذ 53: أُوقف المحلّل المحلي (stub) في systemd-resolved (قابل للتراجع: %s)
+en|dns_stub_kept|Port 53 is held by the local stub resolver of systemd-resolved and was left as it is. Switch it off yourself (DNSStubListener=no in /etc/systemd/resolved.conf.d/) or run the installer again with --dns-server
+fr|dns_stub_kept|Le port 53 est tenu par le résolveur local (stub) de systemd-resolved et a été laissé tel quel. Coupez-le vous-même (DNSStubListener=no dans /etc/systemd/resolved.conf.d/) ou relancez l'installeur avec --dns-server
+es|dns_stub_kept|El puerto 53 lo ocupa el resolvedor local (stub) de systemd-resolved y se dejó como estaba. Desactívelo usted mismo (DNSStubListener=no en /etc/systemd/resolved.conf.d/) o vuelva a ejecutar el instalador con --dns-server
+de|dns_stub_kept|Port 53 wird vom lokalen Stub-Resolver von systemd-resolved belegt und blieb unverändert. Schalten Sie ihn selbst ab (DNSStubListener=no in /etc/systemd/resolved.conf.d/) oder starten Sie den Installer erneut mit --dns-server
+it|dns_stub_kept|La porta 53 è occupata dal resolver locale (stub) di systemd-resolved ed è stata lasciata com'era. Disattivalo tu (DNSStubListener=no in /etc/systemd/resolved.conf.d/) oppure riesegui l'installer con --dns-server
+pt|dns_stub_kept|A porta 53 está ocupada pelo resolvedor local (stub) do systemd-resolved e foi deixada como estava. Desligue-o pelos seus meios (DNSStubListener=no em /etc/systemd/resolved.conf.d/) ou execute o instalador de novo com --dns-server
+nl|dns_stub_kept|Poort 53 wordt bezet door de lokale stub-resolver van systemd-resolved en is ongemoeid gelaten. Schakel hem zelf uit (DNSStubListener=no in /etc/systemd/resolved.conf.d/) of start het installatieprogramma opnieuw met --dns-server
+ru|dns_stub_kept|Порт 53 занят локальным stub-резолвером systemd-resolved и оставлен как есть. Отключите его сами (DNSStubListener=no в /etc/systemd/resolved.conf.d/) или запустите установщик снова с --dns-server
+zh|dns_stub_kept|53 端口被 systemd-resolved 的本地 stub 解析器占用，已保持原样。请自行关闭（在 /etc/systemd/resolved.conf.d/ 中设置 DNSStubListener=no），或使用 --dns-server 重新运行安装程序
+ar|dns_stub_kept|المنفذ 53 تشغله المحلّل المحلي (stub) في systemd-resolved وتُرك كما هو. أوقفه بنفسك (DNSStubListener=no في /etc/systemd/resolved.conf.d/) أو أعد تشغيل المثبّت مع --dns-server
+en|dns_busy|Port 53 is already used by %s. ToutWAF never stops another program: free the port yourself, or give the DNS role of the console a specific address
+fr|dns_busy|Le port 53 est déjà utilisé par %s. ToutWAF n'arrête jamais un autre programme : libérez le port vous-même, ou donnez au rôle DNS de la console une adresse précise
+es|dns_busy|El puerto 53 ya lo usa %s. ToutWAF nunca detiene otro programa: libere el puerto usted mismo o dé al rol DNS de la consola una dirección concreta
+de|dns_busy|Port 53 wird bereits von %s verwendet. ToutWAF hält nie ein anderes Programm an: geben Sie den Port selbst frei oder weisen Sie der DNS-Rolle der Konsole eine bestimmte Adresse zu
+it|dns_busy|La porta 53 è già usata da %s. ToutWAF non ferma mai un altro programma: libera la porta tu stesso oppure assegna al ruolo DNS della console un indirizzo preciso
+pt|dns_busy|A porta 53 já é usada por %s. O ToutWAF nunca para outro programa: liberte a porta pelos seus meios ou dê à função DNS da consola um endereço concreto
+nl|dns_busy|Poort 53 wordt al gebruikt door %s. ToutWAF stopt nooit een ander programma: maak de poort zelf vrij of geef de DNS-rol van de console een bepaald adres
+ru|dns_busy|Порт 53 уже используется программой %s. ToutWAF никогда не останавливает другие программы: освободите порт сами или задайте роли DNS консоли конкретный адрес
+zh|dns_busy|53 端口已被 %s 占用。ToutWAF 绝不会停止其他程序：请自行释放该端口，或为控制台的 DNS 角色指定具体地址
+ar|dns_busy|المنفذ 53 مستخدم بالفعل من %s. لا يوقف ToutWAF أي برنامج آخر: حرّر المنفذ بنفسك أو امنح دور DNS في لوحة التحكم عنوانا محددا
+en|dns_fw|Firewall (%s): port 53 (UDP and TCP) opened
+fr|dns_fw|Pare-feu (%s) : port 53 (UDP et TCP) ouvert
+es|dns_fw|Cortafuegos (%s): puerto 53 (UDP y TCP) abierto
+de|dns_fw|Firewall (%s): Port 53 (UDP und TCP) geöffnet
+it|dns_fw|Firewall (%s): porta 53 (UDP e TCP) aperta
+pt|dns_fw|Firewall (%s): porta 53 (UDP e TCP) aberta
+nl|dns_fw|Firewall (%s): poort 53 (UDP en TCP) geopend
+ru|dns_fw|Брандмауэр (%s): порт 53 (UDP и TCP) открыт
+zh|dns_fw|防火墙（%s）：已放行 53 端口（UDP 和 TCP）
+ar|dns_fw|جدار الحماية (%s): تم فتح المنفذ 53 (UDP وTCP)
+en|dns_fw_manual|Port 53 (UDP and TCP) is not opened automatically on this firewall: open it yourself
+fr|dns_fw_manual|Le port 53 (UDP et TCP) n'est pas ouvert automatiquement sur ce pare-feu : ouvrez-le vous-même
+es|dns_fw_manual|El puerto 53 (UDP y TCP) no se abre automáticamente en este cortafuegos: ábralo usted mismo
+de|dns_fw_manual|Port 53 (UDP und TCP) wird bei dieser Firewall nicht automatisch geöffnet: öffnen Sie ihn selbst
+it|dns_fw_manual|La porta 53 (UDP e TCP) non viene aperta automaticamente su questo firewall: aprila tu stesso
+pt|dns_fw_manual|A porta 53 (UDP e TCP) não é aberta automaticamente nesta firewall: abra-a manualmente
+nl|dns_fw_manual|Poort 53 (UDP en TCP) wordt op deze firewall niet automatisch geopend: open haar zelf
+ru|dns_fw_manual|Порт 53 (UDP и TCP) в этом брандмауэре автоматически не открывается: откройте его сами
+zh|dns_fw_manual|此防火墙不会自动放行 53 端口（UDP 和 TCP）：请自行放行
+ar|dns_fw_manual|لا يُفتح المنفذ 53 (UDP وTCP) تلقائيا في جدار الحماية هذا: افتحه بنفسك
+en|dns_reverted|DNS server of the console switched off: what the installer changed for it has been undone
+fr|dns_reverted|Serveur DNS de la console désactivé : ce que l'installeur avait modifié pour lui a été annulé
+es|dns_reverted|Servidor DNS de la consola desactivado: se deshizo lo que el instalador había cambiado para él
+de|dns_reverted|DNS-Server der Konsole abgeschaltet: was der Installer dafür geändert hatte, wurde rückgängig gemacht
+it|dns_reverted|Server DNS della console disattivato: ciò che l'installer aveva modificato per lui è stato annullato
+pt|dns_reverted|Servidor DNS da consola desativado: o que o instalador tinha alterado para ele foi desfeito
+nl|dns_reverted|DNS-server van de console uitgeschakeld: wat het installatieprogramma ervoor had gewijzigd is ongedaan gemaakt
+ru|dns_reverted|DNS-сервер консоли отключён: изменения, сделанные для него установщиком, отменены
+zh|dns_reverted|控制台的 DNS 服务器已关闭：安装程序为其所做的更改已撤销
+ar|dns_reverted|تم إيقاف خادم DNS الخاص بلوحة التحكم: أُلغي ما غيّره المثبّت من أجله
+en|p_dns|DNS (authoritative server of the console)
+fr|p_dns|DNS (serveur autoritatif de la console)
+es|p_dns|DNS (servidor autoritativo de la consola)
+de|p_dns|DNS (autoritativer Server der Konsole)
+it|p_dns|DNS (server autorevole della console)
+pt|p_dns|DNS (servidor autoritativo da consola)
+nl|p_dns|DNS (gezaghebbende server van de console)
+ru|p_dns|DNS (авторитетный сервер консоли)
+zh|p_dns|DNS（控制台的权威服务器）
+ar|p_dns|DNS (الخادم الموثوق للوحة التحكم)
 en|q_firewall|Open the firewall automatically (firewalld / ufw)?
 fr|q_firewall|Ouvrir automatiquement le pare-feu (firewalld / ufw) ?
 es|q_firewall|¿Abrir el cortafuegos automáticamente (firewalld / ufw)?
@@ -1615,6 +1750,16 @@ nl|cp_expected|verwacht
 ru|cp_expected|ожидается
 zh|cp_expected|预期兼容
 ar|cp_expected|متوقع
+en|cp_branch|tested on %s; yours (%s): same branch, not tested separately
+fr|cp_branch|testé sur %s ; la vôtre (%s) : même branche, non testée séparément
+es|cp_branch|probado en %s; la suya (%s): misma rama, no probada por separado
+de|cp_branch|getestet auf %s; Ihre Version (%s): gleicher Zweig, nicht gesondert getestet
+it|cp_branch|testato su %s; la sua (%s): stesso ramo, non testata separatamente
+pt|cp_branch|testado em %s; a sua (%s): mesmo ramo, não testada separadamente
+nl|cp_branch|getest op %s; uw versie (%s): dezelfde tak, niet apart getest
+ru|cp_branch|проверено на %s; ваша версия (%s): та же ветка, отдельно не проверялась
+zh|cp_branch|已在 %s 上测试；您的版本（%s）：同一分支，未单独测试
+ar|cp_branch|تم الاختبار على %s؛ إصدارك (%s): الفرع نفسه، ولم يُختبر بشكل منفصل
 en|cp_w_like|%s is not in the compatibility table: treated as the %s family (expected). Continuing.
 fr|cp_w_like|%s n'est pas dans la table de compatibilité : traité comme la famille %s (attendu). On continue.
 es|cp_w_like|%s no figura en la tabla de compatibilidad: se trata como la familia %s (esperado). Se continúa.
@@ -3895,97 +4040,98 @@ pkg|arch|libcap|libcap
 pkg|arch|selinux|-
 pkg|arch|logrotate|logrotate
 distro|almalinux|rhel|AlmaLinux|8|major|-
-ver|almalinux|10|tested|-
-ver|almalinux|9|tested|-
-ver|almalinux|8|tested|-
+ver|almalinux|10|tested|-|-|-
+ver|almalinux|9|tested|-|-|-
+ver|almalinux|8|tested|-|-|-
 distro|rocky|rhel|Rocky Linux|8|major|-
-ver|rocky|10|tested|-
-ver|rocky|9|tested|-
-ver|rocky|8|tested|-
+ver|rocky|10|tested|-|-|-
+ver|rocky|9|tested|-|-|-
+ver|rocky|8|tested|-|-|-
 distro|rhel|rhel|Red Hat Enterprise Linux|8|major|-
-ver|rhel|10|tested|-
-ver|rhel|9|tested|-
-ver|rhel|8|tested|-
-ver|rhel|7|unsupported|eol
+ver|rhel|10|tested|-|-|-
+ver|rhel|9|tested|-|-|-
+ver|rhel|8|tested|-|-|-
+ver|rhel|7|unsupported|eol|-|-
 distro|centos|rhel|CentOS Stream|9|major|-
-ver|centos|10|tested|-
-ver|centos|9|tested|-
-ver|centos|8|unsupported|eol
-ver|centos|7|unsupported|eol
+ver|centos|10|tested|-|-|-
+ver|centos|9|tested|-|-|-
+ver|centos|8|unsupported|eol|-|-
+ver|centos|7|unsupported|eol|-|-
 distro|ol|rhel|Oracle Linux|8|major|-
-ver|ol|10|tested|-
-ver|ol|9|tested|-
-ver|ol|8|tested|-
-ver|ol|7|unsupported|eol
+ver|ol|10|tested|-|-|-
+ver|ol|9|tested|-|-|-
+ver|ol|8|tested|-|-|-
+ver|ol|7|unsupported|eol|-|-
 distro|fedora|rhel|Fedora|41|major|-
-ver|fedora|44|tested|-
-ver|fedora|43|tested|-
-ver|fedora|42|tested|-
-ver|fedora|41|tested|-
+ver|fedora|44|tested|-|-|-
+ver|fedora|43|tested|-|-|-
+ver|fedora|42|tested|-|-|-
+ver|fedora|41|tested|-|-|-
 distro|amzn|amazon|Amazon Linux|2023|major|-
-ver|amzn|2023|tested|-
-ver|amzn|2|unsupported|eol
+ver|amzn|2023|tested|-|-|-
+ver|amzn|2|unsupported|eol|-|-
 distro|debian|debian|Debian|11|major|-
-ver|debian|13|tested|-
-ver|debian|12|tested|-
-ver|debian|11|tested|-
-ver|debian|10|unsupported|eol
+ver|debian|13|tested|-|-|-
+ver|debian|12|tested|-|-|-
+ver|debian|11|tested|-|-|-
+ver|debian|10|unsupported|eol|-|-
 distro|ubuntu|debian|Ubuntu|20.04|minor|-
-ver|ubuntu|26.04|tested|-
-ver|ubuntu|25.10|tested|-
-ver|ubuntu|24.04|tested|-
-ver|ubuntu|22.04|tested|-
-ver|ubuntu|20.04|tested|-
-ver|ubuntu|18.04|unsupported|glibc
+ver|ubuntu|26.04|tested|-|-|-
+ver|ubuntu|25.10|tested|-|-|-
+ver|ubuntu|24.04|tested|-|-|-
+ver|ubuntu|22.04|tested|-|-|-
+ver|ubuntu|20.04|tested|-|-|-
+ver|ubuntu|18.04|unsupported|glibc|-|-
 distro|linuxmint|debian|Linux Mint / LMDE|-|major|derived
-ver|linuxmint|*|expected|-
+ver|linuxmint|7|tested|-|7|LMDE 7 (gigi)
+ver|linuxmint|22|tested|-|22.3|Linux Mint 22.3
 distro|pop|debian|Pop!_OS|-|major|derived
-ver|pop|*|expected|-
+ver|pop|24|tested|-|24.04|Pop!_OS 24.04 LTS
 distro|zorin|debian|Zorin OS|-|major|derived
-ver|zorin|*|expected|-
+ver|zorin|18|tested|-|18|Zorin OS 18.1
 distro|elementary|debian|elementary OS|-|major|derived
-ver|elementary|*|expected|-
+ver|elementary|8|tested|-|8|elementary OS 8
 distro|kali|debian|Kali Linux|-|major|rolling
-ver|kali|*|expected|-
+ver|kali|*|tested|-|-|-
 distro|raspbian|debian|Raspberry Pi OS (32-bit, Raspbian)|-|major|-
-ver|raspbian|*|unsupported|arm32
+ver|raspbian|*|unsupported|arm32|-|-
 distro|devuan|debian|Devuan|-|major|-
-ver|devuan|*|unsupported|init
+ver|devuan|*|unsupported|init|-|-
 distro|opensuse-leap|suse|openSUSE Leap|15.6|minor|-
-ver|opensuse-leap|16.0|tested|-
-ver|opensuse-leap|15.6|tested|-
+ver|opensuse-leap|16.0|tested|-|-|-
+ver|opensuse-leap|15.6|tested|-|-|-
 distro|opensuse-tumbleweed|suse|openSUSE Tumbleweed|-|major|rolling
-ver|opensuse-tumbleweed|*|tested|-
+ver|opensuse-tumbleweed|*|tested|-|-|-
 distro|opensuse-slowroll|suse|openSUSE Slowroll|-|major|rolling
-ver|opensuse-slowroll|*|expected|-
+ver|opensuse-slowroll|*|tested|-|-|-
 distro|sles|suse|SUSE Linux Enterprise Server|15.6|minor|-
-ver|sles|16.0|expected|-
-ver|sles|15.7|expected|-
-ver|sles|15.6|expected|-
+ver|sles|16.0|tested|-|-|-
+ver|sles|15.7|tested|-|-|-
+ver|sles|15.6|tested|-|-|-
 distro|sle-micro|suse|SUSE Linux Micro / MicroOS / Aeon|-|major|-
-ver|sle-micro|*|unsupported|immutable
+ver|sle-micro|*|unsupported|immutable|-|-
 distro|opensuse-microos|suse|openSUSE MicroOS / Aeon / Kalpa|-|major|-
 alias|opensuse-aeon|opensuse-microos
 alias|opensuse-kalpa|opensuse-microos
-ver|opensuse-microos|*|unsupported|immutable
+ver|opensuse-microos|*|unsupported|immutable|-|-
 distro|arch|arch|Arch Linux|-|major|rolling
-ver|arch|*|tested|-
+ver|arch|*|tested|-|-|-
 distro|manjaro|arch|Manjaro|-|major|rolling
-ver|manjaro|*|expected|-
+ver|manjaro|*|tested|-|-|-
 distro|endeavouros|arch|EndeavourOS|-|major|rolling
-ver|endeavouros|*|expected|-
+ver|endeavouros|*|tested|-|-|-
 distro|garuda|arch|Garuda Linux|-|major|rolling
-ver|garuda|*|expected|-
+ver|garuda|*|tested|-|-|-
 distro|cachyos|arch|CachyOS|-|major|rolling
-ver|cachyos|*|expected|-
+ver|cachyos|*|tested|-|-|-
 distro|artix|arch|Artix Linux|-|major|-
-ver|artix|*|unsupported|init
+ver|artix|*|unsupported|init|-|-
 distro|alpine|-|Alpine Linux|-|major|-
-ver|alpine|*|unsupported|musl
+ver|alpine|*|unsupported|musl|-|-
 distro|void|-|Void Linux|-|major|-
-ver|void|*|unsupported|init
+ver|void|*|unsupported|init|-|-
 distro|nixos|-|NixOS|-|major|-
-ver|nixos|*|unsupported|layout
+ver|nixos|*|unsupported|layout|-|-
 TW_PLATFORMS
 }
 # END PLATFORMS
@@ -4184,7 +4330,7 @@ vcmp() {
 }
 vlt() { [ "$(vcmp "$1" "$2")" = -1 ]; }
 
-CP_NAME=""; CP_LABEL=""; CP_STATUS="expected"; CP_FAMILY=""; CP_REASONS=(); CP_NOTES=()
+CP_NAME=""; CP_LABEL=""; CP_STATUS="expected"; CP_FAMILY=""; CP_REASONS=(); CP_NOTES=(); CP_TESTED_ON=""
 CP_HARD=0; COMPAT_OK=0; CP_GLIBC="?"; CP_SYSTEMD="?"; CP_KERNEL="?"; CP_ARCHRAW=""; COMPAT_LINE=""; SKIP_OS_CHECK="${SKIP_OS_CHECK:-0}"
 cp_reason() { CP_REASONS+=("$(t "$@")"); }
 cp_note()   { CP_NOTES+=("$(t "$@")"); }
@@ -4205,18 +4351,20 @@ compat_eval() {
       [ "$fam" != "-" ] || fam=""
       CP_FAMILY="$fam"; CP_NAME="$name"; ver="$OS_VER"; CP_LABEL="$name${ver:+ $ver}"
       case ",$flags," in *,derived,*) CP_LABEL="${OS_NAME:-$name}";; *,rolling,*) CP_LABEL="$name";; esac
-      st=""; code="-"; wild=0; entry=0; max=""; k=""
+      st=""; code="-"; wild=0; entry=0; max=""; k=""; tx="-"; tl="-"
       case "$key" in minor) k="$(printf '%s' "$ver" | cut -d. -f1-2)";; *) k="${ver%%.*}";; esac
       while IFS= read -r l; do                                  # the version lines of this distribution
         case "$l" in "ver|$id|"*) ;; *) continue;; esac
-        IFS='|' read -r _ _ v1 s1 c1 <<<"$l"
+        IFS='|' read -r _ _ v1 s1 c1 x1 l1 <<<"$l"
         if [ "$v1" = "*" ]; then st="$s1"; code="$c1"; wild=1
-        elif [ -n "$ver" ] && [ "$v1" = "$k" ]; then st="$s1"; code="$c1"; entry=1; fi
+        elif [ -n "$ver" ] && [ "$v1" = "$k" ]; then st="$s1"; code="$c1"; entry=1; tx="${x1:--}"; tl="${l1:--}"; fi
         if [ "$s1" != unsupported ] && [ "$v1" != "*" ] && { [ -z "$max" ] || vlt "$max" "$v1"; }; then max="$v1"; fi
       done <<<"$PLATFORMS"
       if [ "$wild" = 1 ]; then :                                 # derived / rolling / one status for every version
       elif [ -z "$ver" ]; then st=expected; cp_note cp_w_nover "$name"
-      elif [ "$entry" = 1 ]; then :
+      elif [ "$entry" = 1 ]; then
+        # one version of this major branch ran (a derivative: tested_exact): another version of the branch is told so, honestly, and goes on
+        if [ "$st" = tested ] && [ "$tx" != "-" ] && [ "$ver" != "$tx" ]; then st=branch; CP_TESTED_ON="$tl"; fi
       elif [ "$min" != "-" ] && vlt "$k" "$min"; then st=unsupported; code=old
       else
         st=expected
@@ -4261,7 +4409,7 @@ compat_eval() {
     if [ -z "$ub" ] && have dpkg; then case "$(dpkg --print-architecture 2>/dev/null || true)" in armhf|armel) ub=32;; esac; fi
     if [ "$ub" = 32 ]; then cp_reason cp_r_arm_userland32; CP_HARD=1; fi
     pim=""; if [ -r "${TEST_DT_MODEL:-/proc/device-tree/model}" ]; then pim="$(tr -d '\0' <"${TEST_DT_MODEL:-/proc/device-tree/model}" 2>/dev/null || true)"; fi
-    [ "$CP_STATUS" != tested ] || CP_STATUS=expected        # arm64 is only emulation-tested: never "tested"
+    case "$CP_STATUS" in tested|branch) CP_STATUS=expected;; esac        # arm64 is only emulation-tested: never "tested"
     case "$pim" in "Raspberry Pi"*) cp_note cp_w_pi;; esac
   fi
   # ---- glibc
@@ -4300,6 +4448,11 @@ compat_eval() {
   return 0
 }
 
+# the word after "Compatible: <system>": tested, expected, or for another version of a branch that ran (derivatives) what exactly ran
+cp_status_text() {
+  if [ "$CP_STATUS" = branch ]; then t cp_branch "$CP_TESTED_ON" "${OS_VER:-?}"; else t "cp_$CP_STATUS"; fi
+}
+
 # compact table of the compatible systems (generated from the platform data)
 compat_table() {
   local IFS=' ' l id fam name min key flags tested exp any v s lab seen
@@ -4336,7 +4489,7 @@ compat_print() {
     printf '  %s\n' "$(t cp_refused)"
     for r in "${CP_REASONS[@]}"; do printf '    - %s\n' "$r"; done
   else
-    printf '  %s\n' "$(t cp_ok "$CP_LABEL" "$(t "cp_$CP_STATUS")")"
+    printf '  %s\n' "$(t cp_ok "$CP_LABEL" "$(cp_status_text)")"
     for w in ${CP_NOTES[@]+"${CP_NOTES[@]}"}; do printf '  [warn] %s\n' "$w"; done
   fi
   echo
@@ -4360,7 +4513,7 @@ compat_gate() {
       exit 3
     fi
   else
-    COMPAT_LINE="$(t cp_ok "$CP_LABEL" "$(t "cp_$CP_STATUS")")"
+    COMPAT_LINE="$(t cp_ok "$CP_LABEL" "$(cp_status_text)")"
     COMPAT_OK=1
   fi
   case "$ARCH" in amd64|arm64) ;; *) die "unsupported architecture: $CP_ARCHRAW";; esac
@@ -4752,7 +4905,7 @@ sysupdate_run() {   # before the prerequisites are installed: a failed or skippe
   if [ "$SKIP_SYSUPDATE" = 1 ]; then say "  $BUL $(t su_skipped)"; return 0; fi
   if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) $(t su_dry)"; return 0; fi
   local stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}"
-  if [ "${TOUTWAF_FORCE_SYSTEM_UPDATE:-}" != 1 ] && [ -n "$(find "$stamp" -mmin -360 2>/dev/null || true)" ]; then say "  $BUL $(t su_recent)"; return 0; fi
+  if [ "${TOUTWAF_FORCE_SYSTEM_UPDATE:-}" != 1 ] && [ -e "$stamp" ] && [ $(( $(date +%s) - $(stat -c %Y "$stamp" 2>/dev/null || echo 0) )) -lt 21600 ]; then say "  $BUL $(t su_recent)"; return 0; fi
   STEP_NOSPIN=1 step "$(t s_sysupdate)" sysupdate_do   # no spinner: the progress lines of the update are printed in its place
   return 0
 }
@@ -5400,7 +5553,7 @@ af_apply() {   # af_apply "ID ID ...": diagnoses and corrects; the number of cor
   done
   return 0
 }
-af_state_vars="ACTION COMPONENT VERSION CHANNEL TARBALL BASE_URL CP_URL ENROLL_TOKEN NODE_TOKEN CP_CA NODE_GROUP CP_PORT HTTP_PORT HTTPS_PORT PUBLIC_HOST PRIVATE_HOST OPEN_FW OPEN_CP_PORT CONSOLE_FROM HTTP3 FW_MODULE NO_ENABLE NO_START SKIP_SYSUPDATE DB_ENGINE DB_DSN DB_DSN_FILE DB_LOCAL DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD_FILE DB_TLS_MODE DB_CA DB_ADMIN_DSN_FILE BIN_DIR HOME_DIR LAYOUT LANG_CODE FORCE NO_EXTRAS NO_TELEMETRY CLOUD_URL"
+af_state_vars="ACTION COMPONENT VERSION CHANNEL TARBALL BASE_URL CP_URL ENROLL_TOKEN NODE_TOKEN CP_CA NODE_GROUP CP_PORT HTTP_PORT HTTPS_PORT PUBLIC_HOST PRIVATE_HOST OPEN_FW OPEN_CP_PORT CONSOLE_FROM HTTP3 DNS_SERVER DNS_FREE FW_MODULE NO_ENABLE NO_START SKIP_SYSUPDATE DB_ENGINE DB_DSN DB_DSN_FILE DB_LOCAL DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD_FILE DB_TLS_MODE DB_CA DB_ADMIN_DSN_FILE BIN_DIR HOME_DIR LAYOUT LANG_CODE FORCE NO_EXTRAS NO_TELEMETRY CLOUD_URL"
 af_save_state() {   # an interactive run: what was answered, for the new attempt (a private file; removed when read)
   local f v IFS=' '
   f="$(mktemp "$(af_p /run)/toutwaf-autofix.XXXXXX" 2>/dev/null || mktemp)"; chmod 0600 "$f"
@@ -5802,6 +5955,12 @@ restore_profile() {
 }
 
 # restore_run_client DIR ARGS...: the client with its secrets in the environment only.
+# DIR: the first manifest.json under DIR (the external tool for that is not part of minimal Rocky / Alma 8 images)
+restore_find_manifest() {
+  local e; [ -f "$1/manifest.json" ] && { printf '%s\n' "$1/manifest.json"; return 0; }
+  for e in "$1"/*; do [ -d "$e" ] && [ ! -L "$e" ] && restore_find_manifest "$e" && return 0; done
+  return 1
+}
 restore_run_client() {
   local d="$1"; shift
   TWB_TOKEN="$RESTORE_TOKEN" TWB_PASSPHRASE="$RESTORE_PASS" TWB_CONFIG="$d/client.json" TWB_CACHE_DIR="$d/cache" "$RESTORE_CLIENT" "$@"
@@ -5836,7 +5995,7 @@ restore_steps() {
   restore_run_client "$w" engine restore "$snap" --config "$w/client.json" --profile toutwaf --target "$w/files" --verify >"$w/out" 2>&1 \
     || { RESTORE_ERR="the restore point could not be read: $(restore_redact "$(tail -n 2 "$w/out" | tr '\n' ' ')")"; return 1; }
   # the folder the client wrote holds the files under the path they had on the machine that made the backup: find manifest.json
-  out="$(find "$w/files" -name manifest.json -type f 2>/dev/null | head -n 1)"
+  out="$(restore_find_manifest "$w/files" || true)"
   [ -n "$out" ] || { RESTORE_ERR="the restore point does not hold a ToutWAF backup (no manifest.json)"; return 1; }
   cpx="$(cp_exe)"
   restore_systemctl stop toutwaf-cp >>"$LOG" 2>&1 || true
@@ -5888,7 +6047,7 @@ Actions:
                              install (default), update to the newest release, remove, health check, show panel links
 Options:
   --component dp|cp|all      what to install (default: all)
-  --version X.Y.Z|latest     release to install (default: latest of the channel)
+  --version X.Y.Z[.W]|latest release to install (default: latest of the channel)
   --channel stable|dev       release channel: stable = branch main, dev = branch dev (remembered in <home>/conf/installer.conf)
   --tarball FILE             install from a local release tarball (offline)
   --extras FILE              also install the extras of the release (host agent for Windows, antivirus programs) from a local file
@@ -5934,6 +6093,12 @@ Options:
   --http3                    serve HTTP/3 (QUIC) too: sets listen.h3 in toutwaf-dp.yaml and opens UDP on the HTTPS port in firewalld / ufw (off by
                              default, UDP stays closed unless this is on; also TOUTWAF_HTTP3=1). On an installed node it changes the setting.
   --no-http3                 turn HTTP/3 off again: listen.h3 removed and the UDP rule this installer added closed (also TOUTWAF_HTTP3=0)
+  --dns-server               prepare the authoritative DNS server of the console (port 53; off by default, an existing installation is never changed
+                             without it; also TOUTWAF_DNS_SERVER=1): the control-plane unit may bind port 53 without root (CAP_NET_BIND_SERVICE),
+                             the local stub resolver of systemd-resolved is switched off when it is the only program on port 53 (reversible), port 53
+                             (UDP and TCP) is opened in firewalld / ufw (not with --no-firewall). No other program is ever stopped. The DNS role
+                             itself is given in the console (DNS > Servers).
+  --no-dns-server            undo what this installer did for it (capability, stub resolver, firewall rules) (also TOUTWAF_DNS_SERVER=0)
   --no-telemetry             install with ZERO telemetry: nothing is sent to the publisher space (also TOUTWAF_TELEMETRY=0). Without it,
                              the attacks ToutWAF blocks and aggregate figures are shared with app.toutwaf.com, never the content of
                              requests nor legitimate visitors; it can be switched off at any time in the console (Settings, Privacy and telemetry)
@@ -6197,6 +6362,8 @@ while [ $# -gt 0 ]; do
     --no-firewall) OPEN_FW=0; shift;;
     --http3) HTTP3=1; shift;;
     --no-http3) HTTP3=0; shift;;
+    --dns-server) DNS_SERVER=1; shift;;
+    --no-dns-server) DNS_SERVER=0; shift;;
     --no-telemetry) NO_TELEMETRY=1; shift;;
     --with-firewall|--with-firewall-module) FW_MODULE=1; shift;;
     --no-firewall-module) FW_MODULE=0; shift;;
@@ -6512,17 +6679,83 @@ record_installed() {
     && chmod 0644 "$INSTALLER_CONF.new" && mv -f "$INSTALLER_CONF.new" "$INSTALLER_CONF"
   return 0
 }
-# semver_lt A B: true when A < B (pre-release < release; "-dev.N" compared numerically)
-semver_lt() {
-  local a="${1#v}" b="${2#v}"; a="${a%%+*}"; b="${b%%+*}"
-  local ac="${a%%-*}" bc="${b%%-*}" ap="" bp=""
-  case "$a" in *-*) ap="${a#*-}";; esac; case "$b" in *-*) bp="${b#*-}";; esac
-  if [ "$ac" != "$bc" ]; then [ "$(printf '%s\n%s\n' "$ac" "$bc" | sort -V | head -n1)" = "$ac" ]; return; fi
-  [ "$ap" = "$bp" ] && return 1
-  [ -z "$bp" ] && return 0
-  [ -z "$ap" ] && return 1
-  [ "$(printf '%s\n%s\n' "$ap" "$bp" | sort -V | head -n1)" = "$ap" ]
+# --- version rule (begin) ---------------------------------------------------------------------------------------------------------------
+# THE rule of ToutWAF versions in this script (the same in the control plane, the console, the publisher, install.ps1 and the release tools:
+# spec/version-vectors.json is the table they all pass, docs/release/VERSIONS.md explains it).
+#   [v] N.N.N [.N] [-pre-release]   N = 0 or 1-9 digits without leading zero; pre-release = dot-separated identifiers [0-9A-Za-z-] (numeric ones without
+#   leading zero, 41 characters at most); 0.6.1 and 0.6.1.0 are the SAME version (an absent fourth component is 0); a pre-release is below its release;
+#   0.6.1 < 0.6.1.1 < 0.6.2; numeric component by component, never lexical (no `sort -V`: it orders 0.6.1 below 0.6.1.0 and differs between systems).
+# _ver_split V LOOSE: sets _VC (four integers) and _VP (pre-release identifiers); returns 1 when V is not a version. LOOSE=1 also takes what the channel
+# may carry for the older fields ("2" for min_installer, "1.2", build metadata "+x", free-form pre-release text); LOOSE=0 is the strict format above.
+_ver_split() {
+  local LC_ALL=C v="${1-}" core pre="" id i
+  _VC=(0 0 0 0); _VP=()
+  v="${v#v}"
+  if [ "${2:-0}" = 1 ]; then v="${v%%+*}"; fi
+  case "$v" in *-*) core="${v%%-*}"; pre="${v#*-}"; [ -n "$pre" ] || return 1;; *) core="$v";; esac
+  if [ "${2:-0}" = 1 ]; then
+    [[ "$core" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]] || return 1
+    local -a c; IFS=. read -ra c <<<"$core"
+    for i in "${!c[@]}"; do _VC[i]=$((10#${c[i]})); done
+    if [ -n "$pre" ]; then IFS=. read -ra _VP <<<"$pre"; fi
+    return 0
+  fi
+  [[ "$core" =~ ^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})(\.(0|[1-9][0-9]{0,8}))?$ ]] || return 1
+  _VC=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[5]:-0}")
+  if [ -n "$pre" ]; then
+    [ "${#pre}" -le 41 ] || return 1
+    [[ "$pre" =~ ^[0-9A-Za-z][0-9A-Za-z-]*(\.[0-9A-Za-z][0-9A-Za-z-]*)*$ ]] || return 1
+    IFS=. read -ra _VP <<<"$pre"
+    for id in "${_VP[@]}"; do [[ "$id" =~ ^0[0-9]+$ ]] && return 1; done
+  fi
+  return 0
 }
+# ver_valid V: true when V is a ToutWAF version (strict format above; a leading "v" is dropped).
+ver_valid() { _ver_split "${1-}" 0; }
+# ver_canon V: prints the canonical spelling (no "v", no fourth component of 0: 0.6.1.0 -> 0.6.1); false when V is not a version.
+ver_canon() {
+  local out
+  _ver_split "${1-}" 0 || return 1
+  out="${_VC[0]}.${_VC[1]}.${_VC[2]}"; if [ "${_VC[3]}" != 0 ]; then out="$out.${_VC[3]}"; fi
+  if [ "${#_VP[@]}" -gt 0 ]; then local IFS=.; out="$out-${_VP[*]}"; fi
+  printf '%s' "$out"
+}
+# _ver_cmp A B LOOSE: prints -1, 0 or 1; returns 2 (prints nothing) when A or B is not a version.
+_ver_cmp() {
+  local LC_ALL=C i x y nx ny
+  local -a ac ap bc bp
+  _ver_split "${1-}" "${3:-0}" || return 2; ac=("${_VC[@]}"); ap=(${_VP[@]+"${_VP[@]}"})   # (the ${x[@]+...} form: an empty array is not "unbound" for bash < 4.4)
+  _ver_split "${2-}" "${3:-0}" || return 2; bc=("${_VC[@]}"); bp=(${_VP[@]+"${_VP[@]}"})
+  for i in 0 1 2 3; do
+    if [ "$((10#${ac[i]}))" -lt "$((10#${bc[i]}))" ]; then echo -1; return 0; fi
+    if [ "$((10#${ac[i]}))" -gt "$((10#${bc[i]}))" ]; then echo 1; return 0; fi
+  done
+  if [ "${#ap[@]}" = 0 ] && [ "${#bp[@]}" = 0 ]; then echo 0; return 0; fi
+  if [ "${#ap[@]}" = 0 ]; then echo 1; return 0; fi
+  if [ "${#bp[@]}" = 0 ]; then echo -1; return 0; fi
+  for ((i = 0; i < ${#ap[@]} && i < ${#bp[@]}; i++)); do
+    x="${ap[i]}"; y="${bp[i]}"
+    nx=0; ny=0; [[ "$x" =~ ^[0-9]+$ ]] && nx=1; [[ "$y" =~ ^[0-9]+$ ]] && ny=1
+    if [ "$nx$ny" = 11 ]; then   # two numbers: by value (leading zeros dropped, then length, then digits: no overflow)
+      x="${x#"${x%%[!0]*}"}"; y="${y#"${y%%[!0]*}"}"; x="${x:-0}"; y="${y:-0}"
+      if [ "${#x}" -lt "${#y}" ]; then echo -1; return 0; fi
+      if [ "${#x}" -gt "${#y}" ]; then echo 1; return 0; fi
+    elif [ "$nx" = 1 ]; then echo -1; return 0
+    elif [ "$ny" = 1 ]; then echo 1; return 0
+    fi
+    if [[ "$x" < "$y" ]]; then echo -1; return 0; fi
+    if [[ "$x" > "$y" ]]; then echo 1; return 0; fi
+  done
+  if [ "${#ap[@]}" -lt "${#bp[@]}" ]; then echo -1; return 0; fi
+  if [ "${#ap[@]}" -gt "${#bp[@]}" ]; then echo 1; return 0; fi
+  echo 0
+}
+# ver_cmp A B: prints -1, 0 or 1 for two versions of the strict format; returns 2 (and prints nothing) when either is not a version.
+ver_cmp() { _ver_cmp "${1-}" "${2-}" 0; }
+# semver_lt A B: true when A < B (pre-release < release; "-dev.N" compared numerically; 0.6.1 == 0.6.1.0). The loose reading of the fields channel.json carries
+# for older purposes ("2", "1.2", a "+build" suffix); anything that is not a version is never less than anything.
+semver_lt() { local r; r="$(_ver_cmp "${1-}" "${2-}" 1)" || return 1; [ "$r" = -1 ]; }
+# --- version rule (end) ------------------------------------------------------------------------------------------------------------------
 # update_state CUR_VERSION CUR_BUILD NEW_VERSION NEW_BUILD  ->  newer | rebuilt | older | same
 # THE rule (the same in the data plane, the control plane and the console): an update exists when the published version is newer, OR the versions
 # are equal and the published build differs from the installed one. An installed build that is unknown counts as different; a published build the
@@ -6801,7 +7034,7 @@ install_backup_client() {
     || fetch "$base/channel.json" "$TMP/bkc/channel.json" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download $base/channels/stable.json or $base/channel.json")"; return 0; }
   ver="$BACKUP_CLIENT_VERSION"
   [ -n "$ver" ] || ver="$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]*)".*/\1/p' "$TMP/bkc/channel.json" | head -n1)"
-  if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "no valid version in the channel")"; return 0; fi
+  if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$'; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "no valid version in the channel")"; return 0; fi
   yanked="$(sed -nE 's/^[[:space:]]*"yanked":[[:space:]]*\[(.*)\].*/\1/p' "$TMP/bkc/channel.json" | head -n1)"
   if printf '%s' "$yanked" | grep -q "\"$ver\"" && [ "$FORCE" = 0 ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "version $ver was withdrawn")"; return 0; fi
   rel="$base/releases/$ver"; asset="toutwaf-backup-linux-$ARCH.tar.gz"
@@ -6840,6 +7073,7 @@ build_ports() {   # lines: port|proto|purpose   (deduplicated by port/proto)
   fi
   if want_dp; then SUMMARY_PORTS+="$HTTP_PORT|tcp|$(t p_http)"$'\n'"$HTTPS_PORT|tcp|$(t p_https)"$'\n'; fi
   if want_dp && [ "$(http3_on)" = 1 ]; then SUMMARY_PORTS+="$HTTPS_PORT|udp|HTTP/3 (QUIC)"$'\n'; fi
+  if want_cp && [ "$(dns_server_on)" = 1 ]; then SUMMARY_PORTS+="53|udp|$(t p_dns)"$'\n'"53|tcp|$(t p_dns)"$'\n'; fi
   SUMMARY_PORTS="$(printf '%s' "$SUMMARY_PORTS" | awk -F'|' 'NF>2 && !seen[$1 "/" $2]++')"$'\n'
   return 0
 }
@@ -7018,15 +7252,16 @@ cmd_uninstall() {
   # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
   if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
-  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-netif-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-time.path toutwaf-time.service toutwaf-relay.path toutwaf-relay.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
+  dns_server_revert quiet   # the stub resolver and the port 53 rules this installer changed for the DNS server of the console
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-netif-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-time.path toutwaf-time.service toutwaf-sysupdate.path toutwaf-sysupdate.service toutwaf-relay.path toutwaf-relay.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
     if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
     run rm -f "$(p /etc/systemd/system/$s)"
   done
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl stop toutwaf-upgrade-rollback.timer toutwaf-upgrade-rollback.service >>"$LOG" 2>&1 || true; fi   # transient units of an update in progress
   if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl daemon-reload; fi
-  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-relay toutwaf-cloudlink; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
+  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-sysupdate toutwaf-relay toutwaf-cloudlink toutwaf-install; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
   run rm -f "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"
-  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-relay; do
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-sysupdate toutwaf-relay; do
     for d in /usr/local/bin "$(secure_link_dir)"; do
       [ -n "$d" ] || continue
       l="$(p "$d/$b")"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
@@ -7241,6 +7476,11 @@ pubkey_id() { pubkey_raw "$1" | base64 -d | sha256sum | cut -c1-16; }
 
 # resolve the release to install: sets RESOLVED_VERSION (and CH_* from channel.json when reachable)
 resolve_release() {
+  # a pinned version is a version (X.Y.Z or X.Y.Z.W, optionally -pre-release) and is used in its canonical spelling: the release directory of 0.6.1.0 is releases/0.6.1
+  if [ "$VERSION" != latest ]; then
+    ver_valid "$VERSION" || die "--version must be latest or a version X.Y.Z or X.Y.Z.W (optionally followed by -pre-release such as -dev), not: $VERSION"
+    VERSION="$(ver_canon "$VERSION")"
+  fi
   local pinned=0; [ "$VERSION" != latest ] && pinned=1
   if ! fetch_channel; then
     if [ "$CH_EMPTY" = 1 ] && [ "$pinned" = 0 ]; then
@@ -7614,7 +7854,7 @@ link_cli() {
   if [ -n "$sd" ] && [ "$sd" != "$BIN_DIR" ] && [ "$sd" != /usr/local/bin ]; then dirs="$dirs $sd"; fi
   for d in $dirs; do
     run install -d -m 0755 "$(p "$d")"
-    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-relay; do
+    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-sysupdate toutwaf-relay; do
       [ -e "$(p "$BIN_DIR/$b")" ] || continue
       l="$(p "$d/$b")"
       if [ -L "$l" ] || [ ! -e "$l" ]; then run ln -sfn "$BIN_DIR/$b" "$l"; fi
@@ -7843,8 +8083,7 @@ RestartSec=2s
 TimeoutStopSec=30s
 LimitNOFILE=262144
 NoNewPrivileges=yes
-CapabilityBoundingSet=
-AmbientCapabilities=
+$(dns_caps_lines)
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -8005,7 +8244,18 @@ put_file() {
 }
 # <<< hostio <<<
 
-valid_version() { [[ "${1:-}" == latest ]] || [[ "${1:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]{0,40})?$ ]]; }
+# a version the request may name: "latest", X.Y.Z or X.Y.Z.W (components 0 or 1-9 digits without leading zero), optionally -pre-release (dot-separated
+# identifiers of [0-9A-Za-z-], a numeric one without leading zero). The same format as the other readers (spec/version-vectors.json); a leading "v" is not accepted.
+valid_version() {
+  local v="${1:-}" pre id
+  [[ "$v" == latest ]] && return 0
+  [[ "$v" =~ ^(0|[1-9][0-9]{0,8})(\.(0|[1-9][0-9]{0,8})){2,3}(-([0-9A-Za-z][0-9A-Za-z-]*(\.[0-9A-Za-z][0-9A-Za-z-]*)*))?$ ]] || return 1
+  pre="${BASH_REMATCH[5]:-}"
+  [ "${#pre}" -le 41 ] || return 1
+  local IFS=.
+  for id in $pre; do [[ "$id" =~ ^0[0-9]+$ ]] && return 1; done
+  return 0
+}
 valid_channel() { [[ "${1:-}" == stable || "${1:-}" == dev ]]; }
 valid_comp()    { [[ "${1:-}" == all || "${1:-}" == cp || "${1:-}" == dp ]]; }
 valid_job()     { [[ -z "${1:-}" || "${1:-}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
@@ -9167,6 +9417,26 @@ case "${1:-}" in
   *) echo "usage: toutwaf-time apply|status|set-timezone ZONE|set-ntp on|off|set-ntp-servers [HOST...]|set-time RFC3339" >&2; exit 2;;
 esac
 TW_TIME_TPL
+  emit_helper toutwaf-sysupdate <<'TW_SYSUPDATE_TPL'
+#!/usr/bin/env bash
+# toutwaf-sysupdate-proto: 1
+#
+# toutwaf-sysupdate apply   (root; toutwaf-sysupdate.service, started by toutwaf-sysupdate.path) perform the pending @DATA_DIR@/sysupdate-request:
+#                           scan, plan (simulation), apply or reboot, for the operating system packages of THIS machine. The request is left by the
+#                           control plane (console host) or by the data plane (a node, command update_system); both are unprivileged and the file is
+#                           untrusted input: `toutwafctl sysupdate-host apply` reads it again, refuses any key or value outside its fixed list, and
+#                           never runs a shell. Answers: @DATA_DIR@/sysupdate-result.json and, during an update, @DATA_DIR@/sysupdate-state.json.
+# (docs/design/mises-a-jour-systeme.md)
+set -u
+CTL="@BIN_DIR@/toutwafctl"
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-sysupdate must run as root" >&2; exit 1; }
+case "${1:-}" in
+  apply)
+    [ -x "$CTL" ] || { echo "toutwafctl is missing" >&2; exit 1; }
+    exec "$CTL" sysupdate-host apply --data-dir "@DATA_DIR@";;
+  *) echo "usage: toutwaf-sysupdate apply" >&2; exit 2;;
+esac
+TW_SYSUPDATE_TPL
   emit_helper toutwaf-relay <<'TW_RELAY_TPL'
 #!/usr/bin/env bash
 # toutwaf-relay-proto: 1
@@ -9451,7 +9721,7 @@ do_apply() {
   local back; back="$(mktemp -u -- "$CONF.relay-new.XXXXXX")"
   if cp -p -- "$bak" "$back" 2>/dev/null && put_conf "$back"; then
     if dp_restart; then write_status rolled_back "the data plane did not start with the new settings: the previous configuration was put back and runs"; return 1; fi
-    write_status failed "the data plane did not start with the new settings and does not start with the previous configuration either: see journalctl -u $DP_UNIT (copy: $bak)"; return 1
+    write_status failed "copy of the previous configuration: $bak (the data plane starts neither with the new settings nor with it: see journalctl -u $DP_UNIT)"; return 1
   fi
   rm -f -- "$back"
   write_status failed "the data plane did not start with the new settings and the previous configuration could not be put back: copy at $bak"
@@ -9741,6 +10011,33 @@ ProtectHome=yes
 NoNewPrivileges=yes
 EOF
   fi
+  if want_cp || want_dp; then
+    cat >"$sd/toutwaf-sysupdate.path" <<EOF
+[Unit]
+Description=ToutWAF operating system update requests (console System updates)
+
+[Path]
+PathExists=$DATA_DIR/sysupdate-request
+Unit=toutwaf-sysupdate.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-sysupdate.service" <<EOF
+[Unit]
+Description=ToutWAF operating system update helper (requested by the control plane or the data plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-sysupdate apply
+# an update of the packages of a server can be long; the package manager is never cut by a shorter limit than this one
+TimeoutStartSec=75min
+PrivateTmp=yes
+ProtectHome=yes
+EOF
+  fi
   return 0
 }
 
@@ -9808,7 +10105,8 @@ se_state_add() {
   return 0
 }
 # the type the policy gives PATH today (local rules included); "" when matchpathcon is not there
-se_default_type() { have matchpathcon || return 0; matchpathcon -n "$1" 2>/dev/null | awk -F: 'NR==1{print $3}'; }
+# (a failing matchpathcon, e.g. the SELinux tools are installed but the kernel / policy is not usable, must not abort the installer under pipefail)
+se_default_type() { have matchpathcon || return 0; matchpathcon -n "$1" 2>/dev/null | awk -F: 'NR==1{print $3}' || true; }
 selinux_bin_pattern() {
   case "$BIN_DIR" in /usr/*|/bin|/sbin) printf '%s' "$BIN_DIR/toutwaf.*";; *) printf '%s' "$BIN_DIR(/.*)?";; esac   # a shared system directory: only our own files
 }
@@ -9920,6 +10218,141 @@ selinux_remove() {
   say "  $(paint "$GRN" "$OKM") $(t sel_removed)"
   return 0
 }
+
+# BEGIN dns-server
+# The authoritative DNS server of the console (docs/design/dns-autoritatif.md). What the installer does for it, and ONLY that:
+#   * the control-plane unit gets CAP_NET_BIND_SERVICE (ambient) so that the console can bind port 53 as the unprivileged service user;
+#   * port 53 is looked at: free, held by the local stub resolver of systemd-resolved (127.0.0.53 / 127.0.0.54), or held by another program.
+#     The stub is switched off with a drop-in (DNSStubListener=no) and /etc/resolv.conf is pointed at the real upstream list, so that the machine
+#     keeps resolving; it is undoable. ANOTHER program is never stopped: it is named, and the owner decides;
+#   * port 53 (UDP and TCP) is opened in firewalld / ufw when OPEN_FW allows (nftables / iptables are never modified).
+# Everything it changes is recorded in $CONF_DIR/dns-server.undo (one shell command per line, run backwards by --no-dns-server and by the uninstall).
+dns_unit_has_caps() { grep -q '^AmbientCapabilities=CAP_NET_BIND_SERVICE' "$(p /etc/systemd/system/toutwaf-cp.service)" 2>/dev/null; }
+# dns_server_on: the option when given, else what the installed unit says (an update keeps it; a fresh installation without the option: off)
+dns_server_on() {
+  if [ -n "$DNS_SERVER" ]; then printf '%s' "$DNS_SERVER"; return 0; fi
+  if dns_unit_has_caps; then printf 1; else printf 0; fi
+}
+# the two capability lines of the cp unit (empty set unless the DNS server is on)
+dns_caps_lines() {
+  if [ "$(dns_server_on)" = 1 ]; then printf 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE'
+  else printf 'CapabilityBoundingSet=\nAmbientCapabilities='; fi
+}
+dns_undo_file() { p "$CONF_DIR/dns-server.undo"; }
+dns_undo_add() {   # dns_undo_add 'command' : remembered, run backwards by dns_server_revert
+  local f; f="$(dns_undo_file)"; mkdir -p "$(dirname "$f")" 2>/dev/null || true
+  printf '%s\n' "$1" >>"$f"; chmod 0600 "$f" 2>/dev/null || true
+}
+# dns_port_state: sets DNS_PORT_STATE (free | stub | busy | unknown) and DNS_PORT_USERS (names of the programs that hold port 53, for busy)
+dns_port_state() {
+  local out line addr proc name stub=0 other=0 users=""
+  DNS_PORT_STATE=free; DNS_PORT_USERS=""
+  if have ss; then out="$(ss -H -ltunp 'sport = :53' 2>/dev/null || true)"
+  else DNS_PORT_STATE=unknown; return 0; fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    addr="$(awk '{print $5}' <<<"$line")"; addr="${addr%:*}"; addr="${addr%%\%*}"; addr="${addr#[}"; addr="${addr%]}"
+    proc="$(sed -n 's/.*users:((\(.*\))).*/\1/p' <<<"$line")"
+    name="$(sed -n 's/^"\([^"]*\)".*/\1/p' <<<"$proc")"
+    case "$addr:$name" in
+      127.0.0.53:systemd-resolve*|127.0.0.54:systemd-resolve*) stub=1;;
+      *) other=1; case " $users " in *" ${name:-?} "*) ;; *) users="$users ${name:-?}";; esac;;
+    esac
+  done <<<"$out"
+  if [ "$other" = 1 ]; then DNS_PORT_STATE=busy; DNS_PORT_USERS="${users# }"
+  elif [ "$stub" = 1 ]; then DNS_PORT_STATE=stub; fi
+  return 0
+}
+# dns_release_stub: DNSStubListener=no in a drop-in of its own; /etc/resolv.conf pointed at the real list of upstream servers when it pointed at the stub
+dns_release_stub() {
+  have systemctl || return 1
+  local dropin rc ln prev
+  dropin="$(p /etc/systemd/resolved.conf.d/toutwaf-dns.conf)"
+  rc="$(p /etc/resolv.conf)"
+  mkdir -p "$(dirname "$dropin")"
+  # the undo list is run BACKWARDS: the restart is recorded first so that it runs last, after the drop-in is gone and resolv.conf is back
+  # (recorded last, it ran before them and the stub stayed off: found on a real systemd-resolved)
+  dns_undo_add "systemctl restart systemd-resolved"
+  printf '# written by the ToutWAF installer (--dns-server): frees port 53 for the DNS server of the console. Undo: --no-dns-server\n[Resolve]\nDNSStubListener=no\n' >"$dropin"
+  dns_undo_add "rm -f '$dropin'"
+  if [ -L "$rc" ]; then
+    prev="$(readlink "$rc")"
+    case "$prev" in
+      *stub-resolv.conf)
+        ln="$(dirname "$prev")/resolv.conf"
+        ln -sfn "$ln" "$rc" && dns_undo_add "ln -sfn '$prev' '$rc'";;
+    esac
+  fi
+  systemctl restart systemd-resolved >/dev/null 2>&1 || { warn "systemd-resolved did not restart after the change: check it (systemctl status systemd-resolved)"; return 1; }
+  return 0
+}
+dns_ufw_active() { have ufw && ufw status 2>/dev/null | head -n1 | grep -qi 'status: active'; }
+# dns_open_firewall: 53/udp and 53/tcp, only where firewalld / ufw is running and only what is not already open; recorded for the undo
+dns_open_firewall() {
+  [ "$OPEN_FW" = 0 ] && return 0
+  local be="" pr
+  if firewalld_running; then be=firewalld; elif dns_ufw_active; then be=ufw; fi
+  if [ -z "$be" ]; then info "$(t dns_fw_manual)"; return 0; fi
+  for pr in udp tcp; do
+    case "$be" in
+      firewalld)
+        if ! firewall-cmd --query-port="53/$pr" >/dev/null 2>&1; then
+          firewall-cmd --permanent --add-port="53/$pr" >/dev/null 2>&1 && dns_undo_add "firewall-cmd --permanent --remove-port=53/$pr"
+        fi;;
+      ufw)
+        if ! ufw status 2>/dev/null | grep -Eq "^53/${pr}[[:space:]]+ALLOW"; then
+          ufw allow "53/$pr" >/dev/null 2>&1 && dns_undo_add "ufw delete allow 53/$pr"
+        fi;;
+    esac
+  done
+  if [ "$be" = firewalld ]; then firewall-cmd --reload >/dev/null 2>&1 || true; dns_undo_add "firewall-cmd --reload"; fi
+  info "$(t dns_fw "$be")"
+  return 0
+}
+# dns_server_revert [quiet]: run the recorded undo commands, last first, then forget them
+dns_server_revert() {
+  local f line n=0; f="$(dns_undo_file)"
+  [ -f "$f" ] || return 0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if [ "$STAGING" = 1 ] || [ "$DRY_RUN" = 1 ]; then continue; fi
+    bash -c "$line" >>"${LOG:-/dev/null}" 2>&1 || true; n=$((n + 1))
+  done < <(tac "$f")
+  rm -f "$f"
+  [ "${1:-}" = quiet ] || info "$(t dns_reverted)"
+  return 0
+}
+# setup_dns_server: --dns-server (or the interactive answer) -> prepare the machine; --no-dns-server -> undo. The unit itself is written by write_units.
+setup_dns_server() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  if [ "$DNS_SERVER" = 0 ]; then dns_server_revert; return 0; fi
+  [ "$DNS_SERVER" = 1 ] || return 0
+  dns_port_state
+  case "$DNS_PORT_STATE" in
+    stub)
+      if [ "$DNS_FREE" = 1 ]; then
+        if dns_release_stub; then info "$(t dns_stub_released "$(dns_undo_file)")"; else warn "$(t dns_stub_kept)"; fi
+      else warn "$(t dns_stub_kept)"; fi;;
+    busy) warn "$(t dns_busy "$DNS_PORT_USERS")";;
+  esac
+  dns_open_firewall
+  info "$(t dns_ready)"
+  return 0
+}
+# ask_dns_server (interactive installation): the recommended answer is yes when nothing else listens on port 53 (free, or only the stub of systemd-resolved)
+ask_dns_server() {
+  local def=0 a f
+  dns_port_state
+  case "$DNS_PORT_STATE" in free|stub) def=1;; esac
+  say "  $D$(t dns_n1)$R"; say "  $D$(t dns_n2)$R"
+  ask_yn a "$(t q_dns)" "$def"
+  if [ "$a" != 1 ]; then DNS_SERVER=0; return 0; fi
+  DNS_SERVER=1
+  if [ "$DNS_PORT_STATE" = stub ]; then ask_yn f "$(t q_dns_free)" 1; DNS_FREE="$f"; fi
+  if [ "$DNS_PORT_STATE" = busy ]; then warn "$(t dns_busy "$DNS_PORT_USERS")"; fi
+  return 0
+}
+# END dns-server
 
 # firewall.conf (root-owned): the ports of this host that toutwaf-firewall may open. Written at every install / update (so that a
 # console "Open the required ports" works after a port change); only an install opens ports, an update never re-opens what an
@@ -10971,6 +11404,7 @@ start_services() {
   if want_cp; then systemctl enable --now toutwaf-fw.path >/dev/null 2>&1 || warn "could not enable toutwaf-fw.path"; fi
   if want_cp; then systemctl enable --now toutwaf-jobs.path >/dev/null 2>&1 || warn "could not enable toutwaf-jobs.path"; fi
   if want_cp; then systemctl enable --now toutwaf-time.path >/dev/null 2>&1 || warn "could not enable toutwaf-time.path"; fi
+  if want_cp || want_dp; then systemctl enable --now toutwaf-sysupdate.path >/dev/null 2>&1 || warn "could not enable toutwaf-sysupdate.path"; fi
   if want_cp; then
     systemctl enable toutwaf-cp >/dev/null 2>&1 || true
     if svc_active toutwaf-cp && [ "$CHANGED" = 0 ]; then :; else
@@ -11070,6 +11504,7 @@ do_install_flow() {
   step "$(t s_units)" phase_units
   if [ "$STAGING" = 0 ]; then step "$(t s_selinux)" setup_selinux; fi
   if [ "$STAGING" = 0 ]; then step "$(t s_fw)" setup_firewall; fi
+  if [ "$STAGING" = 0 ] && want_cp && [ -n "$DNS_SERVER" ]; then step "$(t s_dns)" setup_dns_server; fi
   if want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_boot)" prepare_panel; fi
   if want_dp && want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_link)" link_local_dp; fi
   if want_cp && [ "$FW_MODULE" = 1 ]; then step "$(t s_fwmod)" enable_firewall_module; fi
@@ -11082,7 +11517,7 @@ do_install_flow() {
       say "  $BUL services installed but not started (--no-start)"
     fi
     if [ "$NO_ENABLE" = 1 ]; then
-      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path toutwaf-time.path toutwaf-relay.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
+      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path toutwaf-time.path toutwaf-sysupdate.path toutwaf-relay.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
     fi
   fi
   record_installed_now
@@ -11116,6 +11551,7 @@ configure_interactively() {
     ask CONSOLE_FROM "$(t q_console_from)" "$CONSOLE_FROM"
     if [ -n "$CONSOLE_FROM" ] && { ! [[ "$CONSOLE_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$CONSOLE_FROM" == */0 ]]; }; then say "  $(paint "$RED" "$(t q_console_from_bad)")"; CONSOLE_FROM=""; fi
   fi
+  if want_cp && [ -z "$DNS_SERVER" ] && [ "$ACTION" = install ]; then ask_dns_server; fi
   if want_cp && [ -z "$FW_MODULE" ] && [ "$ACTION" = install ]; then
     echo >&3
     say "  $D$(t fwmod_n1)$R"; say "  $D$(t fwmod_n2)$R"; say "  $D$(t fwmod_n3)$R"
