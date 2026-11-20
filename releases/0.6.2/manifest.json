@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "version": "0.6.2",
+  "build": "ce0e7dd4a9af",
+  "channel": "stable",
+  "released_at": "2026-11-20T05:47:42Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 85916208,
+      "sha256": "f20612fee2800c5065a010656f1b001d318c5a1a568b364ca518e54e0012c910"
+    },
+    {
+      "name": "toutwaf-windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "size": 89368436,
+      "sha256": "0231e4d79424e726382467e042927b4fce4c0928106c67483fb64a4207fcfcd9"
+    },
+    {
+      "name": "toutwaf-windows-arm64.zip",
+      "os": "windows",
+      "arch": "arm64",
+      "size": 86064629,
+      "sha256": "324f7d88283fbff57b8cfdc4807c499070d7c92a333068a76b60f91027d02e00"
+    },
+    {
+      "name": "toutwaf-extras.tar.gz",
+      "os": "any",
+      "arch": "any",
+      "size": 21278637,
+      "sha256": "3e780c54c79d039bba80adcc1e51c30a580d4eede71b03566f67ff81f91fc101",
+      "kind": "extras",
+      "part": 1,
+      "parts": 1
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "freebsd-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "freebsd-arm64",
+      "reason": "disabled in settings"
+    }
+  ],
+  "notes": "## ToutWAF 0.6.2 : correctifs de sécurité\n\nVersion de sécurité : elle reprend tout le contenu de la 0.6.1 et corrige vingt-trois défauts trouvés par une revue du plan de contrôle, des installateurs et du plan de données. Chacun a un test qui échouait avant le correctif et passe après (exception : pour deux défauts du plan de données, la mémoire des WebSocket et les recherches ACME, le test ne vérifie que le comportement corrigé, pas l'échec d'avant). **Mettez à jour** ; les détails d'exploitation ne sont volontairement pas publiés.\n\n### Plan de données (le WAF) : 13 défauts et une garde\n\n- **Critique** : un corps de requête compressé (`Content-Encoding` gzip, deflate, et les autres codages gérés) n'était pas décompressé pour l'inspection, alors que le serveur d'origine, lui, le décompresse : une attaque dans un corps compressé passait. Les corps compressés sont maintenant décompressés puis inspectés, avec une borne contre les bombes de décompression.\n- **Haute** : quatre contournements de l'inspection (corps annoncé sous un type binaire mais lisible par l'origine ; injection entourée d'un faux bloc de code ; paramètre `boundary` ambigu d'un envoi multipart ; liste des adresses bannies et débannissement lisibles sans jeton sur le point d'administration).\n- **Moyenne** : formulaire d'administration pilotable depuis une page web (sans jeton) ; une simple en-tête `Upgrade` coupait la validation stricte du protocole HTTP/1 pour toute la connexion ; WebSocket : trames à bits réservés ou de contrôle mal formées transmises sans lecture, et mémoire non bornée globalement ; recherches de jetons ACME inconnus sans limite vers le plan de contrôle ; corps JSON en UTF-16 ou UTF-32 lu de travers ; clé JSON répétée qui cachait la première valeur ; `/healthz` sans jeton qui exposait les sites, les adresses des origines et les raisons de panne.\n- **Garde contre le détournement d'origine (SSRF)** : l'adresse réellement utilisée pour joindre l'origine d'un site est vérifiée au moment de la connexion. Les adresses des services de métadonnées des fournisseurs cloud, le multicast et la diffusion sont toujours refusés ; les adresses locales de lien (169.254.0.0/16, fe80::/10) le sont sauf réglage explicite du site ; le bouclage et les réseaux privés ne sont refusés que si la politique a `allow_private_origins: false` (réglage existant, absent = comme avant).\n\n### Plan de contrôle : 6 défauts\n\n- **Haute** : un locataire pouvait déclencher et télécharger une capture de trafic de tous les sites d'un nœud (capture sans site désigné) ; un administrateur de locataire pouvait modifier ou supprimer un rôle personnalisé de la plateforme ; une adresse d'origine écrite sous une forme que le résolveur système comprend (entier, hexadécimal, forme abrégée) ou un nom pointant vers l'adresse des métadonnées cloud passait la validation ; un Administrateur pouvait réinitialiser le mot de passe ou l'authentification forte d'un Propriétaire, changer son adresse, le désactiver (aussi par SCIM), puis se connecter à sa place.\n- **Moyenne** : corps de requête lent ou absent qui tenait une connexion indéfiniment (même sur la connexion publique) ; un locataire pouvait choisir lui-même son plan.\n\n### Installateurs (`install.sh`, `install.ps1`, assistant de mise à jour) : 4 défauts\n\n- **Haute** : rejeu d'une ancienne version signée (le `channel.json` non signé annonçait une version récente au-dessus de fichiers signés plus anciens : une mise à jour devenait un retour en arrière silencieux) ; contournement de la signature (« signature absente » acceptée pour les versions annoncées avant 0.2.0-dev.7, version lue dans un fichier non signé).\n- **Moyenne** : une redirection de https vers http pouvait faire passer en clair le `channel.json`, la signature et le script d'installation ; le publieur pouvait signer avec une clé différente de l'ancre de confiance des installateurs (la version publiée aurait été refusée partout).\n\n### Ce qui change pour vous\n\n- Les installateurs **refusent** : une version dont le contenu signé n'est pas celui annoncé (rétrogradation par rejeu), toute version sans signature (l'ancienne tolérance pour les très vieilles versions disparaît), et toute redirection de https vers http.\n- Le point d'administration du plan de données **refuse** (403) toute requête portant un en-tête `Origin` quand aucun jeton n'est configuré (sauf `/integration/`) ; un outil qui envoie `Origin` sans jeton ne marchera plus. `/bans` et `/unban` exigent le jeton. `/healthz` sans jeton ne renvoie plus que l'état global.\n- Les corps compressés sont inspectés ; un corps dont la taille décompressée dépasse la fenêtre d'inspection reçoit **413** sous la politique `reject` (par défaut pour les types texte), comme un corps clair trop gros. Un coût d'analyse supplémentaire est possible sur les corps JSON (second passage pour les clés répétées) : mesuré dans le bruit de mesure.\n- **Faux positifs possibles** : un texte envoyé tel quel sous un type `application/octet-stream` ou `image/*` et commençant par `{`, `[`, `\u003c` ou `nom=` est désormais lu ; un extrait de code SQL placé dans un bloc de code n'est plus excusé quand il sort d'une chaîne (`x' UNION ...`). Les corpus de faux positifs existants passent ; signalez tout blocage inattendu.\n- Un outil qui envoie un `Origin` sans jeton à l'administration, ou un site dont l'origine est une adresse de métadonnées, un bouclage ou un réseau privé sous `allow_private_origins: false`, sera refusé.\n\n### Nouveau : archives Windows dans le canal\n\nLe canal stable porte maintenant `toutwaf-windows-amd64.zip` (85,3 Mio) et `toutwaf-windows-arm64.zip` (82,1 Mio), au format déjà prévu par le contrat des releases : mêmes sommes `SHA256SUMS`, même signature, mêmes listes autorisées. `install.ps1` peut donc enfin télécharger son archive depuis le canal. Un test vérifie, avec PowerShell sur un canal signé de test, le téléchargement, le SHA-256, la signature et l'extraction, et que le refus d'une archive altérée, sans signature ou signée par une autre clé fonctionne. Honnêtement : le plan de données de cette version n'a pas été relancé sur un vrai Windows (plus de machine virtuelle disponible lors de cette publication) ; l'installateur et les binaires de la 0.5.9 à 0.6.0 l'ont été sur Windows 10, 11 et Server 2016 à 2025 (voir la 0.6.1), la version ARM64 n'a jamais été exécutée.\n\n### Non corrigé, à surveiller\n\n- **`install.sh` et `install.ps1` ne sont pas signés** : ils portent l'ancre de confiance et sont exécutés en administrateur à chaque mise à jour. Un hébergement compromis pourrait donc faire exécuter un script malveillant malgré la signature des archives. Piste étudiée (listés dans `SHA256SUMS` signé) : changement de format, non fait dans cette version.\n- `yanked`, `min_installer` et les notes sont dans `channel.json`, non signé ; un script lancé par `curl | sudo bash` tronqué peut s'exécuter à moitié ; l'assistant de mise à jour honore `ALLOW_DOWNGRADE=1` d'un fichier écrit par le compte de service ; sous Windows, la création de `%ProgramData%\\ToutWAF` ne vérifie pas le propriétaire du dossier (suspicion non testée).\n- Plan de données : un corps de plus de 1 Mio classé « fichier » (multipart, binaire) n'est inspecté que sur son premier Mio (choix de conception pour les envois de fichiers, décision du propriétaire) ; un faux bloc de code reste contournable par un attaquant qui connaît le mécanisme ; une expression régulière qui épuise son budget de retour arrière est comptée comme « pas de correspondance » (compteur non exposé) ; `proxy_protocol_from` vide accepte n'importe quelle source ; `cf-connecting-ip` est lu avant `X-Forwarded-For` derrière un proxy de confiance ; pas de durée maximale de réponse en HTTP/1 et HTTP/2 (lecture très lente) ; `/__toutwaf/csp-report` sans limite de débit ; la sonde de santé TCP ne passe pas par la garde anti-SSRF.\n- Plan de contrôle : les jetons d'API limités à des sites voient l'audit de leur organisation entière ; énumération d'adresses e-mail entre organisations (réponse 409) ; un administrateur peut révoquer les jetons d'un propriétaire ; serveurs HTTP de la console sans délai d'écriture.\n- Non essayé : l'installateur sur chaque distribution en conteneur (les attentes de `container-test.sh` et de la matrice ont été adaptées mais pas rejouées), Windows pour les correctifs des installateurs (le test PowerShell tourne sous Linux).\n- Binaires de cette version : Linux amd64, Windows amd64 et arm64 (et les extras) ; pas de FreeBSD ni d'ARM Linux dans le canal."
+}
