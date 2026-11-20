@@ -910,6 +910,16 @@ nl|up_to_date|Al bijgewerkt (%s)
 ru|up_to_date|Уже актуально (%s)
 zh|up_to_date|已是最新版本（%s）
 ar|up_to_date|محدّث بالفعل (%s)
+en|up_refreshed|Same programs: units and helpers refreshed
+fr|up_refreshed|Mêmes programmes : unités et assistants rafraîchis
+es|up_refreshed|Mismos programas: unidades y ayudantes actualizados
+de|up_refreshed|Gleiche Programme: Units und Hilfsprogramme aufgefrischt
+it|up_refreshed|Stessi programmi: unità e helper aggiornati
+pt|up_refreshed|Mesmos programas: unidades e auxiliares atualizados
+nl|up_refreshed|Dezelfde programma's: units en hulpprogramma's vernieuwd
+ru|up_refreshed|Те же программы: юниты и помощники обновлены
+zh|up_refreshed|程序相同：已刷新单元和辅助程序
+ar|up_refreshed|البرامج نفسها: تم تحديث الوحدات والمساعدات
 en|not_installed|ToutWAF is not installed: nothing to update.
 fr|not_installed|ToutWAF n'est pas installé : rien à mettre à jour.
 es|not_installed|ToutWAF no está instalado: nada que actualizar.
@@ -7288,10 +7298,43 @@ cmd_uninstall() {
 }
 
 # ------------------------------------------------------------------------------------------------ prerequisites
+# dnf and yum wait for ever for a package manager that holds their lock ("Waiting for process with pid N to finish"): no mirror, no time limit,
+# nothing on the screen of the console that asked for the installation. pkg_lock_holder names the holder (empty when there is none);
+# pkg_wait_lock waits for it, for TOUTWAF_PKG_LOCK_WAIT seconds at most (default 600), says whom it waits for, and fails with a message that
+# tells what to look at instead of leaving the installation (and the root helper that runs it) hanging.
+pkg_lock_holder() {
+  local f pid; local -a locks=(/var/cache/dnf/metadata_lock.pid /var/run/yum.pid /run/yum.pid)   # (an array: the IFS of this script is not blank)
+  [ -z "${TOUTWAF_TEST_PKG_LOCKS:-}" ] || IFS=' ' read -ra locks <<<"$TOUTWAF_TEST_PKG_LOCKS"   # (the variable is a test hook)
+  for f in "${locks[@]}"; do
+    [ -r "$f" ] || continue
+    pid="$(tr -dc '0-9' <"$f" 2>/dev/null | head -c 10)"
+    if [ -n "$pid" ] && [ "$pid" != "$$" ] && [ -d "/proc/$pid" ]; then printf '%s' "$pid"; return 0; fi
+  done
+  return 1
+}
+pkg_wait_lock() {
+  local max="${TOUTWAF_PKG_LOCK_WAIT:-600}" t0="$SECONDS" pid waited=0 said=-1000 who
+  [ "$DRY_RUN" = 0 ] || return 0
+  while pid="$(pkg_lock_holder)"; do
+    waited=$((SECONDS - t0))
+    who="$(ps -o pid=,etime=,args= -p "$pid" 2>/dev/null | head -n1 | sed 's/^ *//')"
+    if [ "$waited" -ge "$max" ]; then
+      warn "the package manager is busy: process $pid has held its lock for more than $waited s (${who:-gone}); wait for it to end, or stop it, then run this again"
+      return 1
+    fi
+    if [ $((waited - said)) -ge 30 ]; then
+      said="$waited"; info "waiting for the package manager lock held by process $pid (${who:-?}); $waited s so far, giving up after $max s"
+    fi
+    sleep "${TOUTWAF_PKG_LOCK_POLL:-3}"
+  done
+  return 0
+}
+
 # pkg_install PM pkg...: non-interactive install with the native package manager (never a partial system upgrade)
 pkg_install() {
   local pm="$1" out; shift
   mirror_setup || true   # ToutWAF's mirror first, the distribution's repositories as fallback (once per run)
+  case "$pm" in dnf|yum) pkg_wait_lock || return 1;; esac
   case "$pm" in
     dnf) run dnf "${MIRROR_DNF_OPTS[@]+"${MIRROR_DNF_OPTS[@]}"}" install -y "$@";;
     yum) run yum "${MIRROR_DNF_OPTS[@]+"${MIRROR_DNF_OPTS[@]}"}" install -y "$@";;
@@ -9994,7 +10037,7 @@ StartLimitBurst=30
 [Service]
 Type=oneshot
 ExecStart=$BIN_DIR/toutwaf-jobs apply
-TimeoutStartSec=6min
+TimeoutStartSec=50min
 PrivateTmp=yes
 ProtectHome=yes
 NoNewPrivileges=yes
@@ -11448,6 +11491,37 @@ start_services() {
   return 0
 }
 
+# An update that finds the same programs (UPDATE_NOOP) still writes the units and the root helpers again: they are written by THIS installer, not
+# carried by the archive, so an installation made by an older build of the same version kept stale ones (a stale or missing toutwaf-jobs unit made
+# the "Switch to PostgreSQL" job time out). The programs are not touched and a running service is not restarted for it; a path unit whose file
+# changed is restarted (systemd re-reads a service at its next start, but a running path unit keeps its old paths), and the path units that were
+# not enabled are enabled, as the full flow does.
+noop_refresh() {
+  [ "$ACTION" = update ] && [ "$DRY_RUN" = 0 ] || return 0
+  local sd before after u
+  sd="$(p /etc/systemd/system)"
+  before="$( (cd "$sd" 2>/dev/null && sha256sum toutwaf-*.path 2>/dev/null) || true)"
+  step "$(t s_user)" phase_account
+  load_existing_ports
+  step "$(t s_units)" phase_units
+  if [ "$STAGING" = 0 ]; then step "$(t s_selinux)" setup_selinux; fi
+  if [ "$HAS_SYSTEMD" = 1 ]; then
+    run systemctl daemon-reload
+    after="$( (cd "$sd" 2>/dev/null && sha256sum toutwaf-*.path 2>/dev/null) || true)"
+    while IFS= read -r u; do
+      [ -n "$u" ] || continue
+      if ! grep -qxF -- "$u" <<<"$before"; then
+        u="${u#*  }"
+        [ "$u" = toutwaf-upgrade.path ] && continue   # the update helper may be the one running this installer: its watch is re-read at the next boot or restart
+        run systemctl restart "$u" || warn "could not restart $u"
+      fi
+    done <<<"$after"
+    if [ "$NO_START" = 0 ]; then step "$(t s_start)" start_services; fi
+  fi
+  say "  $BUL $(t up_refreshed)"
+  return 0
+}
+
 # update_verdict VERSION BUILD: the rule applied to every installed component that this run touches; "same" only when each one is
 update_verdict() {
   local b v bb st res=same
@@ -11484,7 +11558,7 @@ do_install_flow() {
     # build cannot tell: the archive is downloaded and its files are compared, as before.)
     local ust; ust="$(update_verdict "$RESOLVED_VERSION" "$NEW_BUILD")"
     case "$ust" in
-      same) if [ -n "$NEW_BUILD" ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; extras_maintain "$RESOLVED_VERSION" "$NEW_BUILD"; return 0; fi;;
+      same) if [ -n "$NEW_BUILD" ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; noop_refresh; extras_maintain "$RESOLVED_VERSION" "$NEW_BUILD"; return 0; fi;;
       rebuilt) say "  $BUL $(t up_rebuilt "$(installed_identity_label)" "$(ver_label "$RESOLVED_VERSION" "$NEW_BUILD")")";;
     esac
   fi
@@ -11501,7 +11575,7 @@ do_install_flow() {
     done
     if [ -n "$cur" ] && [ "$RESOLVED_VERSION" != local ] && [ "$RESOLVED_VERSION" != source ] && semver_lt "$RESOLVED_VERSION" "$cur" && [ "$FORCE" = 0 ]; then die "$(t e_downgrade "$RESOLVED_VERSION" "$CHANNEL" "$cur")"; fi
     if [ "$same" = 1 ] && [ "$FORCE" = 0 ]; then
-      say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}")")"; UPDATE_NOOP=1
+      say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}")")"; UPDATE_NOOP=1; noop_refresh
       # the files are the archive's: whatever the binaries cannot say of themselves, the archive does
       record_installed "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}"
       if [ -n "$EXTRAS_DIR" ]; then install_extras; extras_report; else extras_maintain "${ARCHIVE_VERSION:-$RESOLVED_VERSION}" "${ARCHIVE_BUILD:-$NEW_BUILD}"; fi   # same programs: the extras alone may be missing
