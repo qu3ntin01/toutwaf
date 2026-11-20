@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "version": "0.6.3",
+  "build": "2486bf8ba738",
+  "channel": "stable",
+  "released_at": "2026-11-20T10:09:17Z",
+  "assets": [
+    {
+      "name": "toutwaf-linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "size": 85981803,
+      "sha256": "309b6823bf46ea83b2b0685ec23d8ebd7e231fa62c85c6c589546110cf08f17e"
+    },
+    {
+      "name": "toutwaf-windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "size": 89389062,
+      "sha256": "2501fcf10252545b226d97b595e3584601c07a2d8bc4e58efb63159e98b7a65e"
+    },
+    {
+      "name": "toutwaf-windows-arm64.zip",
+      "os": "windows",
+      "arch": "arm64",
+      "size": 85993677,
+      "sha256": "f4c0462c2555236dc50d8e530ae08e85315dc3da419db682ef73925dd03b4ab9"
+    },
+    {
+      "name": "toutwaf-extras.tar.gz",
+      "os": "any",
+      "arch": "any",
+      "size": 21412419,
+      "sha256": "78907669dbb3379d6a6c7348bf737bda231d9e0960cb15661ec1f60be9ae6eb9",
+      "kind": "extras",
+      "part": 1,
+      "parts": 1
+    }
+  ],
+  "skipped": [
+    {
+      "target": "linux-arm64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "freebsd-amd64",
+      "reason": "disabled in settings"
+    },
+    {
+      "target": "freebsd-arm64",
+      "reason": "disabled in settings"
+    }
+  ],
+  "notes": "## ToutWAF 0.6.3 : correctifs (« Passer à PostgreSQL », mises à jour, robots d'indexation)\n\nVersion de correction : elle reprend tout le contenu de la 0.6.2 et corrige, pour chacun avec un test, les défauts ci-dessous. Chaque ligne dit ce qui a été prouvé et comment.\n\n### « Passer à PostgreSQL » et tâches du serveur : l'assistant racine (`toutwaf-jobs`)\n\n- **Cause trouvée de « install_timeout : l'assistant racine n'a pas répondu à temps »** : l'assistant écrivait la réponse d'une tâche (`jobs/\u003ctâche\u003e.res.json`) en `root:root` 0640 dans un dossier appartenant au compte de service ; la console, qui n'a pas le droit de passer outre les modes de fichier, recevait « permission refusée », ignorait l'erreur et attendait ses 7 minutes fixes. Reproduit sur une AlmaLinux 10.3 démarrée avec systemd (la tâche `pg_install_local` y prenait 9 s et `runuser -u toutwaf -- cat jobs/x.res.json` répondait « Permission denied »). Toutes les tâches étaient concernées (aussi `logrotate` et `journal_vacuum` planifiées). La réponse et la progression appartiennent maintenant au propriétaire du dossier de données.\n- **Boucle de relance** : la demande n'était supprimée qu'à la fin de la tâche ; quand systemd arrêtait l'unité après 6 minutes, l'unité de chemin relançait aussitôt l'assistant, et la même installation repartait toutes les 6 minutes sans jamais écrire de réponse (observé au laboratoire avec un verrou de gestionnaire de paquets tenu). La demande est supprimée dès qu'elle est lue. La limite de la tâche arrêtait le script mais pas le gestionnaire de paquets qu'il avait lancé : la tâche tourne maintenant dans son propre groupe de processus, arrêté en entier à la limite (45 minutes pour `pg_install_local`, unité à 50 minutes) ; elle écrit un fichier de progression (un battement toutes les 5 s et les dernières lignes de l'installeur). Cinq tests, trois vérifiés en échec avant le correctif.\n- **Console** : l'installation est suivie par cette progression tant qu'elle avance (limite 60 minutes) au lieu de 7 minutes de silence ; elle dit, avec les commandes à lancer, si la réponse existe mais est illisible, si la demande n'a pas été prise en 45 s (elle est alors retirée pour ne pas partir plus tard par surprise), si l'assistant a cessé de répondre, ou s'il ne connaît pas la tâche (assistant plus ancien : mettre ToutWAF à jour). Textes dans les dix langues. `JobsCapability` ne répond plus « oui » dès que les fichiers existent : elle signale une unité de chemin arrêtée ou en échec (`unit_inactive`) et une unité qui surveille un autre dossier de données que celui de la console (`datadir_mismatch`) avant d'écrire la demande (vérifié au laboratoire, y compris sous le durcissement de `toutwaf-cp.service`).\n- **Gestionnaire de paquets verrouillé** : l'attente du verrou de `dnf` / `yum` ne démarrait jamais (`install.sh` tourne avec `IFS=$'\\n\\t'`, la liste des fichiers de verrou était lue comme un seul mot) : elle attend maintenant `TOUTWAF_PKG_LOCK_WAIT` secondes (600 par défaut), nomme le processus et dit quoi regarder. `pkg-lock-test.sh` sous le même `IFS` : 6 réussites et 4 échecs avant, 10 réussites après.\n- **Préparation de la base** : la copie vérifiée du fichier SQLite (`VACUUM INTO`) lit la base par une connexion à elle ; pendant des minutes elle empêche la réinitialisation du journal d'écriture (WAL) et le journal de la base la décrivait comme « une connexion hors des réservoirs » sans nom : elle est maintenant déclarée et nommée, et une préparation peut être arrêtée (l'annulation interrompt la copie). Un journal resté « en préparation » par un processus disparu ne bloque plus une nouvelle préparation. Test : pendant la copie, `/proc/locks` montre un verrou de lecture du processus alors que les réservoirs n'en montrent aucun (la signature du journal du serveur du propriétaire) ; une préparation dont l'étape PostgreSQL échoue ne laisse aucune lecture ouverte.\n\n### Mise à jour sans nouveau programme (`install.sh --update`)\n\n- Une mise à jour qui trouvait les mêmes programmes ne réécrivait ni unités ni assistants ; or ils viennent de l'installeur, pas de l'archive : une installation faite par un ancien build de la même version gardait des unités et assistants périmés (par exemple `toutwaf-jobs`). Elle les réécrit maintenant (unités et assistants), recharge systemd, redémarre seulement les unités de chemin dont le fichier a changé (jamais `toutwaf-upgrade.path`, que l'assistant de mise à jour peut être en train d'exécuter) et active celles qui ne l'étaient pas ; elle ne touche ni les programmes, ni la configuration, ni un service en marche. Le message « Mêmes programmes : unités et assistants rafraîchis » existe dans les dix langues. Test `update-rule-test.sh` : 124 réussites et 4 échecs avant (unité périmée gardée, assistant périmé gardé, message absent, cas d'un canal sans build), 128 et 0 après.\n\n### Plan de données : en-têtes de requête terminés par un LF seul\n\n- **Faux positif en production (0.6.1)** : des dizaines de « request framing violation, connection closed ... bare LF line terminator » pour le robot de Meta, Googlebot et des adresses AWS : une connexion fermée, c'est un robot d'indexation ou d'aperçu qui ne voit pas le site. Cause : le contrôle du cadrage refusait toute ligne d'une requête qui ne se terminait pas par CRLF, alors que la RFC 9112 (section 2.2) permet à un récepteur d'accepter un LF seul, comme le font nginx, HAProxy, Cloudflare et l'analyseur de hyper qui lit réellement la requête.\n- **Choix : normaliser, ne pas fermer.** Les lignes d'un en-tête de requête peuvent se terminer par un LF seul (`limits.reject_bare_lf: false`, la valeur par défaut) ; le contrôle voit exactement les lignes que voit hyper, donc CL.TE, TE.CL, TE obscurci, Content-Length doublé ou portant un CR, obs-fold et NUL restent refusés (un champ caché derrière un LF seul est un champ) ; un CR qui n'est pas celui d'un CRLF est refusé ; le découpage par morceaux garde son CRLF strict ; la requête transmise à l'origine est réécrite avec CRLF (test avec une origine TCP brute : aucun LF seul n'est relayé). `limits.reject_bare_lf: true` rétablit le refus strict. Tests `bare_lf.rs` (robots servis, rien relayé en LF seul, contrebande écrite avec des LF toujours refusée, option stricte) : avant le correctif, le test des robots échoue (réponse vide, connexion fermée).\n- **Le journal des violations porte un extrait** (`sample`) : les 120 premiers octets de l'en-tête de la requête refusée (jamais un corps), octets de contrôle montrés (`\\r`, `\\n`, `\\xHH`), valeurs d'`Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization` et `X-Api-Key` retirées.\n\n### Ce qui change pour vous\n\n- Les requêtes dont les lignes se terminent par un LF seul sont servies (elles étaient refusées par défaut) ; le réglage `limits.reject_bare_lf: true` remet le refus.\n- Une tâche de l'assistant racine qui dépasse sa limite est arrêtée avec ses processus enfants, et la console dit pourquoi au lieu de se taire 7 minutes.\n- Une mise à jour « déjà à jour » réécrit désormais les unités et assistants de l'installeur en cours.\n\n### Non établi, non corrigé, à surveiller\n\n- **La cause chez le propriétaire n'est pas établie** : aucune donnée de son serveur (unité, étiquettes, journal de l'assistant) n'était disponible. Ce qui est prouvé : l'illisibilité de la réponse (corrigée), la boucle de relance et les enfants non arrêtés (corrigées), l'attente du verrou de paquets (corrigée), et que le chemin normal répond en 0,5 à 2,5 s au laboratoire. Qu'une copie `VACUUM INTO` tourne encore sur son serveur n'est pas démontré (la durée d'une copie de 9,4 Go n'a pas été mesurée). Si l'installation de PostgreSQL échoue encore, le message nomme maintenant la cause et la commande à lancer.\n- Le laboratoire était une AlmaLinux 10.3 dans des espaces de noms, avec le noyau de l'hôte sans SELinux : le comportement sous SELinux n'a pas été essayé.\n- Restent ouverts, comme dans la 0.6.2 : `install.sh` et `install.ps1` ne sont pas signés ; `yanked` et `min_installer` sont dans un `channel.json` non signé ; un corps de plus de 1 Mio classé « fichier » n'est inspecté que sur son premier Mio ; `proxy_protocol_from` vide accepte toute source. Voir les notes de la 0.6.2.\n- Binaires de cette version : Linux amd64, Windows amd64 et arm64 (et les extras) ; le plan de données Windows n'a pas été relancé sur un vrai Windows."
+}
