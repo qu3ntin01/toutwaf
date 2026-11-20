@@ -231,8 +231,8 @@ $script:Catalog = @{
         'w_mirror' = 'The public mirror served files that do not agree with each other ({0}): it is probably still refreshing after a publication. Reading the channel again, once.'
         'e_mismatch' = 'checksum mismatch for {0} ({1}): the downloaded file does not match the checksum that was published, so nothing was installed or changed. Right after a publication the public mirror can serve the previous files for a few minutes: wait five minutes and run the installer again. If it happens again, do not install: the publication is damaged.'
         'e_downgrade' = 'The latest release {0} of channel {1} is older than the installed {2}: use -Force to downgrade.'
+        'e_archive_ver' = 'The archive is for version {0} but the release announced is {1}: the files do not belong to the announced release (a mirror replaying an older signed release?). Nothing was installed or changed.'
         's_sigok' = 'release signature verified, key {0}'
-        'w_sigold' = 'release {0} was published without a signature (releases before 0.2.0-dev.7 are unsigned): only SHA-256 was verified, the signature could not be checked'
         'w_sigskip' = 'release signature NOT verified: openssl.exe was not found in PATH (Windows has no built-in Ed25519 verification), only SHA-256 was checked. Install OpenSSL 3 and run again to verify against key {0}'
         'done' = 'Done.'
         'failed' = 'Failed'
@@ -618,8 +618,8 @@ $script:Catalog = @{
         'w_mirror' = 'Le miroir public a servi des fichiers qui ne concordent pas ({0}) : il est probablement encore en cours de mise \u00e0 jour apr\u00e8s une publication. Nouvelle lecture du canal, une seule fois.'
         'e_mismatch' = 'somme de contr\u00f4le incorrecte pour {0} ({1}) : le fichier t\u00e9l\u00e9charg\u00e9 ne correspond pas \u00e0 la somme publi\u00e9e, donc rien n''a \u00e9t\u00e9 install\u00e9 ni modifi\u00e9. Juste apr\u00e8s une publication, le miroir public peut servir les anciens fichiers pendant quelques minutes : attendez cinq minutes et relancez l''installeur. Si cela se reproduit, n''installez pas : la publication est endommag\u00e9e.'
         'e_downgrade' = 'La derni\u00e8re version {0} du canal {1} est plus ancienne que la version install\u00e9e {2} : utilisez -Force pour r\u00e9trograder.'
+        'e_archive_ver' = 'L''archive est de la version {0} alors que la version annonc\u00e9e est {1} : les fichiers n''appartiennent pas \u00e0 la version annonc\u00e9e (un miroir qui rejoue une ancienne version sign\u00e9e ?). Rien n''a \u00e9t\u00e9 install\u00e9 ni modifi\u00e9.'
         's_sigok' = 'signature de la version v\u00e9rifi\u00e9e, cl\u00e9 {0}'
-        'w_sigold' = 'la version {0} a \u00e9t\u00e9 publi\u00e9e sans signature (les versions ant\u00e9rieures \u00e0 0.2.0-dev.7 ne sont pas sign\u00e9es) : seul le SHA-256 a \u00e9t\u00e9 v\u00e9rifi\u00e9, la signature n''a pas pu l''\u00eatre'
         'w_sigskip' = 'signature de la version NON v\u00e9rifi\u00e9e : openssl.exe est introuvable dans le PATH (Windows n''a pas de v\u00e9rification Ed25519 int\u00e9gr\u00e9e), seul le SHA-256 a \u00e9t\u00e9 contr\u00f4l\u00e9. Installez OpenSSL 3 et relancez pour v\u00e9rifier avec la cl\u00e9 {0}'
         'done' = 'Termin\u00e9.'
         'failed' = '\u00c9chec'
@@ -1005,8 +1005,8 @@ $script:Catalog = @{
         'w_mirror' = 'El espejo p\u00fablico ha servido archivos que no concuerdan entre s\u00ed ({0}): probablemente a\u00fan se est\u00e1 actualizando tras una publicaci\u00f3n. Se lee el canal de nuevo, una sola vez.'
         'e_mismatch' = 'suma de comprobaci\u00f3n incorrecta para {0} ({1}): el archivo descargado no coincide con la suma publicada, por lo que no se ha instalado ni modificado nada. Justo despu\u00e9s de una publicaci\u00f3n, el espejo p\u00fablico puede servir los archivos anteriores durante unos minutos: espere cinco minutos y vuelva a ejecutar el instalador. Si se repite, no instale: la publicaci\u00f3n est\u00e1 da\u00f1ada.'
         'e_downgrade' = 'La \u00faltima versi\u00f3n {0} del canal {1} es anterior a la instalada {2}: use -Force para degradar.'
+        'e_archive_ver' = 'El archivo es de la versi\u00f3n {0} pero la versi\u00f3n anunciada es {1}: los archivos no pertenecen a la versi\u00f3n anunciada (\u00bfun espejo que reproduce una versi\u00f3n firmada antigua?). No se ha instalado ni modificado nada.'
         's_sigok' = 'firma de la versi\u00f3n verificada, clave {0}'
-        'w_sigold' = 'la versi\u00f3n {0} se public\u00f3 sin firma (las anteriores a 0.2.0-dev.7 no est\u00e1n firmadas): solo se verific\u00f3 el SHA-256, no se pudo comprobar la firma'
         'w_sigskip' = 'firma de la versi\u00f3n NO verificada: no se encontr\u00f3 openssl.exe en el PATH (Windows no incluye verificaci\u00f3n Ed25519), solo se comprob\u00f3 el SHA-256. Instale OpenSSL 3 y vuelva a ejecutar para verificar con la clave {0}'
         'done' = 'Hecho.'
         'failed' = 'Error'
@@ -1392,8 +1392,8 @@ $script:Catalog = @{
         'w_mirror' = 'Der \u00f6ffentliche Spiegel hat Dateien geliefert, die nicht zusammenpassen ({0}): vermutlich wird er nach einer Ver\u00f6ffentlichung noch aktualisiert. Der Kanal wird einmal neu gelesen.'
         'e_mismatch' = 'Pr\u00fcfsumme stimmt nicht f\u00fcr {0} ({1}): Die heruntergeladene Datei passt nicht zur ver\u00f6ffentlichten Pr\u00fcfsumme, daher wurde nichts installiert oder ge\u00e4ndert. Direkt nach einer Ver\u00f6ffentlichung kann der \u00f6ffentliche Spiegel einige Minuten lang die vorherigen Dateien liefern: Warten Sie f\u00fcnf Minuten und starten Sie das Installationsprogramm erneut. Tritt es erneut auf, installieren Sie nicht: Die Ver\u00f6ffentlichung ist besch\u00e4digt.'
         'e_downgrade' = 'Die neueste Version {0} des Kanals {1} ist \u00e4lter als die installierte {2}: -Force zum Downgrade.'
+        'e_archive_ver' = 'Das Archiv ist Version {0}, angek\u00fcndigt ist aber {1}: die Dateien geh\u00f6ren nicht zur angek\u00fcndigten Version (spielt ein Spiegel eine \u00e4ltere signierte Version ein?). Es wurde nichts installiert oder ge\u00e4ndert.'
         's_sigok' = 'Release-Signatur gepr\u00fcft, Schl\u00fcssel {0}'
-        'w_sigold' = 'Version {0} wurde ohne Signatur ver\u00f6ffentlicht (Versionen vor 0.2.0-dev.7 sind unsigniert): nur SHA-256 wurde gepr\u00fcft, die Signatur konnte nicht gepr\u00fcft werden'
         'w_sigskip' = 'Release-Signatur NICHT gepr\u00fcft: openssl.exe wurde im PATH nicht gefunden (Windows hat keine eingebaute Ed25519-Pr\u00fcfung), nur SHA-256 wurde gepr\u00fcft. OpenSSL 3 installieren und erneut ausf\u00fchren, um mit Schl\u00fcssel {0} zu pr\u00fcfen'
         'done' = 'Fertig.'
         'failed' = 'Fehlgeschlagen'
@@ -1779,8 +1779,8 @@ $script:Catalog = @{
         'w_mirror' = 'Il mirror pubblico ha servito file che non concordano tra loro ({0}): probabilmente si sta ancora aggiornando dopo una pubblicazione. Rileggo il canale, una sola volta.'
         'e_mismatch' = 'checksum non corrispondente per {0} ({1}): il file scaricato non corrisponde al checksum pubblicato, quindi non \u00e8 stato installato n\u00e9 modificato nulla. Subito dopo una pubblicazione il mirror pubblico pu\u00f2 servire per qualche minuto i file precedenti: attendi cinque minuti e rilancia l''installer. Se si ripete, non installare: la pubblicazione \u00e8 danneggiata.'
         'e_downgrade' = 'L''ultima versione {0} del canale {1} \u00e8 pi\u00f9 vecchia di quella installata {2}: usa -Force per il downgrade.'
+        'e_archive_ver' = 'L''archivio \u00e8 della versione {0} ma la versione annunciata \u00e8 {1}: i file non appartengono alla versione annunciata (un mirror che ripropone una vecchia versione firmata?). Non \u00e8 stato installato n\u00e9 modificato nulla.'
         's_sigok' = 'firma della release verificata, chiave {0}'
-        'w_sigold' = 'la versione {0} \u00e8 stata pubblicata senza firma (le versioni precedenti a 0.2.0-dev.7 non sono firmate): \u00e8 stato verificato solo lo SHA-256, la firma non ha potuto essere controllata'
         'w_sigskip' = 'firma della release NON verificata: openssl.exe non trovato nel PATH (Windows non ha una verifica Ed25519 integrata), \u00e8 stato controllato solo lo SHA-256. Installa OpenSSL 3 ed esegui di nuovo per verificare con la chiave {0}'
         'done' = 'Fatto.'
         'failed' = 'Fallito'
@@ -2166,8 +2166,8 @@ $script:Catalog = @{
         'w_mirror' = 'O espelho p\u00fablico serviu ficheiros que n\u00e3o concordam entre si ({0}): provavelmente ainda est\u00e1 a atualizar ap\u00f3s uma publica\u00e7\u00e3o. A ler o canal de novo, uma \u00fanica vez.'
         'e_mismatch' = 'soma de verifica\u00e7\u00e3o incorreta para {0} ({1}): o ficheiro transferido n\u00e3o corresponde \u00e0 soma publicada, por isso nada foi instalado nem alterado. Logo ap\u00f3s uma publica\u00e7\u00e3o, o espelho p\u00fablico pode servir os ficheiros anteriores durante alguns minutos: aguarde cinco minutos e execute o instalador de novo. Se se repetir, n\u00e3o instale: a publica\u00e7\u00e3o est\u00e1 danificada.'
         'e_downgrade' = 'A \u00faltima vers\u00e3o {0} do canal {1} \u00e9 mais antiga do que a instalada {2}: use -Force para reverter.'
+        'e_archive_ver' = 'O arquivo \u00e9 da vers\u00e3o {0} mas a vers\u00e3o anunciada \u00e9 {1}: os ficheiros n\u00e3o pertencem \u00e0 vers\u00e3o anunciada (um espelho a repetir uma vers\u00e3o assinada antiga?). Nada foi instalado nem alterado.'
         's_sigok' = 'assinatura da vers\u00e3o verificada, chave {0}'
-        'w_sigold' = 'a vers\u00e3o {0} foi publicada sem assinatura (as anteriores a 0.2.0-dev.7 n\u00e3o s\u00e3o assinadas): s\u00f3 o SHA-256 foi verificado, a assinatura n\u00e3o p\u00f4de ser conferida'
         'w_sigskip' = 'assinatura da vers\u00e3o N\u00c3O verificada: openssl.exe n\u00e3o foi encontrado no PATH (o Windows n\u00e3o tem verifica\u00e7\u00e3o Ed25519 integrada), s\u00f3 o SHA-256 foi conferido. Instale o OpenSSL 3 e execute de novo para verificar com a chave {0}'
         'done' = 'Conclu\u00eddo.'
         'failed' = 'Falhou'
@@ -2553,8 +2553,8 @@ $script:Catalog = @{
         'w_mirror' = 'De openbare mirror leverde bestanden die niet bij elkaar passen ({0}): hij wordt waarschijnlijk nog bijgewerkt na een publicatie. Het kanaal wordt \u00e9\u00e9n keer opnieuw gelezen.'
         'e_mismatch' = 'checksum klopt niet voor {0} ({1}): het gedownloade bestand komt niet overeen met de gepubliceerde checksum, dus er is niets ge\u00efnstalleerd of gewijzigd. Direct na een publicatie kan de openbare mirror enkele minuten de vorige bestanden aanbieden: wacht vijf minuten en start het installatieprogramma opnieuw. Gebeurt het opnieuw, installeer dan niet: de publicatie is beschadigd.'
         'e_downgrade' = 'De nieuwste versie {0} van kanaal {1} is ouder dan de ge\u00efnstalleerde {2}: gebruik -Force om terug te gaan.'
+        'e_archive_ver' = 'Het archief is van versie {0} maar de aangekondigde versie is {1}: de bestanden horen niet bij de aangekondigde versie (een mirror die een oudere ondertekende versie opnieuw aanbiedt?). Er is niets ge\u00efnstalleerd of gewijzigd.'
         's_sigok' = 'release-handtekening gecontroleerd, sleutel {0}'
-        'w_sigold' = 'versie {0} is zonder handtekening gepubliceerd (versies v\u00f3\u00f3r 0.2.0-dev.7 zijn niet ondertekend): alleen SHA-256 is gecontroleerd, de handtekening kon niet worden gecontroleerd'
         'w_sigskip' = 'release-handtekening NIET gecontroleerd: openssl.exe niet gevonden in PATH (Windows heeft geen ingebouwde Ed25519-controle), alleen SHA-256 is gecontroleerd. Installeer OpenSSL 3 en voer opnieuw uit om te controleren met sleutel {0}'
         'done' = 'Klaar.'
         'failed' = 'Mislukt'
@@ -2940,8 +2940,8 @@ $script:Catalog = @{
         'w_mirror' = '\u041f\u0443\u0431\u043b\u0438\u0447\u043d\u043e\u0435 \u0437\u0435\u0440\u043a\u0430\u043b\u043e \u043e\u0442\u0434\u0430\u043b\u043e \u0444\u0430\u0439\u043b\u044b, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u043d\u0435 \u0441\u043e\u0433\u043b\u0430\u0441\u0443\u044e\u0442\u0441\u044f \u043c\u0435\u0436\u0434\u0443 \u0441\u043e\u0431\u043e\u0439 ({0}): \u0432\u0435\u0440\u043e\u044f\u0442\u043d\u043e, \u043e\u043d\u043e \u0435\u0449\u0451 \u043e\u0431\u043d\u043e\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u043f\u043e\u0441\u043b\u0435 \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438. \u041a\u0430\u043d\u0430\u043b \u0431\u0443\u0434\u0435\u0442 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d \u0437\u0430\u043d\u043e\u0432\u043e \u043e\u0434\u0438\u043d \u0440\u0430\u0437.'
         'e_mismatch' = '\u043a\u043e\u043d\u0442\u0440\u043e\u043b\u044c\u043d\u0430\u044f \u0441\u0443\u043c\u043c\u0430 \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442 \u0434\u043b\u044f {0} ({1}): \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u043d\u044b\u0439 \u0444\u0430\u0439\u043b \u043d\u0435 \u0441\u043e\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u0435\u0442 \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u043d\u043e\u0439 \u0441\u0443\u043c\u043c\u0435, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u0438 \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043e. \u0421\u0440\u0430\u0437\u0443 \u043f\u043e\u0441\u043b\u0435 \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438 \u043f\u0443\u0431\u043b\u0438\u0447\u043d\u043e\u0435 \u0437\u0435\u0440\u043a\u0430\u043b\u043e \u043c\u043e\u0436\u0435\u0442 \u043d\u0435\u0441\u043a\u043e\u043b\u044c\u043a\u043e \u043c\u0438\u043d\u0443\u0442 \u043e\u0442\u0434\u0430\u0432\u0430\u0442\u044c \u043f\u0440\u0435\u0436\u043d\u0438\u0435 \u0444\u0430\u0439\u043b\u044b: \u043f\u043e\u0434\u043e\u0436\u0434\u0438\u0442\u0435 \u043f\u044f\u0442\u044c \u043c\u0438\u043d\u0443\u0442 \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0449\u0438\u043a \u0441\u043d\u043e\u0432\u0430. \u0415\u0441\u043b\u0438 \u043e\u0448\u0438\u0431\u043a\u0430 \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0441\u044f, \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u0430\u0432\u043b\u0438\u0432\u0430\u0439\u0442\u0435: \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044f \u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0435\u043d\u0430.'
         'e_downgrade' = '\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 \u0440\u0435\u043b\u0438\u0437 {0} \u043a\u0430\u043d\u0430\u043b\u0430 {1} \u0441\u0442\u0430\u0440\u0448\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u043e\u0433\u043e {2}: \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 -Force \u0434\u043b\u044f \u043f\u043e\u043d\u0438\u0436\u0435\u043d\u0438\u044f \u0432\u0435\u0440\u0441\u0438\u0438.'
+        'e_archive_ver' = '\u0410\u0440\u0445\u0438\u0432 \u043e\u0442\u043d\u043e\u0441\u0438\u0442\u0441\u044f \u043a \u0432\u0435\u0440\u0441\u0438\u0438 {0}, \u0430 \u043e\u0431\u044a\u044f\u0432\u043b\u0435\u043d\u0430 \u0432\u0435\u0440\u0441\u0438\u044f {1}: \u0444\u0430\u0439\u043b\u044b \u043d\u0435 \u043f\u0440\u0438\u043d\u0430\u0434\u043b\u0435\u0436\u0430\u0442 \u043e\u0431\u044a\u044f\u0432\u043b\u0435\u043d\u043d\u043e\u0439 \u0432\u0435\u0440\u0441\u0438\u0438 (\u0437\u0435\u0440\u043a\u0430\u043b\u043e \u043f\u043e\u0434\u0441\u043e\u0432\u044b\u0432\u0430\u0435\u0442 \u0441\u0442\u0430\u0440\u0443\u044e \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u0443\u044e \u0432\u0435\u0440\u0441\u0438\u044e?). \u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u0438 \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043e.'
         's_sigok' = '\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u0440\u0435\u043b\u0438\u0437\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430, \u043a\u043b\u044e\u0447 {0}'
-        'w_sigold' = '\u0432\u0435\u0440\u0441\u0438\u044f {0} \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d\u0430 \u0431\u0435\u0437 \u043f\u043e\u0434\u043f\u0438\u0441\u0438 (\u0432\u0435\u0440\u0441\u0438\u0438 \u0434\u043e 0.2.0-dev.7 \u043d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u044b): \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e SHA-256, \u043f\u043e\u0434\u043f\u0438\u0441\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c'
         'w_sigskip' = '\u043f\u043e\u0434\u043f\u0438\u0441\u044c \u0440\u0435\u043b\u0438\u0437\u0430 \u041d\u0415 \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430: openssl.exe \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0432 PATH (\u0432 Windows \u043d\u0435\u0442 \u0432\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u043e\u0439 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 Ed25519), \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e SHA-256. \u0423\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 OpenSSL 3 \u0438 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u043d\u043e\u0432\u0430, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043f\u043e \u043a\u043b\u044e\u0447\u0443 {0}'
         'done' = '\u0413\u043e\u0442\u043e\u0432\u043e.'
         'failed' = '\u041e\u0448\u0438\u0431\u043a\u0430'
@@ -3327,8 +3327,8 @@ $script:Catalog = @{
         'w_mirror' = '\u516c\u5171\u955c\u50cf\u63d0\u4f9b\u7684\u6587\u4ef6\u5f7c\u6b64\u4e0d\u4e00\u81f4\uff08{0}\uff09\uff1a\u5f88\u53ef\u80fd\u662f\u53d1\u5e03\u540e\u4ecd\u5728\u5237\u65b0\u3002\u5c06\u91cd\u65b0\u8bfb\u53d6\u4e00\u6b21\u6e20\u9053\u3002'
         'e_mismatch' = '{0} \u7684\u6821\u9a8c\u548c\u4e0d\u5339\u914d\uff08{1}\uff09\uff1a\u4e0b\u8f7d\u7684\u6587\u4ef6\u4e0e\u5df2\u53d1\u5e03\u7684\u6821\u9a8c\u548c\u4e0d\u4e00\u81f4\uff0c\u56e0\u6b64\u672a\u5b89\u88c5\u6216\u66f4\u6539\u4efb\u4f55\u5185\u5bb9\u3002\u53d1\u5e03\u540e\u7684\u51e0\u5206\u949f\u5185\uff0c\u516c\u5171\u955c\u50cf\u53ef\u80fd\u4ecd\u63d0\u4f9b\u65e7\u6587\u4ef6\uff1a\u8bf7\u7b49\u5f85\u4e94\u5206\u949f\u540e\u91cd\u65b0\u8fd0\u884c\u5b89\u88c5\u7a0b\u5e8f\u3002\u82e5\u518d\u6b21\u51fa\u73b0\uff0c\u8bf7\u52ff\u5b89\u88c5\uff1a\u8be5\u53d1\u5e03\u5df2\u635f\u574f\u3002'
         'e_downgrade' = '\u6700\u65b0\u7248\u672c {0}\uff08\u901a\u9053 {1}\uff09\u6bd4\u5df2\u5b89\u88c5\u7684 {2} \u65e7\uff1a\u4f7f\u7528 -Force \u964d\u7ea7\u3002'
+        'e_archive_ver' = '\u538b\u7f29\u5305\u7684\u7248\u672c\u662f {0}\uff0c\u4f46\u516c\u5e03\u7684\u7248\u672c\u662f {1}\uff1a\u8fd9\u4e9b\u6587\u4ef6\u4e0d\u5c5e\u4e8e\u516c\u5e03\u7684\u7248\u672c\uff08\u955c\u50cf\u662f\u5426\u5728\u91cd\u653e\u65e7\u7684\u5df2\u7b7e\u540d\u7248\u672c\uff1f\uff09\u3002\u672a\u5b89\u88c5\u6216\u66f4\u6539\u4efb\u4f55\u5185\u5bb9\u3002'
         's_sigok' = '\u53d1\u5e03\u7b7e\u540d\u6821\u9a8c\u901a\u8fc7\uff0c\u5bc6\u94a5 {0}'
-        'w_sigold' = '\u7248\u672c {0} \u53d1\u5e03\u65f6\u6ca1\u6709\u7b7e\u540d\uff080.2.0-dev.7 \u4e4b\u524d\u7684\u7248\u672c\u5747\u672a\u7b7e\u540d\uff09\uff1a\u4ec5\u6821\u9a8c\u4e86 SHA-256\uff0c\u65e0\u6cd5\u6821\u9a8c\u7b7e\u540d'
         'w_sigskip' = '\u672a\u6821\u9a8c\u53d1\u5e03\u7b7e\u540d\uff1aPATH \u4e2d\u627e\u4e0d\u5230 openssl.exe\uff08Windows \u6ca1\u6709\u5185\u7f6e Ed25519 \u6821\u9a8c\uff09\uff0c\u4ec5\u6821\u9a8c\u4e86 SHA-256\u3002\u8bf7\u5b89\u88c5 OpenSSL 3 \u5e76\u91cd\u65b0\u8fd0\u884c\uff0c\u4ee5\u4f7f\u7528\u5bc6\u94a5 {0} \u6821\u9a8c'
         'done' = '\u5b8c\u6210\u3002'
         'failed' = '\u5931\u8d25'
@@ -3714,8 +3714,8 @@ $script:Catalog = @{
         'w_mirror' = '\u0642\u062f\u0651\u0645\u062a \u0627\u0644\u0645\u0631\u0622\u0629 \u0627\u0644\u0639\u0627\u0645\u0629 \u0645\u0644\u0641\u0627\u062a \u063a\u064a\u0631 \u0645\u062a\u0633\u0642\u0629 \u0641\u064a\u0645\u0627 \u0628\u064a\u0646\u0647\u0627 ({0}): \u0631\u0628\u0645\u0627 \u0645\u0627 \u0632\u0627\u0644\u062a \u062a\u064f\u062d\u062f\u064e\u0651\u062b \u0628\u0639\u062f \u0627\u0644\u0646\u0634\u0631. \u0633\u062a\u064f\u0639\u0627\u062f \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0642\u0646\u0627\u0629 \u0645\u0631\u0629 \u0648\u0627\u062d\u062f\u0629.'
         'e_mismatch' = '\u0645\u062c\u0645\u0648\u0639 \u0627\u0644\u062a\u062d\u0642\u0642 \u063a\u064a\u0631 \u0645\u0637\u0627\u0628\u0642 \u0644\u0640 {0} ({1}): \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0630\u064a \u0646\u064f\u0632\u0650\u0651\u0644 \u0644\u0627 \u064a\u0637\u0627\u0628\u0642 \u0627\u0644\u0645\u062c\u0645\u0648\u0639 \u0627\u0644\u0645\u0646\u0634\u0648\u0631\u060c \u0644\u0630\u0644\u0643 \u0644\u0645 \u064a\u064f\u062b\u0628\u064e\u0651\u062a \u0623\u0648 \u064a\u064f\u063a\u064a\u064e\u0651\u0631 \u0623\u064a \u0634\u064a\u0621. \u0628\u0639\u062f \u0627\u0644\u0646\u0634\u0631 \u0645\u0628\u0627\u0634\u0631\u0629 \u0642\u062f \u062a\u0642\u062f\u0651\u0645 \u0627\u0644\u0645\u0631\u0622\u0629 \u0627\u0644\u0639\u0627\u0645\u0629 \u0627\u0644\u0645\u0644\u0641\u0627\u062a \u0627\u0644\u0633\u0627\u0628\u0642\u0629 \u0644\u0628\u0636\u0639 \u062f\u0642\u0627\u0626\u0642: \u0627\u0646\u062a\u0638\u0631 \u062e\u0645\u0633 \u062f\u0642\u0627\u0626\u0642 \u0648\u0634\u063a\u0651\u0644 \u0627\u0644\u0645\u062b\u0628\u0651\u062a \u0645\u062c\u062f\u062f\u064b\u0627. \u0625\u0646 \u062a\u0643\u0631\u0631 \u0630\u0644\u0643 \u0641\u0644\u0627 \u062a\u062b\u0628\u0651\u062a: \u0627\u0644\u0646\u0634\u0631 \u062a\u0627\u0644\u0641.'
         'e_downgrade' = '\u0623\u062d\u062f\u062b \u0625\u0635\u062f\u0627\u0631 {0} \u0641\u064a \u0627\u0644\u0642\u0646\u0627\u0629 {1} \u0623\u0642\u062f\u0645 \u0645\u0646 \u0627\u0644\u0645\u062b\u0628\u0651\u062a {2}: \u0627\u0633\u062a\u062e\u062f\u0645 -Force \u0644\u0644\u0631\u062c\u0648\u0639.'
+        'e_archive_ver' = '\u0627\u0644\u0623\u0631\u0634\u064a\u0641 \u0644\u0644\u0625\u0635\u062f\u0627\u0631 {0} \u0644\u0643\u0646 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0627\u0644\u0645\u0639\u0644\u0646 \u0647\u0648 {1}: \u0627\u0644\u0645\u0644\u0641\u0627\u062a \u0644\u0627 \u062a\u062e\u0635 \u0627\u0644\u0625\u0635\u062f\u0627\u0631 \u0627\u0644\u0645\u0639\u0644\u0646 (\u0647\u0644 \u064a\u0639\u064a\u062f \u0645\u0631\u0622\u0629 \u0625\u0635\u062f\u0627\u0631\u064b\u0627 \u0645\u0648\u0642\u0651\u0639\u064b\u0627 \u0642\u062f\u064a\u0645\u064b\u0627\u061f). \u0644\u0645 \u064a\u062a\u0645 \u062a\u062b\u0628\u064a\u062a \u0623\u0648 \u062a\u063a\u064a\u064a\u0631 \u0623\u064a \u0634\u064a\u0621.'
         's_sigok' = '\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u0625\u0635\u062f\u0627\u0631\u060c \u0627\u0644\u0645\u0641\u062a\u0627\u062d {0}'
-        'w_sigold' = '\u0627\u0644\u0625\u0635\u062f\u0627\u0631 {0} \u0646\u064f\u0634\u0631 \u0628\u062f\u0648\u0646 \u062a\u0648\u0642\u064a\u0639 (\u0627\u0644\u0625\u0635\u062f\u0627\u0631\u0627\u062a \u0642\u0628\u0644 0.2.0-dev.7 \u063a\u064a\u0631 \u0645\u0648\u0642\u0651\u0639\u0629): \u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 SHA-256 \u0641\u0642\u0637 \u0648\u0644\u0645 \u064a\u0645\u0643\u0646 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u062a\u0648\u0642\u064a\u0639'
         'w_sigskip' = '\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u0625\u0635\u062f\u0627\u0631: \u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u0639\u062b\u0648\u0631 \u0639\u0644\u0649 openssl.exe \u0641\u064a PATH (\u0644\u0627 \u064a\u0648\u0641\u0631 Windows \u062a\u062d\u0642\u0642\u0627 \u0645\u062f\u0645\u062c\u0627 \u0645\u0646 Ed25519) \u0648\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 SHA-256 \u0641\u0642\u0637. \u062b\u0628\u0651\u062a OpenSSL 3 \u0648\u0623\u0639\u062f \u0627\u0644\u062a\u0634\u063a\u064a\u0644 \u0644\u0644\u062a\u062d\u0642\u0642 \u0628\u0627\u0644\u0645\u0641\u062a\u0627\u062d {0}'
         'done' = '\u062a\u0645.'
         'failed' = '\u0641\u0634\u0644'
@@ -4955,7 +4955,6 @@ function Get-ChannelBuild($j) { if ($j -and ($j.PSObject.Properties.Name -contai
 # RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
 $script:ReleasePubKeyDefault = 'gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0='
 $script:ReleasePubKeyId = '3fc61b30f128ff14'
-$script:SigRequiredFrom = '0.2.0-dev.7'   # releases before this one were published unsigned
 function Test-CustomPubKey { return [bool]($env:TOUTWAF_RELEASE_PUBKEY -or (Test-Path (Join-Path $ConfDir 'release.pub'))) }
 function Get-PubKeyPem([string]$tmp) {
     # TOUTWAF_RELEASE_PUBKEY, else <ConfDir>\release.pub, else the built-in key
@@ -5048,7 +5047,7 @@ function Test-Ed25519Signature([byte[]]$Pub, [byte[]]$Msg, [byte[]]$Sig) {
     if (-not ('TwEd25519' -as [type])) { Add-Type -TypeDefinition $script:Ed25519Source -Language CSharp -ReferencedAssemblies $(if ($PSVersionTable.PSEdition -eq 'Core') { @('System.Runtime.Numerics', 'System.Security.Cryptography') } else { @('System.Numerics') }) }
     return [TwEd25519]::Verify($Pub, $Msg, $Sig)
 }
-# Policy: a bad signature ALWAYS aborts; a missing one aborts for releases >= SigRequiredFrom and only warns for older (unsigned) ones.
+# Policy: a bad signature ALWAYS aborts, and so does a missing one (there is no exemption for any version).
 # Windows (.NET, PowerShell 5.1 and 7) has no Ed25519 of its own: Test-Ed25519Signature above does it (openssl.exe is only a fallback). If neither is possible
 # a loud warning says so and nothing is reported as verified (SHA-256 was still checked). A key the admin configured explicitly stays fail-closed.
 function Confirm-ReleaseSignature([string]$relUrl, [string]$tmp, [string]$query = '') {
@@ -5061,8 +5060,8 @@ function Confirm-ReleaseSignature([string]$relUrl, [string]$tmp, [string]$query 
     catch {
         $sc = 0; try { $sc = [int]$_.Exception.Response.StatusCode } catch { $sc = 0 }
         if ($sc -eq 404) {   # not published
-            if (Test-SemverLess $script:ResolvedVersion $script:SigRequiredFrom) { Write-Warn (T 'w_sigold' @($script:ResolvedVersion)); return }
-            throw "release signature missing ($relUrl/SHA256SUMS.sig): releases >= $($script:SigRequiredFrom) are signed, installation refused"
+            # no exemption for "old" versions: the version comes from the unsigned channel.json, so a mirror could claim any version below the first signed one
+            throw "release signature missing ($relUrl/SHA256SUMS.sig): every release is signed, installation refused"
         }
         throw "cannot download the release signature ($relUrl/SHA256SUMS.sig)"
     }
@@ -5380,6 +5379,12 @@ function Get-Release([string]$tmp) {
     $bf = $idFiles | Where-Object { $_.Name -ceq 'BUILD' } | Select-Object -First 1
     $archVer = if ($vf) { (Get-Content $vf.FullName -TotalCount 1).Trim() } else { '' }
     $archBuild = if ($bf) { ConvertTo-Build (Get-Content $bf.FullName -TotalCount 1) } else { '' }
+    # The signature covers SHA256SUMS, not the version it belongs to: an unsigned channel.json can announce 0.6.2 over the (genuinely signed) files of 0.6.0.
+    # The archive's own VERSION (protected by the signed hash) must be the release that was resolved (0.6.1 and 0.6.1.0 are the same release).
+    if (-not $ZipPath -and $archVer) {
+        $ca = ConvertTo-CanonicalVersion $archVer; $cr = ConvertTo-CanonicalVersion $resolved
+        if (-not $ca -or $ca -ne $cr) { throw (T 'e_archive_ver' @($archVer, $resolved)) }
+    }
     return @{ Version = $resolved; ArchiveVersion = $archVer; ArchiveBuild = $archBuild; Bins = $bins; AgentDist = $(if ($agentDist) { $agentDist.FullName } else { '' }); AVDist = $(if ($avDist) { $avDist.FullName } else { '' }) }
 }
 

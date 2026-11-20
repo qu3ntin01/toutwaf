@@ -1040,6 +1040,16 @@ nl|e_downgrade|De nieuwste versie %s van kanaal %s is ouder dan de geïnstalleer
 ru|e_downgrade|Последний релиз %s канала %s старше установленного %s: используйте --force для понижения версии.
 zh|e_downgrade|最新版本 %s（通道 %s）比已安装的 %s 旧：使用 --force 降级。
 ar|e_downgrade|أحدث إصدار %s في القناة %s أقدم من المثبّت %s: استخدم --force للرجوع.
+en|e_archive_ver|The archive is for version %s but the release announced is %s: the files do not belong to the announced release (a mirror replaying an older signed release?). Nothing was installed or changed.
+fr|e_archive_ver|L'archive est de la version %s alors que la version annoncée est %s : les fichiers n'appartiennent pas à la version annoncée (un miroir qui rejoue une ancienne version signée ?). Rien n'a été installé ni modifié.
+es|e_archive_ver|El archivo es de la versión %s pero la versión anunciada es %s: los archivos no pertenecen a la versión anunciada (¿un espejo que reproduce una versión firmada antigua?). No se ha instalado ni modificado nada.
+de|e_archive_ver|Das Archiv ist Version %s, angekündigt ist aber %s: die Dateien gehören nicht zur angekündigten Version (spielt ein Spiegel eine ältere signierte Version ein?). Es wurde nichts installiert oder geändert.
+it|e_archive_ver|L'archivio è della versione %s ma la versione annunciata è %s: i file non appartengono alla versione annunciata (un mirror che ripropone una vecchia versione firmata?). Non è stato installato né modificato nulla.
+pt|e_archive_ver|O arquivo é da versão %s mas a versão anunciada é %s: os ficheiros não pertencem à versão anunciada (um espelho a repetir uma versão assinada antiga?). Nada foi instalado nem alterado.
+nl|e_archive_ver|Het archief is van versie %s maar de aangekondigde versie is %s: de bestanden horen niet bij de aangekondigde versie (een mirror die een oudere ondertekende versie opnieuw aanbiedt?). Er is niets geïnstalleerd of gewijzigd.
+ru|e_archive_ver|Архив относится к версии %s, а объявлена версия %s: файлы не принадлежат объявленной версии (зеркало подсовывает старую подписанную версию?). Ничего не установлено и не изменено.
+zh|e_archive_ver|压缩包的版本是 %s，但公布的版本是 %s：这些文件不属于公布的版本（镜像是否在重放旧的已签名版本？）。未安装或更改任何内容。
+ar|e_archive_ver|الأرشيف للإصدار %s لكن الإصدار المعلن هو %s: الملفات لا تخص الإصدار المعلن (هل يعيد مرآة إصدارًا موقّعًا قديمًا؟). لم يتم تثبيت أو تغيير أي شيء.
 en|s_sigok|release signature verified, key %s
 fr|s_sigok|signature de la version vérifiée, clé %s
 es|s_sigok|firma de la versión verificada, clave %s
@@ -1050,16 +1060,6 @@ nl|s_sigok|release-handtekening gecontroleerd, sleutel %s
 ru|s_sigok|подпись релиза проверена, ключ %s
 zh|s_sigok|发布签名校验通过，密钥 %s
 ar|s_sigok|تم التحقق من توقيع الإصدار، المفتاح %s
-en|w_sigold|release %s was published without a signature (releases before 0.2.0-dev.7 are unsigned): only SHA-256 was verified, the signature could not be checked
-fr|w_sigold|la version %s a été publiée sans signature (les versions antérieures à 0.2.0-dev.7 ne sont pas signées) : seul le SHA-256 a été vérifié, la signature n'a pas pu l'être
-es|w_sigold|la versión %s se publicó sin firma (las anteriores a 0.2.0-dev.7 no están firmadas): solo se verificó el SHA-256, no se pudo comprobar la firma
-de|w_sigold|Version %s wurde ohne Signatur veröffentlicht (Versionen vor 0.2.0-dev.7 sind unsigniert): nur SHA-256 wurde geprüft, die Signatur konnte nicht geprüft werden
-it|w_sigold|la versione %s è stata pubblicata senza firma (le versioni precedenti a 0.2.0-dev.7 non sono firmate): è stato verificato solo lo SHA-256, la firma non ha potuto essere controllata
-pt|w_sigold|a versão %s foi publicada sem assinatura (as anteriores a 0.2.0-dev.7 não são assinadas): só o SHA-256 foi verificado, a assinatura não pôde ser conferida
-nl|w_sigold|versie %s is zonder handtekening gepubliceerd (versies vóór 0.2.0-dev.7 zijn niet ondertekend): alleen SHA-256 is gecontroleerd, de handtekening kon niet worden gecontroleerd
-ru|w_sigold|версия %s опубликована без подписи (версии до 0.2.0-dev.7 не подписаны): проверена только SHA-256, подпись проверить не удалось
-zh|w_sigold|版本 %s 发布时没有签名（0.2.0-dev.7 之前的版本均未签名）：仅校验了 SHA-256，无法校验签名
-ar|w_sigold|الإصدار %s نُشر بدون توقيع (الإصدارات قبل 0.2.0-dev.7 غير موقّعة): تم التحقق من SHA-256 فقط ولم يمكن التحقق من التوقيع
 en|w_sigskip|release signature NOT verified: openssl.exe was not found in PATH (Windows has no built-in Ed25519 verification), only SHA-256 was checked. Install OpenSSL 3 and run again to verify against key %s
 fr|w_sigskip|signature de la version NON vérifiée : openssl.exe est introuvable dans le PATH (Windows n'a pas de vérification Ed25519 intégrée), seul le SHA-256 a été contrôlé. Installez OpenSSL 3 et relancez pour vérifier avec la clé %s
 es|w_sigskip|firma de la versión NO verificada: no se encontró openssl.exe en el PATH (Windows no incluye verificación Ed25519), solo se comprobó el SHA-256. Instale OpenSSL 3 y vuelva a ejecutar para verificar con la clave %s
@@ -4622,20 +4622,20 @@ env_check() {   # fills EC_LV / EC_CA / EC_AC from what this machine is; changes
         fwp="$fwp $p"
       done
       if [ "$OPEN_FW" = 0 ] && [ -n "$fwp" ]; then ec_add warn "$(t pf_fw_cause "$fw" "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fw_action)"; fi
-    elif have ufw && ufw status 2>/dev/null | head -n1 | grep -qi 'status: active'; then
+    elif have ufw && grep -qi 'status: active' <<<"$(ufw status 2>/dev/null | head -n1)"; then
       fw=ufw
       for p in "$HTTP_PORT" "$HTTPS_PORT"; do
-        ufw status 2>/dev/null | grep -Eq "^$p(/tcp)?[[:space:]]+ALLOW" || fwp="$fwp $p"
+        grep -Eq "^$p(/tcp)?[[:space:]]+ALLOW" <<<"$(ufw status 2>/dev/null)" || fwp="$fwp $p"
       done
       if [ "$OPEN_FW" = 0 ] && [ -n "$fwp" ]; then ec_add warn "$(t pf_fw_cause "$fw" "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fw_action)"; fi
-    elif have iptables && iptables -S INPUT 2>/dev/null | head -n1 | grep -Eq '^-P INPUT (DROP|REJECT)'; then
+    elif have iptables && grep -Eq '^-P INPUT (DROP|REJECT)' <<<"$(iptables -S INPUT 2>/dev/null | head -n1)"; then
       for p in "$HTTP_PORT" "$HTTPS_PORT"; do
-        iptables -S INPUT 2>/dev/null | grep -Eq -- "--dports? ([0-9:,]*,)?$p([, ]|$).*-j ACCEPT" || fwp="$fwp $p"
+        grep -Eq -- "--dports? ([0-9:,]*,)?$p([, ]|$).*-j ACCEPT" <<<"$(iptables -S INPUT 2>/dev/null)" || fwp="$fwp $p"
       done
       if [ -n "$fwp" ]; then ec_add warn "$(t pf_fwx_cause iptables "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fwx_action)"; fi
-    elif have nft && nft list ruleset 2>/dev/null | grep -q 'policy drop'; then
+    elif have nft && grep -q 'policy drop' <<<"$(nft list ruleset 2>/dev/null)"; then
       for p in "$HTTP_PORT" "$HTTPS_PORT"; do
-        nft list ruleset 2>/dev/null | grep -Eq "dport (\{[^}]*\b$p\b[^}]*\}|$p)\b.*accept" || fwp="$fwp $p"
+        grep -Eq "dport (\{[^}]*\b$p\b[^}]*\}|$p)\b.*accept" <<<"$(nft list ruleset 2>/dev/null)" || fwp="$fwp $p"
       done
       if [ -n "$fwp" ]; then ec_add warn "$(t pf_fwx_cause nftables "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fwx_action)"; fi
     fi
@@ -5801,8 +5801,8 @@ via_repo_try() {
   [ -n "$pm" ] || { via_repo_fail "this system is not covered by the package repository (AlmaLinux / Rocky / RHEL $VIA_REPO_EL, Debian family)"; return 1; }
   if [ "$pm" = apt ]; then probe="$base/deb/dists/$suite/InRelease"; keyurl="$base/toutwaf.gpg"; keydst=/usr/share/keyrings/toutwaf.gpg; cfg=/etc/apt/sources.list.d/toutwaf.list
   else probe="$base/rpm/el$maj/$rarch/repodata/repomd.xml"; keyurl="$base/toutwaf.asc"; keydst=/etc/pki/rpm-gpg/RPM-GPG-KEY-toutwaf; cfg=/etc/yum.repos.d/toutwaf.repo; fi
-  curl -fsSL --connect-timeout 8 --max-time 25 -o "$TMP/via-probe" "$probe" 2>>"$LOG" || { via_repo_fail "the ToutWAF repository is not reachable ($probe)"; return 1; }
-  curl -fsSL --connect-timeout 8 --max-time 25 -o "$key" "$keyurl" 2>>"$LOG" || { via_repo_fail "cannot download the repository key ($keyurl)"; return 1; }
+  curl_s -fsSL --connect-timeout 8 --max-time 25 -o "$TMP/via-probe" "$probe" 2>>"$LOG" || { via_repo_fail "the ToutWAF repository is not reachable ($probe)"; return 1; }
+  curl_s -fsSL --connect-timeout 8 --max-time 25 -o "$key" "$keyurl" 2>>"$LOG" || { via_repo_fail "cannot download the repository key ($keyurl)"; return 1; }
   fpr="$(gpg --batch --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
   [ "$(printf '%s' "$fpr" | tr 'a-f' 'A-F')" = "$(printf '%s' "$REPO_KEY_FPR" | tr -d ' ' | tr 'a-f' 'A-F')" ] || { via_repo_fail "the repository key fingerprint (${fpr:-unreadable}) is not the expected one"; return 1; }
   # the repository definition is generated here from this installer's own constants, never downloaded
@@ -5874,8 +5874,8 @@ mirror_setup() {
   base="${REPO_LINUX%/}/main"
   if [ "$pm" = apt ]; then probe="$base/vendor/deb/dists/$suite/InRelease"; keyurl="$base/toutwaf.gpg"; keydst=/usr/share/keyrings/toutwaf.gpg; cfg=/etc/apt/sources.list.d/toutwaf-mirror.list
   else probe="$base/vendor/rpm/el$maj/$rarch/repodata/repomd.xml"; keyurl="$base/toutwaf.asc"; keydst=/etc/pki/rpm-gpg/RPM-GPG-KEY-toutwaf; cfg=/etc/yum.repos.d/toutwaf-mirror.repo; fi
-  curl -fsSL --connect-timeout 5 --max-time 20 -o "$TMP/mirror-probe" "$probe" 2>>"$LOG" || { mirror_skip "the ToutWAF mirror is not reachable ($probe)"; return 1; }
-  curl -fsSL --connect-timeout 5 --max-time 20 -o "$key" "$keyurl" 2>>"$LOG" || { mirror_skip "cannot download the mirror key ($keyurl)"; return 1; }
+  curl_s -fsSL --connect-timeout 5 --max-time 20 -o "$TMP/mirror-probe" "$probe" 2>>"$LOG" || { mirror_skip "the ToutWAF mirror is not reachable ($probe)"; return 1; }
+  curl_s -fsSL --connect-timeout 5 --max-time 20 -o "$key" "$keyurl" 2>>"$LOG" || { mirror_skip "cannot download the mirror key ($keyurl)"; return 1; }
   fpr="$(gpg --batch --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
   [ "$(printf '%s' "$fpr" | tr 'a-f' 'A-F')" = "$(printf '%s' "$REPO_KEY_FPR" | tr -d ' ' | tr 'a-f' 'A-F')" ] || { mirror_skip "the mirror key fingerprint (${fpr:-unreadable}) is not the expected one"; return 1; }
   run install -d -m 0755 "$(p "$(dirname "$keydst")")" "$(p "$(dirname "$cfg")")" || { mirror_skip "cannot create $(dirname "$cfg")"; return 1; }
@@ -6775,11 +6775,11 @@ ch_top() { ch_flat | sed -e 's/^[[:space:]]*{//' -e 's/}[[:space:]]*$//' -e ':a'
 ch_str() { ch_top | grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n1 | sed 's/^[^:]*:[[:space:]]*"\(.*\)"$/\1/' || true; }   # the string value of a top-level key
 fetch_channel() {   # returns 1 when unreachable / not JSON / without a version (CH_EMPTY=1 then: a valid channel.json saying that nothing is published)
   CH_EMPTY=0
-  if ! curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG"; then
+  if ! curl_s -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG"; then
     # the primary source is unreachable: the GitHub copy of the same signed channel (not when a mirror or another repository was chosen)
     [ -z "$BASE_URL" ] && [ -n "$SRC_FALLBACK" ] && [ "$SRC_ROOT" != "$SRC_FALLBACK" ] || return 1
     SRC_ROOT="$SRC_FALLBACK"
-    curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG" || return 1
+    curl_s -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG" || return 1
   fi
   CH_JSON="$(cat "$TMP/channel.json")"
   case "$CH_JSON" in *'{'*) ;; *) return 1;; esac
@@ -7357,14 +7357,15 @@ install_pkgs() {
 }
 
 # ------------------------------------------------------------------------------------------------ fetch
-fetch() { curl -fsSL --retry 3 --connect-timeout 15 -o "$2" "$1"; }
+# curl_s: curl that keeps a download which started on https on https: a redirect to plain http is refused (curl -L follows it by default)
+curl_s() { local a pr=(); for a in "$@"; do case "$a" in https://*) pr=(--proto-redir "=https"); break;; esac; done; curl "${pr[@]+"${pr[@]}"}" "$@"; }
+fetch() { curl_s -fsSL --retry 3 --connect-timeout 15 -o "$2" "$1"; }
 
 # Release signature trust anchor. It lives HERE (in the installer you run), never in channel.json: the copy of the public key that
 # channel.json advertises is informational and must not be trusted. Overridden by TOUTWAF_RELEASE_PUBKEY, then by $CONF_DIR/release.pub.
 # RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
 RELEASE_PUBKEY_DEFAULT='gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0='
 RELEASE_PUBKEY_ID='3fc61b30f128ff14'
-SIG_REQUIRED_FROM='0.2.0-dev.7'   # releases before this one were published unsigned
 
 # release_pubkey: prints the path of a PEM public key (Ed25519): TOUTWAF_RELEASE_PUBKEY, else $CONF_DIR/release.pub, else the built-in key
 release_pubkey() {
@@ -7499,7 +7500,7 @@ resolve_release() {
 
 # verify_signature: SHA256SUMS.sig (base64 of the raw signature over SHA256SUMS) against the trust anchor. Used by the installer and,
 # because toutwaf-upgrade downloads and runs this very script with --update, by the in-console update too.
-# Policy: a bad signature ALWAYS aborts; a missing one aborts for releases >= $SIG_REQUIRED_FROM and only warns for older (unsigned) ones.
+# Policy: a bad signature ALWAYS aborts, and so does a missing one (there is no exemption for any version).
 # Engine: openssl when it can verify Ed25519 (>= 3.0), else the embedded pure-Python verifier; neither available: refused (fail closed).
 verify_signature() {   # $1 = base URL of the release directory, $2 = its cache-bypass query ("" or "?b=<build>")
   local pem code rc=0 kid mode="" py="" okv=0
@@ -7512,11 +7513,12 @@ verify_signature() {   # $1 = base URL of the release directory, $2 = its cache-
     [ -n "$py" ] || die "cannot verify the Ed25519 release signature: this system's OpenSSL ($(openssl version 2>/dev/null | awk '{print $2}')) has no Ed25519 verification (OpenSSL >= 3.0 is needed) and no Python 3 was found for the built-in fallback verifier. The installation is refused (fail closed): install OpenSSL 3 or python3, or verify SHA256SUMS(.sig) yourself (see deploy/README.md, Release signature) and install from the archive with --tarball"
     mode=python
   fi
-  code="$(curl -fsSL --retry 3 --connect-timeout 15 -o "$TMP/SHA256SUMS.sig" -w '%{http_code}' "$1/SHA256SUMS.sig${2:-}" 2>>"$LOG")" || rc=$?
+  code="$(curl_s -fsSL --retry 3 --connect-timeout 15 -o "$TMP/SHA256SUMS.sig" -w '%{http_code}' "$1/SHA256SUMS.sig${2:-}" 2>>"$LOG")" || rc=$?
   if [ "$rc" != 0 ]; then
     if [ "$code" = 404 ] || [ "$rc" = 37 ]; then   # not published (37: file:// mirror without the file)
-      if semver_lt "$RESOLVED_VERSION" "$SIG_REQUIRED_FROM"; then warn "$(t w_sigold "$RESOLVED_VERSION")"; return 0; fi
-      die "release signature missing ($1/SHA256SUMS.sig): releases >= $SIG_REQUIRED_FROM are signed, installation refused"
+      # No exemption for "old" versions: the version comes from the unsigned channel.json (or --version), so whoever controls the mirror could claim any
+      # version below the first signed release and have an unsigned archive installed on its SHA-256 alone.
+      die "release signature missing ($1/SHA256SUMS.sig): every release is signed, installation refused"
     fi
     die "cannot download the release signature ($1/SHA256SUMS.sig)"
   fi
@@ -7597,6 +7599,16 @@ obtain_binaries() {   # sets SRC_DIR to a directory holding the binaries
     [ -n "$d" ] && SRC_DIR="$d" || die "no binaries in the archive (expected toutwaf-<version>-linux-$ARCH/bin/)"
   fi
   read_archive_identity
+  # The signature covers SHA256SUMS, not the version it belongs to: an unsigned channel.json can announce 0.6.2 over the (genuinely signed) files of
+  # 0.6.0. The archive's own VERSION, protected by the signed hash, must be the version we resolved (rollback / downgrade by replay).
+  [ -n "$TARBALL" ] || check_archive_version
+}
+# check_archive_version: refuse an archive whose VERSION is not the release that was resolved (0.6.1 and 0.6.1.0 are the same release)
+check_archive_version() {
+  [ -n "$ARCHIVE_VERSION" ] || return 0   # archives from before the VERSION file
+  local a w; a="$(ver_canon "$ARCHIVE_VERSION" || true)"; w="$(ver_canon "$RESOLVED_VERSION" || true)"
+  [ -n "$a" ] && [ "$a" = "$w" ] && return 0
+  die "$(t e_archive_ver "$ARCHIVE_VERSION" "$RESOLVED_VERSION")"
 }
 # the archive says what it holds: VERSION and BUILD next to bin/ (older archives have no BUILD)
 ARCHIVE_VERSION=""; ARCHIVE_BUILD=""
@@ -8318,6 +8330,8 @@ on_exit() {
   [ -z "$plogf" ] || rm -f "$plogf"
   [ -z "$pinst" ] || rm -f "$pinst"
 }
+# curl_s: curl that keeps a download which started on https on https: a redirect to plain http is refused (curl -L follows it by default)
+curl_s() { local a pr=(); for a in "$@"; do case "$a" in https://*) pr=(--proto-redir "=https"); break;; esac; done; curl "${pr[@]+"${pr[@]}"}" "$@"; }
 trap on_exit EXIT
 
 case "${1:-request}" in
@@ -8379,7 +8393,7 @@ case "${1:-request}" in
     got=0
     for url in "${urls[@]+"${urls[@]}"}"; do
       plog "$S_PHASE ($url)"
-      if curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$inst" "$url" 2>>"$plogf" && head -c2 "$inst" | grep -q '^#!'; then got=1; break; fi
+      if curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$inst" "$url" 2>>"$plogf" && head -c2 "$inst" | grep -q '^#!'; then got=1; break; fi
       plog "this source does not answer; trying the next one"
     done
     [ "$got" = 1 ] || fail "cannot download the installer from any source (${urls[*]+${urls[*]}}). Nothing was changed; check the network of this server or set DIRECT_URL in $CONF_DIR/upgrade.conf"
@@ -8526,9 +8540,9 @@ detect() {
   have firewall-cmd && TOOLS="$TOOLS,firewall-cmd"; have ufw && TOOLS="$TOOLS,ufw"; have nft && TOOLS="$TOOLS,nft"; have iptables && TOOLS="$TOOLS,iptables"
   TOOLS="${TOOLS#,}"
   if firewalld_running; then BACKEND=firewalld; ACTIVE=1
-  elif have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then BACKEND=ufw; ACTIVE=1
+  elif have ufw && grep -q '^Status: active' <<<"$(ufw status 2>/dev/null)"; then BACKEND=ufw; ACTIVE=1
   elif have nft && nft list ruleset 2>/dev/null | awk '/hook input/{h=1} h && (/policy drop/ || /(^|[ \t])(drop|reject)($|[ \t])/){f=1} END{exit !f}'; then BACKEND=nftables; ACTIVE=1
-  elif have iptables && iptables -S INPUT 2>/dev/null | grep -qE '^-P INPUT (DROP|REJECT)|^-A INPUT .*-j (DROP|REJECT)'; then BACKEND=iptables; ACTIVE=1
+  elif have iptables && grep -qE '^-P INPUT (DROP|REJECT)|^-A INPUT .*-j (DROP|REJECT)' <<<"$(iptables -S INPUT 2>/dev/null)"; then BACKEND=iptables; ACTIVE=1
   fi
 }
 
@@ -9270,7 +9284,7 @@ EPOCH=0
 
 # ---- the NTP client --------------------------------------------------------------------------------------------------------
 NTP_BACKEND=none; NTP_UNIT=""
-unit_exists() { have systemctl && systemctl list-unit-files "$1" 2>/dev/null | grep -q "^$1"; }
+unit_exists() { have systemctl && grep -q "^$1" <<<"$(systemctl list-unit-files "$1" 2>/dev/null)"; }
 unit_active() { have systemctl && systemctl is-active --quiet "$1" 2>/dev/null; }
 detect_ntp() {
   NTP_BACKEND=none; NTP_UNIT=""
@@ -10286,7 +10300,7 @@ dns_release_stub() {
   systemctl restart systemd-resolved >/dev/null 2>&1 || { warn "systemd-resolved did not restart after the change: check it (systemctl status systemd-resolved)"; return 1; }
   return 0
 }
-dns_ufw_active() { have ufw && ufw status 2>/dev/null | head -n1 | grep -qi 'status: active'; }
+dns_ufw_active() { have ufw && grep -qi 'status: active' <<<"$(ufw status 2>/dev/null | head -n1)"; }
 # dns_open_firewall: 53/udp and 53/tcp, only where firewalld / ufw is running and only what is not already open; recorded for the undo
 dns_open_firewall() {
   [ "$OPEN_FW" = 0 ] && return 0
@@ -10300,7 +10314,7 @@ dns_open_firewall() {
           firewall-cmd --permanent --add-port="53/$pr" >/dev/null 2>&1 && dns_undo_add "firewall-cmd --permanent --remove-port=53/$pr"
         fi;;
       ufw)
-        if ! ufw status 2>/dev/null | grep -Eq "^53/${pr}[[:space:]]+ALLOW"; then
+        if ! grep -Eq "^53/${pr}[[:space:]]+ALLOW" <<<"$(ufw status 2>/dev/null)"; then
           ufw allow "53/$pr" >/dev/null 2>&1 && dns_undo_add "ufw delete allow 53/$pr"
         fi;;
     esac
