@@ -2,6 +2,8 @@
 
 All notable changes of ToutWAF binary releases, newest first.
 
+## 0.7.0 - 2026-11-21
+
 ## 0.6.3 - 2026-11-20
 
 ## 0.6.2 - 2026-11-20

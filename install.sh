@@ -73,9 +73,12 @@ FW_MODULE=""; case "${TOUTWAF_WITH_FIREWALL:-}" in 1|yes|true|on) FW_MODULE=1;; 
 BACKUP_CLIENT=""; case "${TOUTWAF_WITH_BACKUP_CLIENT:-}" in 1|yes|true|on) BACKUP_CLIENT=1;; esac
 BACKUP_CLIENT_BASE="${TOUTWAF_BACKUP_BASE_URL:-https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup}"
 BACKUP_CLIENT_PUBKEY="${TOUTWAF_BACKUP_PUBKEY:-gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0=}"; BACKUP_CLIENT_VERSION=""; BACKUP_CLIENT_RESULT=""
-# Telemetry to the publisher space is ON by default and can be switched off in one click in the console ("zero telemetry"). --no-telemetry or
-# TOUTWAF_TELEMETRY=0 installs with zero telemetry from the first start (written to the control-plane configuration; the console shows it).
-NO_TELEMETRY=0; case "$(printf '%s' "${TOUTWAF_TELEMETRY:-}" | tr 'A-Z' 'a-z')" in 0|false|off|no|none|zero) NO_TELEMETRY=1;; esac
+# Telemetry to the publisher space is OPT-IN (owner decision of 2026-11-20, GDPR: consent before any sending): a new installation sends NOTHING until
+# an administrator accepts it (unchecked box in the first-run wizard of the console, or Settings > Privacy and telemetry). --no-telemetry or
+# TOUTWAF_TELEMETRY=0 writes "enabled: false" (zero telemetry, the console shows it); --telemetry or TOUTWAF_TELEMETRY=1 writes "enabled: true",
+# the consent of whoever runs the installer; without either, the key is NOT written and the answer is asked in the console.
+NO_TELEMETRY=0; TELEMETRY_OPTIN=0
+case "$(printf '%s' "${TOUTWAF_TELEMETRY:-}" | tr 'A-Z' 'a-z')" in 0|false|off|no|none|zero) NO_TELEMETRY=1;; 1|true|on|yes) TELEMETRY_OPTIN=1;; esac
 # The database (--db): empty = ask in the interactive mode; SQLite (unchanged behaviour) otherwise. See the db-setup block.
 # common licence (ToutPanel + ToutWAF): address of the licence site and its pinned public key(s), written to the configuration before the first start
 LICENCE_API_URL="${TOUTWAF_LICENCE_API_URL:-}"; LICENCE_PINS=""; LICENCE_PIN_FILE="${TOUTWAF_LICENCE_PIN_FILE:-}"; LICENCE_PINNED=""
@@ -1050,6 +1053,56 @@ nl|e_downgrade|De nieuwste versie %s van kanaal %s is ouder dan de geïnstalleer
 ru|e_downgrade|Последний релиз %s канала %s старше установленного %s: используйте --force для понижения версии.
 zh|e_downgrade|最新版本 %s（通道 %s）比已安装的 %s 旧：使用 --force 降级。
 ar|e_downgrade|أحدث إصدار %s في القناة %s أقدم من المثبّت %s: استخدم --force للرجوع.
+en|ins_fp|Installer fingerprint (SHA-256): %s. Compare it with the one published with the release (README of the public repository, on GitLab and on GitHub), or check it against the signed release list: %s --verify-self
+fr|ins_fp|Empreinte de l'installateur (SHA-256) : %s. Comparez-la à celle publiée avec la version (README du dépôt public, sur GitLab et sur GitHub), ou vérifiez-la contre la liste signée de la version : %s --verify-self
+es|ins_fp|Huella del instalador (SHA-256): %s. Compárela con la publicada con la versión (README del repositorio público, en GitLab y en GitHub), o verifíquela con la lista firmada de la versión: %s --verify-self
+de|ins_fp|Fingerabdruck des Installers (SHA-256): %s. Vergleichen Sie ihn mit dem zur Version veröffentlichten (README des öffentlichen Repositorys, auf GitLab und GitHub) oder prüfen Sie ihn gegen die signierte Liste der Version: %s --verify-self
+it|ins_fp|Impronta dell'installer (SHA-256): %s. Confrontala con quella pubblicata con la versione (README del repository pubblico, su GitLab e su GitHub), oppure verificala con l'elenco firmato della versione: %s --verify-self
+pt|ins_fp|Impressão digital do instalador (SHA-256): %s. Compare-a com a publicada com a versão (README do repositório público, no GitLab e no GitHub) ou verifique-a com a lista assinada da versão: %s --verify-self
+nl|ins_fp|Vingerafdruk van het installatieprogramma (SHA-256): %s. Vergelijk die met de vingerafdruk die bij de versie is gepubliceerd (README van de openbare repository, op GitLab en GitHub) of controleer hem met de ondertekende lijst van de versie: %s --verify-self
+ru|ins_fp|Отпечаток установщика (SHA-256): %s. Сравните его с опубликованным вместе с релизом (README публичного репозитория, на GitLab и GitHub) или проверьте по подписанному списку релиза: %s --verify-self
+zh|ins_fp|安装程序指纹（SHA-256）：%s。请与随版本发布的指纹比对（公共仓库的 README，位于 GitLab 和 GitHub），或对照版本的签名清单校验：%s --verify-self
+ar|ins_fp|بصمة المثبّت (SHA-256): %s. قارنها بالبصمة المنشورة مع الإصدار (ملف README في المستودع العام على GitLab وGitHub) أو تحقق منها مقابل قائمة الإصدار الموقّعة: %s --verify-self
+en|ins_fp_pipe|This installer was started straight from the download: it cannot read itself, so it can neither show nor verify a fingerprint. To check it first, save %s as a file and run that file with --verify-self.
+fr|ins_fp_pipe|Cet installateur a été lancé directement depuis le téléchargement : il ne peut pas se relire, donc il ne peut ni afficher ni vérifier d'empreinte. Pour le vérifier d'abord, enregistrez %s dans un fichier et lancez ce fichier avec --verify-self.
+es|ins_fp_pipe|Este instalador se ha iniciado directamente desde la descarga: no puede leerse a sí mismo, así que no puede mostrar ni verificar una huella. Para verificarlo antes, guarde %s como archivo y ejecute ese archivo con --verify-self.
+de|ins_fp_pipe|Dieser Installer wurde direkt aus dem Download gestartet: Er kann sich nicht selbst lesen und daher weder einen Fingerabdruck anzeigen noch prüfen. Zum vorherigen Prüfen speichern Sie %s als Datei und führen diese Datei mit --verify-self aus.
+it|ins_fp_pipe|Questo installer è stato avviato direttamente dal download: non può rileggere se stesso, quindi non può né mostrare né verificare un'impronta. Per verificarlo prima, salva %s come file ed esegui quel file con --verify-self.
+pt|ins_fp_pipe|Este instalador foi iniciado diretamente a partir da transferência: não consegue ler-se a si próprio, por isso não pode mostrar nem verificar uma impressão digital. Para o verificar antes, guarde %s como ficheiro e execute esse ficheiro com --verify-self.
+nl|ins_fp_pipe|Dit installatieprogramma is rechtstreeks vanuit de download gestart: het kan zichzelf niet lezen en dus geen vingerafdruk tonen of controleren. Om het eerst te controleren: sla %s op als bestand en voer dat bestand uit met --verify-self.
+ru|ins_fp_pipe|Этот установщик запущен прямо из загрузки: он не может прочитать сам себя и поэтому не может ни показать, ни проверить отпечаток. Чтобы проверить его заранее, сохраните %s в файл и запустите этот файл с --verify-self.
+zh|ins_fp_pipe|此安装程序是直接从下载流启动的：它无法读取自身，因此既不能显示也不能校验指纹。若要先行校验，请将 %s 保存为文件，并用 --verify-self 运行该文件。
+ar|ins_fp_pipe|بدأ هذا المثبّت مباشرة من التنزيل: لا يستطيع قراءة نفسه، لذلك لا يمكنه عرض بصمة ولا التحقق منها. للتحقق أولاً، احفظ %s كملف وشغّل ذلك الملف مع --verify-self.
+en|ins_vs_ok|OK: this installer is the one signed for release %s (SHA-256 %s).
+fr|ins_vs_ok|OK : cet installateur est celui qui est signé pour la version %s (SHA-256 %s).
+es|ins_vs_ok|OK: este instalador es el firmado para la versión %s (SHA-256 %s).
+de|ins_vs_ok|OK: Dieser Installer ist der für Version %s signierte (SHA-256 %s).
+it|ins_vs_ok|OK: questo installer è quello firmato per la versione %s (SHA-256 %s).
+pt|ins_vs_ok|OK: este instalador é o assinado para a versão %s (SHA-256 %s).
+nl|ins_vs_ok|OK: dit installatieprogramma is het ondertekende voor versie %s (SHA-256 %s).
+ru|ins_vs_ok|OK: этот установщик — тот, что подписан для версии %s (SHA-256 %s).
+zh|ins_vs_ok|OK：此安装程序就是版本 %s 所签名的安装程序（SHA-256 %s）。
+ar|ins_vs_ok|OK: هذا المثبّت هو المثبّت الموقّع للإصدار %s (SHA-256 %s).
+en|ins_vs_nolist|The signed SHA256SUMS of release %s does not list the installer: this copy cannot be verified. Do not run it.
+fr|ins_vs_nolist|Le SHA256SUMS signé de la version %s ne liste pas l'installateur : cette copie ne peut pas être vérifiée. Ne la lancez pas.
+es|ins_vs_nolist|El SHA256SUMS firmado de la versión %s no lista el instalador: esta copia no se puede verificar. No la ejecute.
+de|ins_vs_nolist|Die signierte SHA256SUMS der Version %s führt den Installer nicht auf: Diese Kopie lässt sich nicht prüfen. Führen Sie sie nicht aus.
+it|ins_vs_nolist|Il SHA256SUMS firmato della versione %s non elenca l'installer: questa copia non può essere verificata. Non eseguirla.
+pt|ins_vs_nolist|O SHA256SUMS assinado da versão %s não lista o instalador: esta cópia não pode ser verificada. Não a execute.
+nl|ins_vs_nolist|De ondertekende SHA256SUMS van versie %s vermeldt het installatieprogramma niet: dit exemplaar kan niet worden gecontroleerd. Voer het niet uit.
+ru|ins_vs_nolist|Подписанный SHA256SUMS версии %s не содержит установщика: эту копию нельзя проверить. Не запускайте её.
+zh|ins_vs_nolist|版本 %s 的已签名 SHA256SUMS 未列出安装程序：无法校验此副本。请勿运行。
+ar|ins_vs_nolist|ملف SHA256SUMS الموقّع للإصدار %s لا يسرد المثبّت: لا يمكن التحقق من هذه النسخة. لا تشغّلها.
+en|ins_vs_diff|This installer (SHA-256 %s) is NOT the one signed for release %s (SHA-256 %s). Download a fresh copy from the repository and check again. Do not run this one.
+fr|ins_vs_diff|Cet installateur (SHA-256 %s) n'est PAS celui qui est signé pour la version %s (SHA-256 %s). Téléchargez une copie neuve depuis le dépôt et vérifiez de nouveau. Ne lancez pas celui-ci.
+es|ins_vs_diff|Este instalador (SHA-256 %s) NO es el firmado para la versión %s (SHA-256 %s). Descargue una copia nueva del repositorio y verifique de nuevo. No ejecute este.
+de|ins_vs_diff|Dieser Installer (SHA-256 %s) ist NICHT der für Version %s signierte (SHA-256 %s). Laden Sie eine frische Kopie aus dem Repository und prüfen Sie erneut. Führen Sie diesen nicht aus.
+it|ins_vs_diff|Questo installer (SHA-256 %s) NON è quello firmato per la versione %s (SHA-256 %s). Scarica una copia nuova dal repository e verifica di nuovo. Non eseguire questo.
+pt|ins_vs_diff|Este instalador (SHA-256 %s) NÃO é o assinado para a versão %s (SHA-256 %s). Transfira uma cópia nova do repositório e verifique de novo. Não execute este.
+nl|ins_vs_diff|Dit installatieprogramma (SHA-256 %s) is NIET het ondertekende voor versie %s (SHA-256 %s). Download een nieuw exemplaar uit de repository en controleer opnieuw. Voer dit exemplaar niet uit.
+ru|ins_vs_diff|Этот установщик (SHA-256 %s) НЕ тот, что подписан для версии %s (SHA-256 %s). Скачайте свежую копию из репозитория и проверьте снова. Этот не запускайте.
+zh|ins_vs_diff|此安装程序（SHA-256 %s）不是版本 %s 所签名的安装程序（SHA-256 %s）。请从仓库重新下载并再次校验，不要运行此副本。
+ar|ins_vs_diff|هذا المثبّت (SHA-256 %s) ليس المثبّت الموقّع للإصدار %s (SHA-256 %s). نزّل نسخة جديدة من المستودع وتحقق مجددًا. لا تشغّل هذه النسخة.
 en|e_archive_ver|The archive is for version %s but the release announced is %s: the files do not belong to the announced release (a mirror replaying an older signed release?). Nothing was installed or changed.
 fr|e_archive_ver|L'archive est de la version %s alors que la version annoncée est %s : les fichiers n'appartiennent pas à la version annoncée (un miroir qui rejoue une ancienne version signée ?). Rien n'a été installé ni modifié.
 es|e_archive_ver|El archivo es de la versión %s pero la versión anunciada es %s: los archivos no pertenecen a la versión anunciada (¿un espejo que reproduce una versión firmada antigua?). No se ha instalado ni modificado nada.
@@ -1410,16 +1463,16 @@ nl|bkc_badsig|De ToutWAF Backup-client is NIET geïnstalleerd: de handtekening v
 ru|bkc_badsig|Клиент ToutWAF Backup НЕ установлен: подпись релиза НЕДЕЙСТВИТЕЛЬНА. Ничего не установлено.
 zh|bkc_badsig|ToutWAF Backup 客户端未安装：发布签名无效。未安装任何内容。
 ar|bkc_badsig|لم يتم تثبيت عميل ToutWAF Backup: توقيع الإصدار غير صالح. لم يُثبَّت شيء.
-en|tele_on|Telemetry and collective network: by default ToutWAF shares with the publisher space (app.toutwaf.com) the attacks it blocked (attacker address, country, type of attack, rule), attack patterns and aggregate figures, which also feed the live attack map. Never the content of requests, the names of your sites or legitimate visitors. An installation that is updated without ever having chosen is switched on by the update, with a notice in the console. Switch it off in one click in the console (Collective network, or Settings, Privacy and telemetry), or install with --no-telemetry (or TOUTWAF_TELEMETRY=0) for zero telemetry. Details: docs/confidentialite-telemetrie.md
-fr|tele_on|Télémétrie et réseau collectif : par défaut, ToutWAF partage avec l'espace éditeur (app.toutwaf.com) les attaques qu'il a bloquées (adresse de l'attaquant, pays, type d'attaque, règle), des motifs d'attaque et des chiffres agrégés, qui alimentent aussi la carte des attaques en direct. Jamais le contenu des requêtes, les noms de vos sites ni les visiteurs légitimes. Une installation mise à jour sans jamais avoir choisi est activée par la mise à jour, avec un avis dans la console. Désactivable en un clic dans la console (Réseau collectif, ou Paramètres, Confidentialité et télémétrie), ou installez avec --no-telemetry (ou TOUTWAF_TELEMETRY=0) pour une télémétrie zéro. Détails : docs/confidentialite-telemetrie.md
-es|tele_on|Telemetría y red colectiva: por defecto ToutWAF comparte con el espacio del editor (app.toutwaf.com) los ataques que bloqueó (dirección del atacante, país, tipo de ataque, regla), patrones de ataque y cifras agregadas, que también alimentan el mapa de ataques en directo. Nunca el contenido de las solicitudes, los nombres de sus sitios ni los visitantes legítimos. Una instalación actualizada sin haber elegido nunca se activa con la actualización, con un aviso en la consola. Se desactiva con un clic en la consola (Red colectiva, o Ajustes, Privacidad y telemetría), o instale con --no-telemetry (o TOUTWAF_TELEMETRY=0) para telemetría cero. Detalles: docs/confidentialite-telemetrie.md
-de|tele_on|Telemetrie und kollektives Netzwerk: Standardmäßig teilt ToutWAF mit dem Herausgeberbereich (app.toutwaf.com) die blockierten Angriffe (Adresse des Angreifers, Land, Angriffsart, Regel), Angriffsmuster und aggregierte Zahlen, die auch die Live-Angriffskarte speisen. Nie den Inhalt von Anfragen, die Namen Ihrer Sites oder legitime Besucher. Eine ohne Auswahl aktualisierte Installation wird durch das Update eingeschaltet, mit einem Hinweis in der Konsole. Mit einem Klick in der Konsole abschaltbar (Kollektives Netzwerk, oder Einstellungen, Datenschutz und Telemetrie), oder installieren Sie mit --no-telemetry (oder TOUTWAF_TELEMETRY=0) für Null-Telemetrie. Details: docs/confidentialite-telemetrie.md
-it|tele_on|Telemetria e rete collettiva: per impostazione predefinita ToutWAF condivide con lo spazio dell'editore (app.toutwaf.com) gli attacchi bloccati (indirizzo dell'attaccante, paese, tipo di attacco, regola), modelli di attacco e cifre aggregate, che alimentano anche la mappa degli attacchi in diretta. Mai il contenuto delle richieste, i nomi dei vostri siti o i visitatori legittimi. Un'installazione aggiornata senza aver mai scelto viene attivata dall'aggiornamento, con un avviso nella console. Disattivabile con un clic nella console (Rete collettiva, oppure Impostazioni, Privacy e telemetria), oppure installate con --no-telemetry (o TOUTWAF_TELEMETRY=0) per la telemetria zero. Dettagli: docs/confidentialite-telemetrie.md
-pt|tele_on|Telemetria e rede coletiva: por predefinição a ToutWAF partilha com o espaço do editor (app.toutwaf.com) os ataques que bloqueou (endereço do atacante, país, tipo de ataque, regra), padrões de ataque e números agregados, que também alimentam o mapa dos ataques em direto. Nunca o conteúdo dos pedidos, os nomes dos seus sites nem os visitantes legítimos. Uma instalação atualizada sem nunca ter escolhido é ativada pela atualização, com um aviso na consola. Desativável com um clique na consola (Rede coletiva, ou Definições, Privacidade e telemetria), ou instale com --no-telemetry (ou TOUTWAF_TELEMETRY=0) para telemetria zero. Detalhes: docs/confidentialite-telemetrie.md
-nl|tele_on|Telemetrie en collectief netwerk: standaard deelt ToutWAF met de uitgeversruimte (app.toutwaf.com) de geblokkeerde aanvallen (adres van de aanvaller, land, type aanval, regel), aanvalspatronen en geaggregeerde cijfers, die ook de live-aanvalskaart voeden. Nooit de inhoud van verzoeken, de namen van uw sites of legitieme bezoekers. Een installatie die zonder keuze wordt bijgewerkt, wordt door de update ingeschakeld, met een melding in de console. Met één klik uit te zetten in de console (Collectief netwerk, of Instellingen, Privacy en telemetrie), of installeer met --no-telemetry (of TOUTWAF_TELEMETRY=0) voor nul-telemetrie. Details: docs/confidentialite-telemetrie.md
-ru|tele_on|Телеметрия и коллективная сеть: по умолчанию ToutWAF передаёт пространству издателя (app.toutwaf.com) заблокированные атаки (адрес атакующего, страна, тип атаки, правило), шаблоны атак и сводные числа, которые также питают карту атак в реальном времени. Никогда содержимое запросов, названия ваших сайтов и законные посетители. Установка, обновлённая без выбора, включается обновлением, с уведомлением в консоли. Отключается одним щелчком в консоли (Коллективная сеть или Настройки, Конфиденциальность и телеметрия), либо установите с --no-telemetry (или TOUTWAF_TELEMETRY=0) для нулевой телеметрии. Подробности: docs/confidentialite-telemetrie.md
-zh|tele_on|遥测与集体网络：默认情况下，ToutWAF 会与发行方空间（app.toutwaf.com）共享其拦截的攻击（攻击者地址、国家、攻击类型、规则）、攻击模式和汇总数字，这些数据也用于实时攻击地图。绝不包含请求内容、您的站点名称或合法访客。从未做过选择而被更新的安装会在更新时开启，并在控制台中给出提示。可在控制台中一键关闭（集体网络，或 设置 > 隐私与遥测），或使用 --no-telemetry（或 TOUTWAF_TELEMETRY=0）安装以启用零遥测。详情：docs/confidentialite-telemetrie.md
-ar|tele_on|القياس عن بُعد والشبكة الجماعية: يشارك ToutWAF افتراضياً مع فضاء الناشر (app.toutwaf.com) الهجمات التي حجبها (عنوان المهاجم والبلد ونوع الهجوم والقاعدة) وأنماط الهجوم وأرقاماً مجمّعة، وهي تغذّي أيضاً خريطة الهجمات المباشرة. لا محتوى الطلبات ولا أسماء مواقعك ولا الزوار الشرعيين أبداً. يُفعَّل التثبيت المحدَّث الذي لم يختر قط بواسطة التحديث، مع إشعار في الوحدة. يمكن إيقافه بنقرة واحدة في الوحدة (الشبكة الجماعية، أو الإعدادات، الخصوصية والقياس عن بُعد)، أو ثبّت مع --no-telemetry (أو TOUTWAF_TELEMETRY=0) للحصول على قياس صفري. التفاصيل: docs/confidentialite-telemetrie.md
+en|tele_on|Telemetry: NOTHING is sent to the publisher space (app.toutwaf.com) until an administrator accepts, with an unchecked box, in the setup wizard of the console (or later in Settings, Privacy and telemetry). If accepted, the attacks ToutWAF blocked (attacker address, country, type of attack, rule) and aggregate figures are sent, never the content of requests, the names of your sites or legitimate visitors; it can be withdrawn at any time and the data erased. To accept from the start, install with --telemetry (or TOUTWAF_TELEMETRY=1). Details: docs/confidentialite-telemetrie.md
+fr|tele_on|Télémétrie : RIEN n'est envoyé à l'espace éditeur (app.toutwaf.com) tant qu'un administrateur n'a pas accepté, avec une case décochée, dans l'assistant de première configuration de la console (ou plus tard dans Paramètres, Confidentialité et télémétrie). Si vous acceptez, les attaques bloquées par ToutWAF (adresse de l'attaquant, pays, type d'attaque, règle) et des chiffres agrégés sont envoyés, jamais le contenu des requêtes, les noms de vos sites ni les visiteurs légitimes ; retrait à tout moment et effacement des données. Pour accepter dès le départ, installez avec --telemetry (ou TOUTWAF_TELEMETRY=1). Détails : docs/confidentialite-telemetrie.md
+es|tele_on|Telemetría: NO se envía NADA al espacio del editor (app.toutwaf.com) hasta que un administrador lo acepte, con una casilla sin marcar, en el asistente de primera configuración de la consola (o más tarde en Ajustes, Privacidad y telemetría). Si lo acepta, se envían los ataques bloqueados por ToutWAF (dirección del atacante, país, tipo de ataque, regla) y cifras agregadas, nunca el contenido de las solicitudes, los nombres de sus sitios ni los visitantes legítimos; puede retirarse en cualquier momento y borrar los datos. Para aceptar desde el principio, instale con --telemetry (o TOUTWAF_TELEMETRY=1). Detalles: docs/confidentialite-telemetrie.md
+de|tele_on|Telemetrie: Es wird NICHTS an den Herausgeberbereich (app.toutwaf.com) gesendet, bis ein Administrator im Einrichtungsassistenten der Konsole (oder später unter Einstellungen, Datenschutz und Telemetrie) mit einem nicht vorangekreuzten Feld zugestimmt hat. Bei Zustimmung werden die von ToutWAF blockierten Angriffe (Adresse des Angreifers, Land, Angriffsart, Regel) und aggregierte Zahlen gesendet, niemals der Inhalt von Anfragen, die Namen Ihrer Sites oder legitime Besucher; Widerruf jederzeit möglich, die Daten werden gelöscht. Um von Anfang an zuzustimmen, installieren Sie mit --telemetry (oder TOUTWAF_TELEMETRY=1). Details: docs/confidentialite-telemetrie.md
+it|tele_on|Telemetria: NON viene inviato NULLA allo spazio dell'editore (app.toutwaf.com) finché un amministratore non accetta, con una casella non selezionata, nella procedura guidata di prima configurazione della console (o più tardi in Impostazioni, Privacy e telemetria). Se accetta, vengono inviati gli attacchi bloccati da ToutWAF (indirizzo dell'attaccante, paese, tipo di attacco, regola) e cifre aggregate, mai il contenuto delle richieste, i nomi dei suoi siti né i visitatori legittimi; revoca in qualsiasi momento e cancellazione dei dati. Per accettare fin dall'inizio, installi con --telemetry (o TOUTWAF_TELEMETRY=1). Dettagli: docs/confidentialite-telemetrie.md
+pt|tele_on|Telemetria: NADA é enviado ao espaço do editor (app.toutwaf.com) até que um administrador aceite, com uma caixa desmarcada, no assistente de primeira configuração da consola (ou mais tarde em Definições, Privacidade e telemetria). Se aceitar, são enviados os ataques bloqueados pelo ToutWAF (endereço do atacante, país, tipo de ataque, regra) e números agregados, nunca o conteúdo dos pedidos, os nomes dos seus sites nem os visitantes legítimos; retirada a qualquer momento e apagamento dos dados. Para aceitar desde o início, instale com --telemetry (ou TOUTWAF_TELEMETRY=1). Detalhes: docs/confidentialite-telemetrie.md
+nl|tele_on|Telemetrie: er wordt NIETS naar de ruimte van de uitgever (app.toutwaf.com) gestuurd tot een beheerder akkoord gaat, met een niet-aangevinkt vakje, in de installatiewizard van de console (of later bij Instellingen, Privacy en telemetrie). Bij akkoord worden de door ToutWAF geblokkeerde aanvallen (adres van de aanvaller, land, type aanval, regel) en geaggregeerde cijfers verstuurd, nooit de inhoud van verzoeken, de namen van uw sites of legitieme bezoekers; intrekken kan altijd en de gegevens worden gewist. Om vanaf het begin akkoord te gaan, installeert u met --telemetry (of TOUTWAF_TELEMETRY=1). Details: docs/confidentialite-telemetrie.md
+ru|tele_on|Телеметрия: НИЧЕГО не отправляется в пространство издателя (app.toutwaf.com), пока администратор не согласится (неотмеченный флажок) в мастере первоначальной настройки консоли или позже в разделе «Настройки, Конфиденциальность и телеметрия». При согласии отправляются атаки, заблокированные ToutWAF (адрес атакующего, страна, тип атаки, правило) и агрегированные показатели, но никогда содержимое запросов, названия ваших сайтов и законные посетители; согласие можно отозвать в любой момент, данные будут удалены. Чтобы согласиться с самого начала, установите с --telemetry (или TOUTWAF_TELEMETRY=1). Подробности: docs/confidentialite-telemetrie.md
+zh|tele_on|遥测：在管理员于控制台的首次设置向导（或之后在“设置、隐私与遥测”）中通过未勾选的复选框明确同意之前，不会向发布方空间（app.toutwaf.com）发送任何内容。一旦同意，会发送ToutWAF 拦截的攻击（攻击者地址、国家、攻击类型、规则）和汇总数字，绝不包括请求内容、您的站点名称或合法访问者；可随时撤回并删除数据。若要从一开始就同意，请使用 --telemetry（或 TOUTWAF_TELEMETRY=1）安装。详情：docs/confidentialite-telemetrie.md
+ar|tele_on|القياس عن بُعد: لا يُرسل أي شيء إلى فضاء الناشر (app.toutwaf.com) حتى يوافق مسؤول، بخانة غير محددة، في معالج الإعداد الأول للوحدة (أو لاحقاً في الإعدادات، الخصوصية والقياس عن بُعد). عند الموافقة تُرسل الهجمات التي حجبها ToutWAF (عنوان المهاجم والبلد ونوع الهجوم والقاعدة) وأرقام مجمّعة، ولا يُرسل أبداً محتوى الطلبات ولا أسماء مواقعك ولا الزوار الشرعيون؛ ويمكن الانسحاب في أي وقت ومحو البيانات. للموافقة منذ البداية، ثبّت باستخدام --telemetry (أو TOUTWAF_TELEMETRY=1). التفاصيل: docs/confidentialite-telemetrie.md
 en|tele_off|Telemetry: zero telemetry was requested (--no-telemetry / TOUTWAF_TELEMETRY=0). Nothing will be sent to the publisher space, nothing will be received from it, and the console starts with the "Zero telemetry" switch on. You can change this later in the console (Settings, Privacy and telemetry).
 fr|tele_off|Télémétrie : la télémétrie zéro a été demandée (--no-telemetry / TOUTWAF_TELEMETRY=0). Rien ne sera envoyé à l'espace éditeur, rien n'en sera reçu, et la console démarre avec l'interrupteur « Télémétrie zéro » activé. Vous pourrez changer cela plus tard dans la console (Paramètres, Confidentialité et télémétrie).
 es|tele_off|Telemetría: se pidió telemetría cero (--no-telemetry / TOUTWAF_TELEMETRY=0). No se enviará nada al espacio del editor, no se recibirá nada de él y la consola arrancará con el interruptor «Telemetría cero» activado. Podrá cambiarlo más tarde en la consola (Ajustes, Privacidad y telemetría).
@@ -3430,6 +3483,16 @@ nl|af_giveup|Geen automatische pogingen meer (limiet: %s).
 ru|af_giveup|Больше автоматических попыток нет (предел: %s).
 zh|af_giveup|不再自动重试（上限：%s）。
 ar|af_giveup|لا مزيد من المحاولات التلقائية (الحد: %s).
+en|af_failed_at|Stopped at "%s": %s
+fr|af_failed_at|Arrêté à l'étape « %s » : %s
+es|af_failed_at|Detenido en «%s»: %s
+de|af_failed_at|Angehalten bei „%s“: %s
+it|af_failed_at|Interrotto a «%s»: %s
+pt|af_failed_at|Interrompido em «%s»: %s
+nl|af_failed_at|Gestopt bij „%s”: %s
+ru|af_failed_at|Остановлено на шаге «%s»: %s
+zh|af_failed_at|在“%s”处停止：%s
+ar|af_failed_at|توقف عند «%s»: %s
 en|af_diag_ready|A diagnostic ready to send was written to %s (secrets are hidden).
 fr|af_diag_ready|Un diagnostic prêt à envoyer a été écrit dans %s (les secrets sont masqués).
 es|af_diag_ready|Se escribió un diagnóstico listo para enviar en %s (los secretos están ocultos).
@@ -4150,6 +4213,9 @@ PLATFORMS="$(read_platforms)"
 # ------------------------------------------------------------------------------------------------ UI helpers
 UI_COLOR=0; UI_UTF=0; UI_TRUECOLOR=0; BANNER_DONE=0
 SPIN_PID=""; LOG=""; CUR_STEP=""; WARNINGS=()
+# TMP is the work directory that `cleanup` (EXIT trap, below) removes with rm -rf: it is ours only once mktemp made it. Never take it from the environment
+# (TMP=/tmp, TMP=/home/me/data are common): an early exit (--help, an unknown option, --check-compat, a refusal) would remove that directory as root.
+TMP=""
 R=""; B=""; D=""; RED=""; GRN=""; YLW=""; ACC=""; VIO=""
 exec 3>&2                                       # original stderr (die/warn must stay visible while steps are redirected)
 
@@ -4632,13 +4698,13 @@ env_check() {   # fills EC_LV / EC_CA / EC_AC from what this machine is; changes
         fwp="$fwp $p"
       done
       if [ "$OPEN_FW" = 0 ] && [ -n "$fwp" ]; then ec_add warn "$(t pf_fw_cause "$fw" "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fw_action)"; fi
-    elif have ufw && grep -qi 'status: active' <<<"$(ufw status 2>/dev/null | head -n1)"; then
+    elif have ufw && grep -qi 'status: active' <<<"$(ufw status 2>/dev/null | sed -n 1p)"; then
       fw=ufw
       for p in "$HTTP_PORT" "$HTTPS_PORT"; do
         grep -Eq "^$p(/tcp)?[[:space:]]+ALLOW" <<<"$(ufw status 2>/dev/null)" || fwp="$fwp $p"
       done
       if [ "$OPEN_FW" = 0 ] && [ -n "$fwp" ]; then ec_add warn "$(t pf_fw_cause "$fw" "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fw_action)"; fi
-    elif have iptables && grep -Eq '^-P INPUT (DROP|REJECT)' <<<"$(iptables -S INPUT 2>/dev/null | head -n1)"; then
+    elif have iptables && grep -Eq '^-P INPUT (DROP|REJECT)' <<<"$(iptables -S INPUT 2>/dev/null | sed -n 1p)"; then
       for p in "$HTTP_PORT" "$HTTPS_PORT"; do
         grep -Eq -- "--dports? ([0-9:,]*,)?$p([, ]|$).*-j ACCEPT" <<<"$(iptables -S INPUT 2>/dev/null)" || fwp="$fwp $p"
       done
@@ -4724,7 +4790,10 @@ env_run_check() {   # --check-env: the verdict, nothing is changed; exit 0 (noth
 # failure is a warning), it is not repeated within 6 hours, and the machine is never restarted. Read-only checks: running them again changes nothing.
 # BEGIN prereq (extracted by tests/prereq-test.sh: keep the markers)
 SKIP_PREREQ="${TOUTWAF_SKIP_PREREQ:-0}"
-SKIP_SYSUPDATE="${TOUTWAF_SKIP_SYSUPDATE:-${TOUTWAF_NO_SYSTEM_UPDATE:-0}}"
+# Run by the update assistant of the console (it sets TOUTWAF_CP_PREP_HANDOFF=1): a product update does not update the packages of the whole system
+# (a new kernel, libraries, minutes of the 15 that the installer has, then a service that runs over replaced libraries). That is the job of the
+# "System updates" page, with its window, its reboot decision and its rollback. An owner who wants both says so: TOUTWAF_SKIP_SYSUPDATE=0.
+SKIP_SYSUPDATE="${TOUTWAF_SKIP_SYSUPDATE:-${TOUTWAF_NO_SYSTEM_UPDATE:-$([ "${TOUTWAF_CP_PREP_HANDOFF:-0}" = 1 ] && echo 1 || echo 0)}}"
 prereq_dir() {   # the nearest existing directory of a path: a path that does not exist yet lives on the file system of its parent
   local d="$1"
   while [ -n "$d" ] && [ "$d" != / ] && [ ! -d "$d" ]; do d="$(dirname "$d")"; done
@@ -5007,7 +5076,7 @@ af_guard_begin() { AF_SAVED_E=0; case "$-" in *e*) AF_SAVED_E=1;; esac; AF_SAVED
 af_guard_end() { [ "$AF_SAVED_E" = 1 ] && set -e; [ -n "$AF_SAVED_ERR" ] && eval "$AF_SAVED_ERR"; return 0; }
 # (the actions that only read or remove -- --check-env, --check-prereq, --status, --links, --uninstall -- never correct anything)
 af_enabled() {
-  case "${ACTION:-}" in checkenv|checkprereq|status|links|uninstall) return 1;; esac
+  case "${ACTION:-}" in checkenv|checkprereq|verifyself|status|links|uninstall) return 1;; esac
   [ "$AUTOFIX" = 1 ] && [ "${DRY_RUN:-0}" = 0 ] && [ "${STAGING:-0}" = 0 ]
 }
 
@@ -5563,7 +5632,7 @@ af_apply() {   # af_apply "ID ID ...": diagnoses and corrects; the number of cor
   done
   return 0
 }
-af_state_vars="ACTION COMPONENT VERSION CHANNEL TARBALL BASE_URL CP_URL ENROLL_TOKEN NODE_TOKEN CP_CA NODE_GROUP CP_PORT HTTP_PORT HTTPS_PORT PUBLIC_HOST PRIVATE_HOST OPEN_FW OPEN_CP_PORT CONSOLE_FROM HTTP3 DNS_SERVER DNS_FREE FW_MODULE NO_ENABLE NO_START SKIP_SYSUPDATE DB_ENGINE DB_DSN DB_DSN_FILE DB_LOCAL DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD_FILE DB_TLS_MODE DB_CA DB_ADMIN_DSN_FILE BIN_DIR HOME_DIR LAYOUT LANG_CODE FORCE NO_EXTRAS NO_TELEMETRY CLOUD_URL"
+af_state_vars="ACTION COMPONENT VERSION CHANNEL TARBALL BASE_URL CP_URL ENROLL_TOKEN NODE_TOKEN CP_CA NODE_GROUP CP_PORT HTTP_PORT HTTPS_PORT PUBLIC_HOST PRIVATE_HOST OPEN_FW OPEN_CP_PORT CONSOLE_FROM HTTP3 DNS_SERVER DNS_FREE FW_MODULE NO_ENABLE NO_START SKIP_SYSUPDATE DB_ENGINE DB_DSN DB_DSN_FILE DB_LOCAL DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD_FILE DB_TLS_MODE DB_CA DB_ADMIN_DSN_FILE BIN_DIR HOME_DIR LAYOUT LANG_CODE FORCE NO_EXTRAS NO_TELEMETRY TELEMETRY_OPTIN CLOUD_URL"
 af_save_state() {   # an interactive run: what was answered, for the new attempt (a private file; removed when read)
   local f v IFS=' '
   f="$(mktemp "$(af_p /run)/toutwaf-autofix.XXXXXX" 2>/dev/null || mktemp)"; chmod 0600 "$f"
@@ -5591,6 +5660,9 @@ af_reexec() {   # a new attempt: the installer starts again from its own file; r
     af_emit "$(t af_line "$rp" "$ra" "$(t af_try_run)")"
   done
   export TOUTWAF_AUTOFIX_TRY=$((AF_TRY + 1)) TOUTWAF_AUTOFIX_APPLIED="$recs"
+  # The new attempt starts from nothing but this: programs this attempt already replaced look "already up to date" to it, and a service that
+  # runs the old program would then never be restarted (an update that said success while the old version kept running). Remembered across the restart.
+  case "${CHANGED:-0}" in 1) export TOUTWAF_AUTOFIX_CHANGED=1;; *) unset TOUTWAF_AUTOFIX_CHANGED;; esac
   if declare -F interactive >/dev/null 2>&1 && interactive; then st="$(af_save_state)"; args=(--autofix-resume "$st")   # answered at the keyboard: the answers go with it
   else args=("${AF_ARGS[@]+"${AF_ARGS[@]}"}"); fi
   spin_kill 2>/dev/null || true
@@ -5605,7 +5677,12 @@ autofix_failure() {
   AF_ACTIVE=1; af_guard_begin
   AF_UNIT=""; AF_CTX="$(af_context "$1")"
   af_apply "$AF_CATALOG"
-  if [ "$AF_N" -gt 0 ] && [ "$AF_TRY" -lt "$AF_MAX_TRIES" ]; then af_reexec || rc=1; else rc=1; fi
+  if [ "$AF_N" -gt 0 ] && [ "$AF_TRY" -lt "$AF_MAX_TRIES" ]; then
+    # the failure that made a new attempt necessary is said BEFORE the installer starts again (it is never reported otherwise: the new attempt
+    # replaces this process, and a quiet run, like the one of the update assistant, printed nothing of it)
+    af_emit "$(t af_failed_at "${CUR_STEP:-?}" "$(printf '%s' "$1" | { if declare -F diag_redact >/dev/null 2>&1; then diag_redact; else cat; fi; } | head -n1 | cut -c1-300)")"
+    af_reexec || rc=1
+  else rc=1; fi
   [ "$AF_N" -gt 0 ] && [ "$AF_TRY" -ge "$AF_MAX_TRIES" ] && af_emit "$(t af_giveup "$AF_MAX_TRIES")"
   autofix_diagnostic "$1"
   af_guard_end; AF_ACTIVE=""
@@ -6109,9 +6186,11 @@ Options:
                              (UDP and TCP) is opened in firewalld / ufw (not with --no-firewall). No other program is ever stopped. The DNS role
                              itself is given in the console (DNS > Servers).
   --no-dns-server            undo what this installer did for it (capability, stub resolver, firewall rules) (also TOUTWAF_DNS_SERVER=0)
-  --no-telemetry             install with ZERO telemetry: nothing is sent to the publisher space (also TOUTWAF_TELEMETRY=0). Without it,
-                             the attacks ToutWAF blocks and aggregate figures are shared with app.toutwaf.com, never the content of
-                             requests nor legitimate visitors; it can be switched off at any time in the console (Settings, Privacy and telemetry)
+  --no-telemetry             install with ZERO telemetry: nothing is sent to the publisher space (also TOUTWAF_TELEMETRY=0)
+  --telemetry                accept telemetry from the start (also TOUTWAF_TELEMETRY=1): the attacks ToutWAF blocks and aggregate figures are
+                             shared with app.toutwaf.com, never the content of requests nor legitimate visitors. Without --telemetry
+                             NOTHING is sent until an administrator accepts it in the console (first-run wizard, or Settings, Privacy
+                             and telemetry); it can be withdrawn at any time and the data erased
   --with-firewall            ALSO let ToutWAF manage this machine's firewall (the optional Firewall module, off by default; also
                              TOUTWAF_WITH_FIREWALL=1). It only switches the module on: no rule is applied by the installation, and every
                              later change runs as a trial with automatic rollback and an anti-lockout guard (SSH and the console stay reachable).
@@ -6149,6 +6228,8 @@ Options:
   --check-compat             print whether this system is compatible (and the list of compatible distributions), change nothing;
                              exit 0 when compatible, 3 when not
   --skip-os-check            install although the system is unsupported / unrecognised (warns loudly; at your own risk)
+  --verify-self              check THIS file against the signed SHA256SUMS of the release (signature, then SHA-256 of install.sh) and print its SHA-256;
+                             changes nothing, needs no root. Run it on a downloaded file, not through a pipe: exit 0 genuine, 1 not the signed one, 2 cannot read itself
   --check-env                print what this machine lacks for the installation (ports held by another program, a web server that starts at
                              boot, firewall, unreachable control plane) with the cause and what to do, and change nothing;
                              exit 0 when nothing refuses, 4 when the installation would be refused
@@ -6374,7 +6455,8 @@ while [ $# -gt 0 ]; do
     --no-http3) HTTP3=0; shift;;
     --dns-server) DNS_SERVER=1; shift;;
     --no-dns-server) DNS_SERVER=0; shift;;
-    --no-telemetry) NO_TELEMETRY=1; shift;;
+    --no-telemetry) NO_TELEMETRY=1; TELEMETRY_OPTIN=0; shift;;
+    --telemetry) TELEMETRY_OPTIN=1; NO_TELEMETRY=0; shift;;
     --with-firewall|--with-firewall-module) FW_MODULE=1; shift;;
     --no-firewall-module) FW_MODULE=0; shift;;
     --restore) RESTORE=1; shift;;
@@ -6412,6 +6494,7 @@ while [ $# -gt 0 ]; do
     --check-compat) CHECK_COMPAT=1; shift;;
     --skip-os-check) SKIP_OS_CHECK=1; shift;;
     --check-env) ACTION=checkenv; shift;;
+    --verify-self) ACTION=verifyself; shift;;
     --check-prereq) ACTION=checkprereq; shift;;
     --skip-env-check) SKIP_ENV_CHECK=1; shift;;
     --skip-sysupdate) SKIP_SYSUPDATE=1; shift;;
@@ -6485,7 +6568,7 @@ if [ "$CHECK_COMPAT" = 1 ]; then
   [ "$CP_STATUS" != unsupported ] || exit 3
   exit 0
 fi
-if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ "$ACTION" != checkenv ] && [ "$ACTION" != checkprereq ] && [ "$(id -u)" -ne 0 ]; then die "$(t root_required)"; fi
+if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ "$ACTION" != checkenv ] && [ "$ACTION" != checkprereq ] && [ "$ACTION" != verifyself ] && [ "$(id -u)" -ne 0 ]; then die "$(t root_required)"; fi
 autofix_prepare_tmp; TMP="$(mktemp -d)"; LOG="$TMP/install.log"; autofix_flush_pending
 # persist_log: from now on the log goes to /var/log/toutwaf-install.log (called once the compatibility gate has passed, so that a refused
 # run leaves nothing behind)
@@ -6511,6 +6594,19 @@ HAS_SYSTEMD=0; { [ -d /run/systemd/system ] && have systemctl; } && HAS_SYSTEMD=
 want_dp() { [ "$COMPONENT" = dp ] || [ "$COMPONENT" = all ]; }
 want_cp() { [ "$COMPONENT" = cp ] || [ "$COMPONENT" = all ]; }
 svc_active() { [ "$HAS_SYSTEMD" = 1 ] && systemctl is-active --quiet "$1"; }
+# svc_stale UNIT FILE: true when the program the unit RUNS (/proc/PID/exe: the file that was started, even if it was replaced since) is not the one now
+# installed at FILE. "Nothing to restart" is decided on what runs, never on "the files are already in place" (an installer started again after a
+# correction finds them in place, and the old program kept running: production, 0.6.1 -> 0.6.3). False when it cannot tell.
+svc_stale() {
+  local pid exe a b
+  [ "$HAS_SYSTEMD" = 1 ] || return 1
+  pid="$(systemctl show "$1" -p MainPID --value 2>/dev/null || true)"
+  case "$pid" in ""|0|*[!0-9]*) return 1;; esac
+  exe="${SVC_PROC_ROOT:-/proc}/$pid/exe"
+  [ -r "$exe" ] && [ -f "$2" ] || return 1
+  a="$(sha256sum <"$exe" 2>/dev/null | cut -d' ' -f1 || true)"; b="$(sha256sum <"$2" 2>/dev/null | cut -d' ' -f1 || true)"
+  [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$b" ]
+}
 cp_exe() { printf '%s' "${CP_BIN:-$(p "$BIN_DIR/toutwaf-cp")}"; }
 
 # what is installed right now (binaries on disk)
@@ -7601,6 +7697,40 @@ refresh_channel() {
   if [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then NEW_BUILD="$CH_BUILD"; fi
   return 0
 }
+# installer_self: the path of this very file, or nothing when the installer was started straight from the download (curl | bash, bash <(curl ...)):
+# bash then reads the script from a pipe, there is no file to read back.
+installer_self() { local f="${INSTALLER_SELF:-$0}"; if [ -f "$f" ] && [ -r "$f" ]; then printf '%s' "$f"; fi; return 0; }
+# installer_fingerprint_notice [FILE]: at a terminal, an installation says the SHA-256 of the installer it is (to compare with the one published with
+# the release, on another channel than the download: S-04, docs/securite/installateurs.md), or says why it cannot. Unattended runs add nothing.
+# shellcheck disable=SC2120  # the optional FILE is given by deploy/tests/installer-trust-test.sh, the installation itself passes none
+installer_fingerprint_notice() {
+  local f="${1-$(installer_self)}"
+  interactive || return 0
+  if [ -n "$f" ] && [ -f "$f" ]; then say "  $(t ins_fp "$(sha256sum "$f" | cut -d' ' -f1)" "$(basename "$f")")"
+  else say "  $(t ins_fp_pipe install.sh)"; fi
+  return 0
+}
+# cmd_verify_self (--verify-self): is THIS file the installer that the SIGNED SHA256SUMS of the release lists? The signature is checked with the key of this
+# installation first (verify_signature, as for an archive), then the SHA-256 of this file against the line "install.sh". Nothing is installed or changed.
+# What it proves and what it does not: it detects a copy that is not the published one (a swapped mirror, a modified file); it cannot protect against the
+# publisher's own signing key, nor tell the person where the first copy came from if the key it uses is the one this very file carries
+# (docs/securite/installateurs.md: compare the SHA-256 with another channel too).
+cmd_verify_self() {
+  local self hx rel q listed
+  self="$(installer_self)"
+  if [ -z "$self" ]; then printf '%s\n' "$(t ins_fp_pipe install.sh)" >&2; return 2; fi
+  hx="$(sha256sum "$self" | cut -d' ' -f1)"
+  say "  install.sh SHA-256: $hx"
+  resolve_release
+  rel="$(repo_base)/releases/$RESOLVED_VERSION"; q="$(release_q "$(release_build)")"
+  fetch "$rel/SHA256SUMS$q" "$TMP/SHA256SUMS" || die "cannot download $rel/SHA256SUMS"
+  verify_signature "$rel" "$q"
+  listed="$(sed -n 's/^\([0-9A-Fa-f]\{64\}\)[[:space:]][[:space:]]*\*\{0,1\}install\.sh[[:space:]]*$/\1/p' "$TMP/SHA256SUMS" | tr 'A-F' 'a-f' | tail -n1)"
+  if [ -z "$listed" ]; then printf '%s\n' "$(t ins_vs_nolist "$RESOLVED_VERSION")" >&2; return 1; fi
+  if [ "$listed" != "$hx" ]; then printf '%s\n' "$(t ins_vs_diff "$hx" "$RESOLVED_VERSION" "$listed")" >&2; return 1; fi
+  say "  $(t ins_vs_ok "$RESOLVED_VERSION" "$hx")"
+  return 0
+}
 obtain_binaries() {   # sets SRC_DIR to a directory holding the binaries
   local tb="$TARBALL"
   if [ -z "$tb" ]; then
@@ -7952,9 +8082,10 @@ EOF
     # HTTP/3 (QUIC): only when asked for (--http3); UDP stays closed otherwise
     if [ "$(http3_on)" = 1 ]; then echo "  h3: true               # HTTP/3 (QUIC) on UDP $HTTPS_PORT: the installer opens that UDP port in firewalld / ufw"; fi
     cat <<EOF
-  # proxy_protocol: optional      # when behind a TCP load balancer sending PROXY protocol
+  # proxy_protocol: optional      # when behind a TCP load balancer sending PROXY protocol ...
+  # proxy_protocol_from: ["203.0.113.10"]   # ... and the address(es) of that load balancer: a PROXY header is believed ONLY from these
 admin:
-  listen: 127.0.0.1:9101          # /healthz /metrics /status /debug/inspect (loopback only)
+  listen: 127.0.0.1:9101          # /healthz /metrics /status /debug/inspect (loopback only; the token is made at the first start: <data_dir>/admin.token)
 tls:
   profile: intermediate           # modern = TLS 1.3 only
 events:
@@ -8031,10 +8162,11 @@ dataplane:
   http_port: $HTTP_PORT
   https_port: $HTTPS_PORT
 # Telemetry to the publisher space (app.toutwaf.com): the attacks ToutWAF blocked and aggregate figures, never the content of requests nor
-# legitimate visitors. ON by default; "enabled: false" starts with zero telemetry. Once an administrator saved the choice in the console
-# (Settings > Privacy and telemetry), the console wins over this file. Details: docs/confidentialite-telemetrie.md
+# legitimate visitors. OPT-IN: without "enabled: true" NOTHING is sent until an administrator accepts it in the console (first-run wizard, or
+# Settings > Privacy and telemetry); "enabled: false" is zero telemetry. Once an administrator saved the choice in the console, the console
+# wins over this file. Details: docs/confidentialite-telemetrie.md
 telemetry:
-  enabled: $([ "$NO_TELEMETRY" = 1 ] && echo false || echo true)
+$(if [ "$NO_TELEMETRY" = 1 ]; then echo "  enabled: false"; elif [ "${TELEMETRY_OPTIN:-0}" = 1 ]; then echo "  enabled: true"; else echo "  # enabled: (not set: the administrator is asked in the console)"; fi)
 ${lic:+# common licence of ToutPanel and ToutWAF (installer options --licence-api-url / --licence-pin)
 $lic}
 EOF
@@ -8053,6 +8185,43 @@ sd_opt() {
   if [ -z "$SD_VER" ]; then SD_VER="$(systemctl --version 2>/dev/null | awk 'NR==1{print $2}')"; [[ "$SD_VER" =~ ^[0-9]+$ ]] || SD_VER=999; fi
   if [ "$SD_VER" -ge "$1" ]; then printf '%s\n' "$2"; else printf '# %s (needs systemd >= %s, running %s)\n' "$2" "$1" "$SD_VER"; fi
 }
+# Sandbox of the root helpers (audit S-10: toutwaf-jobs/fw/relay/time/sysupdate/vpn/upgrade scored 8.9 to 9.4 "exposed" in
+# `systemd-analyze security`). Each helper runs a short fixed list of actions as root; what is added is only what the helper provably does not
+# use (deploy/tests/helper-sandbox-test.sh pins these choices, runs the helper tests under the capability set and checks the scores):
+#   basic   jobs, sysupdate, upgrade: they run the package manager or the installer (setuid files, services, kernel modules, sysctl,
+#           namespaces, the clock of a tzdata or chrony script...): only realtime scheduling is denied. RestrictSUIDSGID, ProtectSystem,
+#           ProtectKernel*, a capability set or a syscall filter would stop a package from installing.
+#   net     fw, vpn: files, systemctl, and nft / ip / wg over netlink: + native syscalls only, the @system-service filter (the syscalls the
+#           helpers use, measured with strace over their tests, are all in it), no change of personality, kernel log and cgroups read-only.
+#           (the vpn helper writes a sysctl file and applies it: no ProtectKernelTunables; both load rules: no capability set.)
+#   small   relay, time: files, systemctl / timedatectl over the system bus: + kernel tunables and modules, hostname, namespaces,
+#           devices, only local sockets, and the capabilities of a root that rewrites files of another owner. The clock helper keeps the
+#           clock syscalls and CAP_SYS_TIME (timedatectl set-time); the relay helper writes the configuration of the data plane and
+#           restarts it: no ProtectSystem.
+sd_helper_sandbox() {
+  local kind="$1" clock="${2:-protect}"
+  sd_opt 231 RestrictRealtime=yes
+  [ "$kind" = basic ] && return 0
+  sd_opt 235 LockPersonality=yes
+  sd_opt 209 SystemCallArchitectures=native
+  if [ "$clock" = keep ]; then sd_opt 211 "SystemCallFilter=@system-service @clock"; else sd_opt 211 SystemCallFilter=@system-service; fi
+  sd_opt 209 SystemCallErrorNumber=EPERM
+  sd_opt 244 ProtectKernelLogs=yes
+  sd_opt 232 ProtectControlGroups=yes
+  [ "$kind" = net ] && return 0
+  sd_opt 232 ProtectKernelTunables=yes
+  sd_opt 232 ProtectKernelModules=yes
+  sd_opt 242 ProtectHostname=yes
+  sd_opt 233 RestrictNamespaces=yes
+  printf 'PrivateDevices=yes\nRestrictAddressFamilies=AF_UNIX\n'
+  if [ "$clock" = keep ]; then
+    printf 'CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_SYS_TIME\n'
+  else
+    printf 'CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID\n'
+    sd_opt 245 ProtectClock=yes
+  fi
+  return 0
+}
 # StateDirectory= / LogsDirectory= make systemd create /var/lib/toutwaf and /var/log/toutwaf: only wanted for the legacy locations
 state_dir_lines() {
   if [ "$DATA_DIR" = /var/lib/toutwaf ]; then printf 'StateDirectory=toutwaf\nStateDirectoryMode=0750\n'; fi
@@ -8068,6 +8237,8 @@ Description=ToutWAF data plane (reverse proxy / WAAP)
 Documentation=https://github.com/$REPO
 After=network-online.target$(if want_cp || [ "${INST_CP:-0}" = 1 ]; then printf ' toutwaf-cp.service'; fi)
 Wants=network-online.target
+# A crash loop must never end the service for good: without this systemd gives up after 5 starts in 10 s (start-limit-hit) and the unit stays stopped.
+StartLimitIntervalSec=0
 
 [Service]
 Type=notify
@@ -8079,6 +8250,9 @@ ExecStart=$BIN_DIR/toutwaf-dp --config $CONF_DIR/toutwaf-dp.yaml run
 ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=1s
+# the data plane serves the traffic: the OOM killer spares it (the console is taken first); throttled before it takes the whole machine
+OOMScoreAdjust=-500
+$(sd_opt 240 MemoryHigh=85%)
 TimeoutStopSec=40s
 WatchdogSec=60s
 LimitNOFILE=1048576
@@ -8126,15 +8300,24 @@ Description=ToutWAF control plane (API, console, policy distribution)
 Documentation=https://github.com/$REPO
 After=network-online.target
 Wants=network-online.target
+# A crash loop must never end the service for good: without this systemd gives up after 5 starts in 10 s (start-limit-hit) and the unit stays stopped.
+StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+# Type=notify: READY=1 when the listeners are open, WATCHDOG=1 only while the console answers its own /healthz (a stuck console is restarted after WatchdogSec)
+Type=notify
+NotifyAccess=main
 User=$SVC_USER
 Group=$SVC_USER
 EnvironmentFile=-$CONF_DIR/cp.env
 ExecStart=$BIN_DIR/toutwaf-cp \$TOUTWAF_CP_ARGS
 Restart=always
 RestartSec=2s
+WatchdogSec=60s
+# memory: the runtime keeps its heap under 70 % by itself (GOMEMLIMIT set at start); the OOM killer takes the console before the data plane
+OOMScoreAdjust=300
+$(sd_opt 240 MemoryHigh=75%)
+$(sd_opt 240 MemoryMax=90%)
 TimeoutStopSec=30s
 LimitNOFILE=262144
 NoNewPrivileges=yes
@@ -8207,7 +8390,7 @@ EOF
 # The scripts carry a "toutwaf-<name>-proto: N" marker that the control plane checks before offering the button.
 emit_helper() {   # NAME  (template on stdin)
   local dst tmp; dst="$(p "$BIN_DIR/$1")"; tmp="$dst.new"
-  sed -e "s#@DATA_DIR@#$DATA_DIR#g" -e "s#@CONF_DIR@#$CONF_DIR#g" -e "s#@BIN_DIR@#$BIN_DIR#g" -e "s#@REPO@#$REPO#g" -e "s#@SVC_USER@#$SVC_USER#g" >"$tmp"
+  sed -e "s#@DATA_DIR@#$DATA_DIR#g" -e "s#@CONF_DIR@#$CONF_DIR#g" -e "s#@BIN_DIR@#$BIN_DIR#g" -e "s#@REPO@#$REPO#g" -e "s#@SVC_USER@#$SVC_USER#g" -e "s#@RELEASE_PUBKEY@#$RELEASE_PUBKEY_DEFAULT#g" >"$tmp"
   chmod 0755 "$tmp"; mv -f "$tmp" "$dst"   # new inode: a helper that is running right now (it is updating us) keeps reading its old copy
 }
 write_helpers() {
@@ -8241,8 +8424,9 @@ set -uo pipefail
 # journal for every failure. deploy/tests/upgrade-helper-test.sh runs the fallback with a fake environment and with a variable made unbound.
 exec 3>&2   # the journal: the standard error the service was started with, kept apart from the one captured below
 DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; BIN_DIR='@BIN_DIR@'; REPO='@REPO@'; SVC_USER='@SVC_USER@'
-comp=""; chan=""; ver=""; xonly=""; dg=0; job=""; trc=0; rc=0; got=0; base=""; direct=""; br=main; tmp=""; v=""; url=""; l=""; msg=""
-urls=(); args=(); to=()
+comp=""; chan=""; ver=""; xonly=""; dg=0; job=""; trc=0; rc=0; got=0; base=""; direct=""; br=main; tmp=""; v=""; l=""; msg=""
+args=(); to=(); trees=(); VWHY=""; vrefused=0; VREF=0; SVER=""
+RELEASE_KEY_DEFAULT='@RELEASE_PUBKEY@'   # the built-in trust anchor, the one of install.sh (TOUTWAF_RELEASE_PUBKEY, then $CONF_DIR/release.pub, take precedence)
 errf=""; TOOK=0; LAST_ERR=""
 STATE_DIR="${DATA_DIR}-upgrade"
 REQ="$DATA_DIR/upgrade-request"; STATUS="$DATA_DIR/upgrade-status"; LOGF="$DATA_DIR/upgrade.log"; INSTLOG="$DATA_DIR/upgrade-installer.log"
@@ -8298,6 +8482,120 @@ put_file() {
   mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
 }
 # <<< hostio <<<
+# >>> relverify: the Ed25519 signature of a release's SHA256SUMS, checked by a root helper (deploy/helpers/relverify.sh; deploy/tests/upgrade-helper-test.sh checks the copies) >>>
+# The root update helper runs the installer of a release as root: it first checks that the installer is the one the SIGNED SHA256SUMS lists.
+# Engine: openssl when it really verifies Ed25519 (OpenSSL >= 3.0), else the pure-Python verifier below (the same text as ed25519_py of
+# install.sh, RFC 8032 section 5.1.7, only hashlib), else no engine: refused (fail closed).
+#   rv_pem KEY OUT        KEY: a PEM file or text, a file holding the raw 32-byte key in base64, or that base64: OUT becomes a PEM (SPKI)
+#   rv_verify KEY SUMS SIG TMPDIR   0: valid   1: invalid   2: no engine to verify with. SIG: the file of SHA256SUMS.sig (base64 of the raw signature)
+rv_pem() {
+  local k="$1" out="$2" raw
+  if [ -f "$k" ]; then raw="$(cat "$k")"; else raw="$k"; fi
+  case "$raw" in
+    *"BEGIN PUBLIC KEY"*) printf '%s\n' "$raw" >"$out";;
+    *) { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$raw" | tr -d '[:space:]' | base64 -d; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$out";;
+  esac
+}
+# rv_openssl_ok TMPDIR: true when this openssl verifies Ed25519 (probe: RFC 8032 test vector 2, a one-byte message)
+rv_openssl_ok() {
+  command -v openssl >/dev/null 2>&1 || return 1
+  local w="$1" pk="3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+  local sg="92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+  rv_hx() { printf "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+  { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; rv_hx "$pk"; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$w/rv-probe.pem"
+  rv_hx "$sg" >"$w/rv-probe.sig"; printf '\x72' >"$w/rv-probe.msg"
+  openssl pkeyutl -verify -pubin -inkey "$w/rv-probe.pem" -rawin -in "$w/rv-probe.msg" -sigfile "$w/rv-probe.sig" >/dev/null 2>&1
+}
+rv_python3() {
+  local c
+  for c in python3 /usr/libexec/platform-python python; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then command -v "$c"; return 0; fi
+  done
+  return 0
+}
+rv_py() {   # FILE: the verifier. Usage: python FILE PUBLIC_KEY_BASE64 SIGNATURE_FILE MESSAGE_FILE; exit 0 valid, 1 invalid, 2 usage
+  cat >"$1" <<'TW_ED25519_PY'
+import sys, hashlib, base64
+P = 2**255 - 19
+L = 2**252 + 27742317777372353535851937790883648493
+D = -121665 * pow(121666, P - 2, P) % P
+SQRT_M1 = pow(2, (P - 1) // 4, P)
+
+def recover_x(y, sign):
+    if y >= P:
+        return None
+    x2 = (y * y - 1) * pow(D * y * y + 1, P - 2, P) % P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (P + 3) // 8, P)
+    if (x * x - x2) % P:
+        x = x * SQRT_M1 % P
+    if (x * x - x2) % P:
+        return None
+    return x if (x & 1) == sign else P - x
+
+def add(p, q):
+    a = (p[1] - p[0]) * (q[1] - q[0]) % P
+    b = (p[1] + p[0]) * (q[1] + q[0]) % P
+    c = 2 * p[3] * q[3] * D % P
+    d = 2 * p[2] * q[2] % P
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return (e * f % P, g * h % P, f * g % P, e * h % P)
+
+def mul(k, p):
+    r = (0, 1, 1, 0)
+    while k:
+        if k & 1:
+            r = add(r, p)
+        p = add(p, p)
+        k >>= 1
+    return r
+
+def decode(b):
+    n = int.from_bytes(b, "little")
+    y = n & ((1 << 255) - 1)
+    x = recover_x(y, n >> 255)
+    return None if x is None else (x, y, 1, x * y % P)
+
+BY = 4 * pow(5, P - 2, P) % P
+BASE = (recover_x(BY, 0), BY, 1, recover_x(BY, 0) * BY % P)
+
+def verify(pub, sig, msg):
+    if len(pub) != 32 or len(sig) != 64:
+        return False
+    s = int.from_bytes(sig[32:], "little")
+    if s >= L:
+        return False
+    a, r = decode(pub), decode(sig[:32])
+    if a is None or r is None:
+        return False
+    h = int.from_bytes(hashlib.sha512(sig[:32] + pub + msg).digest(), "little") % L
+    lhs, rhs = mul(s, BASE), add(r, mul(h, a))
+    return (lhs[0] * rhs[2] - rhs[0] * lhs[2]) % P == 0 and (lhs[1] * rhs[2] - rhs[1] * lhs[2]) % P == 0
+
+try:
+    pub = base64.b64decode(sys.argv[1], validate=True)
+    sig = open(sys.argv[2], "rb").read()
+    msg = open(sys.argv[3], "rb").read()
+except Exception:
+    sys.exit(2)
+sys.exit(0 if verify(pub, sig, msg) else 1)
+TW_ED25519_PY
+}
+rv_verify() {
+  local key="$1" sums="$2" sigf="$3" w="$4" pem="$4/rv-key.pem" bin="$4/rv-sig.bin" py
+  rv_pem "$key" "$pem" || return 1
+  tr -d '[:space:]' <"$sigf" | base64 -d >"$bin" 2>/dev/null || return 1
+  [ "$(wc -c <"$bin" | tr -d ' ')" = 64 ] || return 1
+  if rv_openssl_ok "$w"; then
+    openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in "$sums" -sigfile "$bin" >/dev/null 2>&1 && return 0
+    return 1
+  fi
+  py="$(rv_python3)"; [ -n "$py" ] || return 2
+  rv_py "$w/rv-ed25519.py"
+  "$py" "$w/rv-ed25519.py" "$(sed '/-----/d' "$pem" | tr -d '[:space:]' | base64 -d | tail -c 32 | base64 -w0)" "$bin" "$sums"
+}
+# <<< relverify <<<
 
 # a version the request may name: "latest", X.Y.Z or X.Y.Z.W (components 0 or 1-9 digits without leading zero), optionally -pre-release (dot-separated
 # identifiers of [0-9A-Za-z-], a numeric one without leading zero). The same format as the other readers (spec/version-vectors.json); a leading "v" is not accepted.
@@ -8375,6 +8673,74 @@ on_exit() {
 }
 # curl_s: curl that keeps a download which started on https on https: a redirect to plain http is refused (curl -L follows it by default)
 curl_s() { local a pr=(); for a in "$@"; do case "$a" in https://*) pr=(--proto-redir "=https"); break;; esac; done; curl "${pr[@]+"${pr[@]}"}" "$@"; }
+# downgrade_grant VERSION: ALLOW_DOWNGRADE=1 in the request (a file the service account writes) is not enough to go back: root must have created the flag
+# $CONF_DIR/allow-downgrade (toutwafctl upgrade-host allow-downgrade --version X): a plain file of root's that nobody else can write, naming THIS version, that
+# expires (a day at most). It is consumed by the update that uses it. 0: allowed (the flag is removed); 1: refused, VWHY says why. (S-04; the same rules as
+# controlplane/internal/upgradehost/downgrade.go)
+downgrade_grant() {
+  local want="$1" f="$CONF_DIR/allow-downgrade" st uid mode size gv exp now
+  VWHY=""
+  if [ -L "$f" ] || [ ! -f "$f" ]; then VWHY="root has not allowed it ($f is missing)"; return 1; fi
+  st="$(LC_ALL=C stat -c '%u|%a|%s' -- "$f" 2>/dev/null)" || { VWHY="$f cannot be read"; return 1; }
+  IFS='|' read -r uid mode size <<<"$st"
+  [ "$uid" = 0 ] || { VWHY="$f is owned by user $uid, not by root"; return 1; }
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || { VWHY="$f can be written by someone else than root"; return 1; }
+  [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le 512 ] || { VWHY="$f is too large to be a flag"; return 1; }
+  gv="$(sed -n 's/^VERSION=//p' "$f" | head -n1 | tr -d '\r')"; exp="$(sed -n 's/^EXPIRES=//p' "$f" | head -n1 | tr -d '\r')"
+  { valid_version "$gv" && [ "$gv" != latest ]; } || { VWHY="$f names no valid version"; return 1; }
+  [[ "$exp" =~ ^[0-9]{1,12}$ ]] || { VWHY="$f has no expiry"; return 1; }
+  now="$(date +%s)"
+  [ "$exp" -gt "$now" ] || { VWHY="the flag $f expired"; return 1; }
+  [ $(( exp - now )) -le 86460 ] || { VWHY="$f expires in more than a day: a flag lives a day at most"; return 1; }
+  [ "$gv" = "$want" ] || { VWHY="root allowed a downgrade to $gv, not to $want"; return 1; }
+  rm -f -- "$f"
+  return 0
+}
+# fetch_installer TREE VERSION OUT: the installer that is about to run as root must be the one that the SIGNED SHA256SUMS of the release lists
+# (S-04: the mutable copy of the branch used to be run as it came, trusted as far as the HTTPS connection). TREE is the root of a release tree
+# (channel.json, releases/<version>/...). The signature is checked with the key of this installation (TOUTWAF_RELEASE_PUBKEY, $CONF_DIR/release.pub,
+# else the built-in one), then the installer of releases/<version>/ (the immutable copy; else the one of the branch) must have the listed SHA-256.
+# 0: OUT holds the verified installer. 1: refused or not reachable, VWHY says why and vrefused=1 when something was there but not verified.
+fetch_installer() {
+  local t="$1" want="$2" out="$3" d ch build="" q="" k listed got rc
+  VWHY=""
+  d="$(mktemp -d)" || { VWHY="no temporary directory"; return 1; }
+  if [ "$want" = latest ] || [ -z "$want" ]; then
+    curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 60 -o "$d/channel.json" "$t/channel.json" 2>>"$plogf" || { VWHY="channel.json cannot be read"; rm -rf "$d"; return 1; }
+    ch="$(tr -d '\r' <"$d/channel.json")"
+    want="$(printf '%s\n' "$ch" | sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' | head -n1)"
+    valid_version "$want" && [ "$want" != latest ] || { VWHY="channel.json names no valid version"; rm -rf "$d"; return 1; }
+    build="$(printf '%s\n' "$ch" | sed -n 's/^[[:space:]]*"build"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{12\}\)".*$/\1/p' | head -n1)"
+  fi
+  # a mirror that caches (raw.githubusercontent.com) is asked past its cache for the build that was announced
+  case "$t" in http://*|https://*) [ -z "$build" ] || q="?b=$build";; esac
+  curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 60 -o "$d/SHA256SUMS" "$t/releases/$want/SHA256SUMS$q" 2>>"$plogf" || { VWHY="SHA256SUMS of $want cannot be read"; rm -rf "$d"; return 1; }
+  vrefused=1; VREF=1   # from here on a source answered: whatever is wrong is a refusal, not a network problem
+  if ! curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 60 -o "$d/SHA256SUMS.sig" "$t/releases/$want/SHA256SUMS.sig$q" 2>>"$plogf"; then
+    VWHY="the release $want carries no signature (SHA256SUMS.sig)"; rm -rf "$d"; return 1
+  fi
+  k="${TOUTWAF_RELEASE_PUBKEY:-}"
+  if [ -z "$k" ] && [ -r "$CONF_DIR/release.pub" ]; then k="$CONF_DIR/release.pub"; fi
+  [ -n "$k" ] || k="$RELEASE_KEY_DEFAULT"
+  rv_verify "$k" "$d/SHA256SUMS" "$d/SHA256SUMS.sig" "$d"; rc=$?
+  case "$rc" in
+    0) ;;
+    2) VWHY="no way to verify the Ed25519 signature here (OpenSSL 3 or python3 is needed)"; rm -rf "$d"; return 1;;
+    *) VWHY="the signature of SHA256SUMS of $want is not valid"; rm -rf "$d"; return 1;;
+  esac
+  listed="$(sed -n 's/^\([0-9A-Fa-f]\{64\}\)[[:space:]][[:space:]]*\*\{0,1\}install\.sh[[:space:]]*$/\1/p' "$d/SHA256SUMS" | tr 'A-F' 'a-f' | tail -n1)"
+  [ -n "$listed" ] || { VWHY="the signed SHA256SUMS of $want does not list install.sh, which would run as root"; rm -rf "$d"; return 1; }
+  # the immutable copy of the release first, then (releases published before the copies were kept there) the one of the branch
+  if ! curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$out" "$t/releases/$want/install.sh$q" 2>>"$plogf" || ! head -c2 "$out" | grep -q '^#!'; then
+    curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$out" "$t/install.sh" 2>>"$plogf" || { VWHY="install.sh cannot be downloaded"; rm -rf "$d"; return 1; }
+  fi
+  head -c2 "$out" | grep -q '^#!' || { VWHY="install.sh is not a script"; rm -rf "$d"; return 1; }
+  got="$(sha256sum "$out" | cut -d' ' -f1)"
+  [ "$got" = "$listed" ] || { VWHY="install.sh does not match the signed SHA256SUMS of $want (listed ${listed:0:12}, downloaded ${got:0:12})"; rm -rf "$d"; return 1; }
+  SVER="$want"
+  rm -rf "$d"
+  return 0
+}
 trap on_exit EXIT
 
 case "${1:-request}" in
@@ -8423,23 +8789,43 @@ case "${1:-request}" in
     plog "update requested: component=$comp channel=$chan version=$ver downgrade_allowed=$dg (fallback helper: this toutwafctl has no upgrade-host)"
     br=main; [ "$chan" = dev ] && br=dev
     base="$(conf_get BASE_URL)"; case "$base" in http://*|https://*) ;; *) base="";; esac
-    # the installer comes from the first source that answers: a mirror, or GitLab, then GitHub, then the direct address of upgrade.conf
-    urls=()
-    if [ -n "${TOUTWAF_INSTALLER_URL:-}" ]; then urls+=("$TOUTWAF_INSTALLER_URL")
-    elif [ -n "$base" ]; then urls+=("$base/install.sh")
+    # the installer comes from the first source that answers AND whose release is signed with the key of this installation: a mirror, or GitLab,
+    # then GitHub, then the direct address of upgrade.conf. An installer that the signed SHA256SUMS does not describe is never run (S-04).
+    trees=()
+    if [ -n "${TOUTWAF_INSTALLER_URL:-}" ]; then :   # the operator's own installer (below): never the signed one
+    elif [ -n "$base" ]; then trees+=("$base")
     else
-      urls+=("$SRC_PRIMARY/$br/install.sh"); [ -z "$SRC_FALLBACK" ] || urls+=("$SRC_FALLBACK/$br/install.sh")
+      trees+=("$SRC_PRIMARY/$br"); [ -z "$SRC_FALLBACK" ] || trees+=("$SRC_FALLBACK/$br")
     fi
-    direct="$(uconf_get DIRECT_URL)"; case "$direct" in http://*|https://*) urls+=("${direct%/}/install.sh");; esac
+    direct="$(uconf_get DIRECT_URL)"; case "$direct" in http://*|https://*) trees+=("${direct%/}");; esac
     inst="$(mktemp)"
     S_PHASE="Downloading the installer"; write_status
     got=0
-    for url in "${urls[@]+"${urls[@]}"}"; do
-      plog "$S_PHASE ($url)"
-      if curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$inst" "$url" 2>>"$plogf" && head -c2 "$inst" | grep -q '^#!'; then got=1; break; fi
-      plog "this source does not answer; trying the next one"
-    done
-    [ "$got" = 1 ] || fail "cannot download the installer from any source (${urls[*]+${urls[*]}}). Nothing was changed; check the network of this server or set DIRECT_URL in $CONF_DIR/upgrade.conf"
+    if [ -n "${TOUTWAF_INSTALLER_URL:-}" ]; then
+      # an installer named by upgrade.env is not the signed one: it runs as root only when the operator says it twice
+      [ "${TOUTWAF_ALLOW_UNSIGNED_INSTALLER:-}" = 1 ] || fail "the installer refused: TOUTWAF_INSTALLER_URL names an installer that the signed SHA256SUMS does not cover; set TOUTWAF_ALLOW_UNSIGNED_INSTALLER=1 in $CONF_DIR/upgrade.env to run it anyway. Nothing was changed"
+      plog "WARNING the installer comes from TOUTWAF_INSTALLER_URL, not from the signed release (TOUTWAF_ALLOW_UNSIGNED_INSTALLER=1)"
+      plog "$S_PHASE ($TOUTWAF_INSTALLER_URL)"
+      if curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$inst" "$TOUTWAF_INSTALLER_URL" 2>>"$plogf" && head -c2 "$inst" | grep -q '^#!'; then got=1; fi
+    else
+      for tree in "${trees[@]+"${trees[@]}"}"; do
+        plog "$S_PHASE ($tree)"
+        VREF=0
+        if fetch_installer "$tree" "$ver" "$inst"; then got=1; plog "the installer of release $SVER matches the signed SHA256SUMS"; break; fi
+        plog "this source is not usable: $VWHY; trying the next one"
+        [ "$VREF" = 0 ] || msg="$VWHY"
+      done
+    fi
+    if [ "$got" != 1 ]; then
+      if [ "$vrefused" = 1 ]; then fail "the installer was refused: $msg. Nothing was changed"; fi
+      fail "cannot download the installer from any source (${trees[*]+${trees[*]}}${TOUTWAF_INSTALLER_URL:-}). Nothing was changed; check the network of this server or set DIRECT_URL in $CONF_DIR/upgrade.conf"
+    fi
+    # a downgrade (or a withdrawn release) needs more than the request: the flag of root, for this very version, consumed here (S-04)
+    if [ "$dg" = 1 ]; then
+      [ -n "${TOUTWAF_INSTALLER_URL:-}" ] && SVER="$ver"
+      downgrade_grant "$SVER" || fail "ALLOW_DOWNGRADE needs the flag of root, and $VWHY. As root: toutwafctl upgrade-host allow-downgrade --version ${SVER:-X}. Nothing was changed"
+      plog "downgrade allowed by $CONF_DIR/allow-downgrade for $SVER (consumed by this update)"
+    fi
     # EXTRAS_ONLY=1: only the extras of the installed release (the Windows agents, the antivirus programs) are installed, nothing is replaced or restarted;
     # the installer downloads them, checks them against the signed SHA256SUMS like the archive, and installs them (install.sh --extras-only)
     xonly="$(req_get EXTRAS_ONLY)"
@@ -9816,6 +10202,7 @@ ExecStart=$BIN_DIR/toutwaf-upgrade apply
 # longest honest run: download and checks (10 min) + the installer (15 min) + the health window (up to 30 min); the transient rollback timer settles
 # the update anyway if systemd cuts the helper short (docs/design/update-resilience.md)
 TimeoutStartSec=60min
+$(sd_helper_sandbox basic)
 EOF
   # finishes or undoes an update that a power loss, a killed helper or a reboot interrupted (no-op when the journal of the update helper is closed)
   cat >"$sd/toutwaf-upgrade-guard.service" <<EOF
@@ -9860,6 +10247,7 @@ TimeoutStartSec=6min
 PrivateTmp=yes
 ProtectHome=yes
 NoNewPrivileges=yes
+$(sd_helper_sandbox small)
 EOF
   fi
   if want_cp; then
@@ -9943,6 +10331,7 @@ ExecStart=$BIN_DIR/toutwaf-vpn apply
 TimeoutStartSec=5min
 PrivateTmp=yes
 ProtectHome=yes
+$(sd_helper_sandbox net)
 EOF
     cat >"$sd/toutwaf-fw.path" <<EOF
 [Unit]
@@ -9968,6 +10357,7 @@ ExecStart=$BIN_DIR/toutwaf-fw apply
 TimeoutStartSec=2min
 PrivateTmp=yes
 ProtectHome=yes
+$(sd_helper_sandbox net)
 EOF
     # loads the confirmed rules at boot, before the control plane runs; installed, NOT enabled (the control plane also compares the
     # loaded rules with the confirmed ones at start-up and every 5 minutes): systemctl enable toutwaf-fw-boot.service
@@ -10041,6 +10431,7 @@ TimeoutStartSec=50min
 PrivateTmp=yes
 ProtectHome=yes
 NoNewPrivileges=yes
+$(sd_helper_sandbox basic)
 EOF
     cat >"$sd/toutwaf-time.path" <<EOF
 [Unit]
@@ -10066,6 +10457,7 @@ TimeoutStartSec=2min
 PrivateTmp=yes
 ProtectHome=yes
 NoNewPrivileges=yes
+$(sd_helper_sandbox small keep)
 EOF
   fi
   if want_cp || want_dp; then
@@ -10093,6 +10485,7 @@ ExecStart=$BIN_DIR/toutwaf-sysupdate apply
 TimeoutStartSec=75min
 PrivateTmp=yes
 ProtectHome=yes
+$(sd_helper_sandbox basic)
 EOF
   fi
   return 0
@@ -10204,8 +10597,8 @@ se_httpd_present() { have nginx || have httpd || have apache2 || [ -x /usr/local
 se_mislabelled() {
   local d paths=()
   for d in "$CONF_DIR" "$DATA_DIR" "$LOG_DIR"; do [ -e "$d" ] && paths+=("$d"); done
-  { [ ${#paths[@]} -gt 0 ] && restorecon -n -v -R "${paths[@]}" 2>/dev/null
-    restorecon -n -v "$BIN_DIR"/toutwaf* 2>/dev/null; } | awk '/^Would relabel / { split($(NF-2), a, ":"); split($NF, b, ":"); if (a[3] != b[3]) n++ } END { print n + 0 }'
+  { [ ${#paths[@]} -gt 0 ] && { restorecon -n -v -R "${paths[@]}" 2>/dev/null || true; }
+    restorecon -n -v "$BIN_DIR"/toutwaf* 2>/dev/null || true; } | awk '/^Would relabel / { split($(NF-2), a, ":"); split($NF, b, ":"); if (a[3] != b[3]) n++ } END { print n + 0 }'
 }
 
 setup_selinux() {
@@ -10343,7 +10736,7 @@ dns_release_stub() {
   systemctl restart systemd-resolved >/dev/null 2>&1 || { warn "systemd-resolved did not restart after the change: check it (systemctl status systemd-resolved)"; return 1; }
   return 0
 }
-dns_ufw_active() { have ufw && grep -qi 'status: active' <<<"$(ufw status 2>/dev/null | head -n1)"; }
+dns_ufw_active() { have ufw && grep -qi 'status: active' <<<"$(ufw status 2>/dev/null | sed -n 1p)"; }
 # dns_open_firewall: 53/udp and 53/tcp, only where firewalld / ufw is running and only what is not already open; recorded for the undo
 dns_open_firewall() {
   [ "$OPEN_FW" = 0 ] && return 0
@@ -10747,6 +11140,9 @@ update_confirmed_cleanup() {
   [ "$ACTION" = update ] || return 0
   [ "$DRY_RUN" = 0 ] || return 0
   [ "${TOUTWAF_UPDATE_KEEP_COPIES:-0}" != 1 ] || { info "update confirmed; the copies made before it are kept (TOUTWAF_UPDATE_KEEP_COPIES=1)"; return 0; }
+  # Started by the update assistant: only it knows that the new version is healthy (its watch runs AFTER this installer) and it deletes its own copies and
+  # the *.prev programs itself once the window is over (confirmed.go). Here the services were only started once: nothing is confirmed yet.
+  [ "${TOUTWAF_UPDATE_DB_HANDLED:-0}" != 1 ] || { info "the update program confirms the update after its health window and deletes the copies made for a rollback then"; return 0; }
   local kb=0 f n
   if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then
     n="$(du -sk "$DB_BACKUP_DIR" 2>/dev/null | awk '{print $1}')"; kb=$((kb + ${n:-0}))
@@ -11285,6 +11681,8 @@ cmd_db_prepare() {
 
 # ------------------------------------------------------------------------------------------------ install / update flow
 CHANGED=0; OLD_DP=""; UPDATE_NOOP=0; PANEL_RAN=0
+# a new attempt after a correction (autofix): the programs the earlier attempt replaced are still to be started (see af_reexec)
+if [ "${AF_TRY:-0}" -gt 0 ] && [ "${TOUTWAF_AUTOFIX_CHANGED:-0}" = 1 ]; then CHANGED=1; fi
 phase_account() { create_user; make_dirs; }
 # The control plane serves the host agent builds to the servers of the cluster: the Linux ones ship in every archive (agent-dist/) and are kept next to the control
 # plane data, replaced at every update. The ones for Windows, and the antivirus programs, come with the extras of the release (install_extras).
@@ -11378,6 +11776,8 @@ Documentation=https://github.com/$REPO
 After=network-online.target
 Wants=network-online.target
 Before=toutwaf-dp.service
+# A crash loop must never end the service for good: without this systemd gives up after 5 starts in 10 s (start-limit-hit) and the unit stays stopped.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -11464,7 +11864,7 @@ start_services() {
   if want_cp || want_dp; then systemctl enable --now toutwaf-sysupdate.path >/dev/null 2>&1 || warn "could not enable toutwaf-sysupdate.path"; fi
   if want_cp; then
     systemctl enable toutwaf-cp >/dev/null 2>&1 || true
-    if svc_active toutwaf-cp && [ "$CHANGED" = 0 ]; then :; else
+    if svc_active toutwaf-cp && [ "$CHANGED" = 0 ] && ! svc_stale toutwaf-cp "$(p "$BIN_DIR/toutwaf-cp")"; then :; else
       log "(Re)starting toutwaf-cp"
       systemctl restart toutwaf-cp >>"$LOG" 2>&1 || true
       if ! wait_cp_healthy && ! autofix_unhealthy toutwaf-cp wait_cp_healthy noslow; then
@@ -11480,7 +11880,7 @@ start_services() {
   fi
   if want_dp; then
     systemctl enable toutwaf-dp >/dev/null 2>&1 || true
-    if svc_active toutwaf-dp && [ "$CHANGED" = 0 ] && [ "$DP_CFG_CHANGED" = 0 ]; then log "data plane unchanged; reloading configuration"; systemctl reload toutwaf-dp || true
+    if svc_active toutwaf-dp && [ "$CHANGED" = 0 ] && [ "$DP_CFG_CHANGED" = 0 ] && ! svc_stale toutwaf-dp "$(p "$BIN_DIR/toutwaf-dp")"; then log "data plane unchanged; reloading configuration"; systemctl reload toutwaf-dp || true
     else
       log "(Re)starting toutwaf-dp"
       systemctl restart toutwaf-dp >>"$LOG" 2>&1 || autofix_service toutwaf-dp wait_healthy || rollback_dp   # (autofix block: corrects the known causes before the rollback)
@@ -11558,7 +11958,7 @@ do_install_flow() {
     # build cannot tell: the archive is downloaded and its files are compared, as before.)
     local ust; ust="$(update_verdict "$RESOLVED_VERSION" "$NEW_BUILD")"
     case "$ust" in
-      same) if [ -n "$NEW_BUILD" ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; noop_refresh; extras_maintain "$RESOLVED_VERSION" "$NEW_BUILD"; return 0; fi;;
+      same) if [ -n "$NEW_BUILD" ] && [ "$CHANGED" = 0 ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; noop_refresh; extras_maintain "$RESOLVED_VERSION" "$NEW_BUILD"; return 0; fi;;
       rebuilt) say "  $BUL $(t up_rebuilt "$(installed_identity_label)" "$(ver_label "$RESOLVED_VERSION" "$NEW_BUILD")")";;
     esac
   fi
@@ -11574,14 +11974,14 @@ do_install_flow() {
       same_file "$SRC_DIR/$b" "$(p "$BIN_DIR/$b")" || same=0
     done
     if [ -n "$cur" ] && [ "$RESOLVED_VERSION" != local ] && [ "$RESOLVED_VERSION" != source ] && semver_lt "$RESOLVED_VERSION" "$cur" && [ "$FORCE" = 0 ]; then die "$(t e_downgrade "$RESOLVED_VERSION" "$CHANNEL" "$cur")"; fi
-    if [ "$same" = 1 ] && [ "$FORCE" = 0 ]; then
+    if [ "$same" = 1 ] && [ "$FORCE" = 0 ] && [ "$CHANGED" = 0 ]; then   # (CHANGED=1: an earlier attempt of this run replaced them: not "nothing to do", they were never started)
       say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}")")"; UPDATE_NOOP=1; noop_refresh
       # the files are the archive's: whatever the binaries cannot say of themselves, the archive does
       record_installed "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}"
       if [ -n "$EXTRAS_DIR" ]; then install_extras; extras_report; else extras_maintain "${ARCHIVE_VERSION:-$RESOLVED_VERSION}" "${ARCHIVE_BUILD:-$NEW_BUILD}"; fi   # same programs: the extras alone may be missing
       return 0
     fi
-    step "$(t s_backup)" backup_before_update
+    if [ "$CHANGED" = 0 ]; then step "$(t s_backup)" backup_before_update; fi   # (not again: the copy of the first attempt is the one that goes back)
   fi
   step "$(t s_user)" phase_account
   write_installer_conf
@@ -11713,6 +12113,7 @@ fi
 case "$ACTION" in
   checkenv) detect_installed; if [ "$INST_CP" = 1 ] || [ "$INST_DP" = 1 ]; then load_existing_ports; fi; rc=0; env_run_check || rc=$?; exit "$rc";;
   checkprereq) rc=0; prereq_run_check || rc=$?; exit "$rc";;
+  verifyself) rc=0; cmd_verify_self || rc=$?; exit "$rc";;
   status) persist_log; rc=0; cmd_status || rc=$?; exit "$rc";;      # (a plain call would fire the ERR trap on a non-zero status)
   links) persist_log; rc=0; cmd_links || rc=$?; exit "$rc";;
   extras) persist_log; rc=0; cmd_extras || rc=$?; exit "$rc";;
@@ -11734,6 +12135,7 @@ if [ "$ACTION" = update ]; then
 else
   if [ "$INST_CP" = 1 ]; then load_existing_ports; fi
   banner
+  if [ "$ACTION" = install ]; then installer_fingerprint_notice; fi
   if interactive && [ "$STAGING" = 0 ]; then configure_interactively; fi
 fi
 if [ -n "$CLOUD_URL" ]; then cloud_prepare; fi

@@ -8,7 +8,7 @@ Firewall · WAF · WAAP · API protection · anti-bot · anti-DDoS · multi-node
 
 [Install](#installation) · [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [First start](#first-start) · [Français](README.md)
 
-**Version 0.6.3** · build `2486bf8ba738` · channel **stable** · 2026-11-20
+**Version 0.7.0** · build `a7e4c64561ed` · channel **stable** · 2026-11-21
 
 </div>
 
@@ -217,7 +217,7 @@ The **Updates** page (Administration menu) shows the installed version, the late
 
 Without a licence or a sign-up ToutWAF runs as the **free edition (Free)**, free, professional use included: **up to 3 protected sites, 1 node, 2 users, 1 organisation and 5 million authorised requests per month** (blocked attacks are not counted). An optional free sign-up (confirmed e-mail address, Administration > Licence) moves the installation to **Free+**: **5 sites and 15 million authorised requests per month** (the other limits are the same; the quotas are not added). The ceilings apply to the whole installation, not to each server. The monthly volume is announced, never enforced by a cut: a warning at 80 % then at 100 %, then, if the overrun lasts, a request to move to a paid offer with an announced grace period (30 days by default). Traffic, protection and the console are never interrupted; only the creation of a new site beyond the ceiling is refused, with the limit and the number in use. WAF protection, two-factor authentication and security updates are in every offer.
 
-More sites or nodes (Pro: 15 sites and 2 nodes; Agency: 50 sites and 5 nodes; Enterprise: ceilings by quote) and the advanced features are under licence: advanced load balancing, several organisations (tenants, MSSP), enterprise sign-in (OIDC, SAML, SCIM), SIEM / SOAR / ticketing / threat-intelligence integrations and off-site backups. They stay visible in the console, locked, with a link to the offers; they are never hidden. When a paid licence expires there are 48 hours of grace (everything works, with warnings), then 48 hours of read-only (traffic and protection continue, nothing can be created or changed), then WAF protection is switched off: traffic keeps flowing, unprotected, and only renewal remains possible in the panel; renewing restores everything at once. Free and Free + are not concerned. Everything else described here is the same product; for larger limits or the advanced features, contact your ToutWAF vendor.
+More sites or nodes (Pro: 15 sites and 2 nodes; Agency: 50 sites and 5 nodes; Enterprise: ceilings by quote) and the advanced features are under licence: advanced load balancing, several organisations (tenants, MSSP), enterprise sign-in (OIDC, SAML, SCIM), SIEM / SOAR / ticketing / threat-intelligence integrations and off-site backups. They stay visible in the console, locked, with a link to the offers; they are never hidden. When a paid licence expires there is a 7-day grace period (everything works, with warnings before and after the expiry), then the rights of the free edition apply, with no cut: your sites stay protected, the last safe policy and the base protection are kept, ToutWAF never switches the WAF off and never cuts traffic; only new configuration and the advanced functions are limited, and sites beyond the free quota are frozen; renewing restores everything at once. Free and Free + are not concerned. Everything else described here is the same product; for larger limits or the advanced features, contact your ToutWAF vendor.
 
 
 ## Known limitations
@@ -242,21 +242,22 @@ Targets not built for this release:
 
 ## Versions and downloads
 
-**Version 0.6.3**
+**Version 0.7.0**
 
 | File | OS | Arch | Size | SHA-256 |
 |---|---|---|---:|---|
-| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 82.0 MiB | `309b6823bf46ea83b2b0685ec23d8ebd7e231fa62c85c6c589546110cf08f17e` |
-| `toutwaf-windows-amd64.zip` | windows | amd64 | 85.2 MiB | `2501fcf10252545b226d97b595e3584601c07a2d8bc4e58efb63159e98b7a65e` |
-| `toutwaf-windows-arm64.zip` | windows | arm64 | 82.0 MiB | `f4c0462c2555236dc50d8e530ae08e85315dc3da419db682ef73925dd03b4ab9` |
-| `toutwaf-extras.tar.gz` | any | any | 20.4 MiB | `78907669dbb3379d6a6c7348bf737bda231d9e0960cb15661ec1f60be9ae6eb9` |
+| `toutwaf-linux-amd64.tar.gz` | linux | amd64 | 83.8 MiB | `10b8c2a230adbdd646d399dde1afc85ccc2b6dda33c17dcbdb646f75ef15edb1` |
+| `toutwaf-windows-amd64.zip` | windows | amd64 | 87.3 MiB | `5a839f1b9fcd1755ecc8301a559e79ccbf141992e061534d67365cc51274fc8d` |
+| `toutwaf-windows-arm64.zip` | windows | arm64 | 84.0 MiB | `611269bc2d5221d02e779a70f4fafb7eaedb9210894bb47d598df28a7b56fab7` |
+| `toutwaf-extras.tar.gz` | any | any | 20.6 MiB | `173006b5fc343ef0282a7a13e5c86ca89e2a258bc96a6f36f879fdfc37993312` |
 
 The `toutwaf-extras*.tar.gz` files (OS and architecture `any`) are the extras of the release: the host agent for Windows, which a console hands to other machines. The installer downloads, checks (SHA-256 and signature) and installs them with the archive of the platform; an installation without them works and does not offer Windows.
 
 
 | Version | Date | Status | Directory |
 |---|---|---|---|
-| `0.6.3` | 2026-11-20T10:09:17Z | **current** | `releases/0.6.3/` |
+| `0.7.0` | 2026-11-21T04:16:01Z | **current** | `releases/0.7.0/` |
+| `0.6.3` | 2026-11-20T10:09:17Z | available | `releases/0.6.3/` |
 | `0.6.2` | 2026-11-20T05:47:42Z | available | `releases/0.6.2/` |
 | `0.6.1` | 2026-11-19T17:17:35Z | available | `releases/0.6.1/` |
 | `0.6.0` | 2026-11-16T17:24:34Z | available | `releases/0.6.0/` |
@@ -286,23 +287,41 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 Every release directory has a `SHA256SUMS` file; `channel.json` repeats the hashes of the current release. The installer checks them automatically. To verify by hand:
 
 ```sh
-cd releases/0.6.3 && sha256sum -c SHA256SUMS --ignore-missing
+cd releases/0.7.0 && sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ### Verify a release
 
-From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `f8fc98e4c6e364fa`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=`. To verify by hand (OpenSSL 3 or later):
+From release 0.2.0-dev.7 on, each release directory also holds `SHA256SUMS.sig`: the base64 of the raw 64-byte Ed25519 signature of the exact `SHA256SUMS` file. The installers verify it by default with a public key built into the installer script (key id `3fc61b30f128ff14`) and refuse a release whose signature is invalid, or missing for 0.2.0-dev.7 and later; releases before 0.2.0-dev.7 were published unsigned (checksums only). The public key repeated in `channel.json` is informational and is never used to trust a release: take the key from the installer script or from your vendor. Public key (raw, base64): `gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0=`. To verify by hand (OpenSSL 3 or later):
 
 ```sh
-V=0.6.3; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
+V=0.7.0; R=https://raw.githubusercontent.com/qu3ntin01/toutwaf/main/releases/$V
 curl -fsSLO "$R/SHA256SUMS" -O "$R/SHA256SUMS.sig"
-{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'PAevMh9+at71+DR2Tnmo2raHB5mgvltMCUds8nevudo=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
+{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo 'gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0=' | base64 -d; } | openssl pkey -pubin -inform DER -out release.pem
 base64 -d SHA256SUMS.sig > sig.bin
 openssl pkeyutl -verify -pubin -inkey release.pem -rawin -in SHA256SUMS -sigfile sig.bin   # "Signature Verified Successfully"
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 A release signed with another key, or modified after signing, fails with "Signature Verification Failure". To trust another key (private mirror), set `TOUTWAF_RELEASE_PUBKEY` or create `<home>/conf/release.pub` before installing.
+
+<!-- installer-fingerprints -->
+**SHA-256 fingerprints of the installers of release 0.7.0**: compare them with those of the script you downloaded (they are also in the signed `SHA256SUMS`). The one-line command (`curl | bash`) is an act of trust in HTTPS and in the account that publishes this repository; the countermeasure is to download, compare, verify, then run:
+
+| File | SHA-256 |
+|---|---|
+| install.sh | `f553663b33a3be98596b5e47496b2322ff2c0a34524d59ed20659f5c96a5f1f6` |
+| install.ps1 | `cba3dde18811214cd196e674cd24feb3588fb9e949fbfc4bd99cfc202b027071` |
+
+```sh
+curl -fsSLO https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/main/install.sh
+sha256sum install.sh        # compare with the table above (and with the website)
+bash install.sh --verify-self   # checks the file against the signed SHA256SUMS
+sudo bash install.sh
+```
+
+On Windows: `install.ps1 -VerifySelf`.
+<!-- /installer-fingerprints -->
 
 ## License and support
 

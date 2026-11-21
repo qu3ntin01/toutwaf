@@ -1,0 +1,12176 @@
+#!/usr/bin/env bash
+# ToutWAF installer for Linux x86_64 or arm64 with systemd: Red Hat family (Alma, Rocky, RHEL, CentOS Stream, Oracle, Fedora), Amazon Linux 2023, Debian family
+# (Debian 11+, Ubuntu 20.04+, Mint, ...; arm64 with a 64-bit OS, e.g. Raspberry Pi OS 64-bit, emulation-tested only), SUSE (Leap 15.6+/16, Tumbleweed, SLES), Arch family. Full list + status: docs/install/platforms.md
+# (generated from deploy/platforms.json). The system is checked BEFORE anything is changed: --check-compat, --skip-os-check.
+#
+#   curl -fsSL https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/main/install.sh | sudo bash
+#       -> interactive menu (reads the keyboard from /dev/tty, so it works when piped)
+#   curl -fsSL <url> | sudo bash -s -- --install --yes --public-host example.com
+#       -> unattended "direct" install (see --help for every option)
+#
+# What it does (idempotent: re-run to upgrade, existing configuration is never overwritten):
+#   * installs toutwaf-dp (data plane) and/or toutwaf-cp + toutwafctl (control plane) from a signed release
+#     verifying SHA-256 and the Ed25519 signature (built-in trust anchor)
+#   * creates the unprivileged `toutwaf` system user and one installation home, /var/toutwaf by default (bin/ conf/ data/ logs/; --home DIR);
+#     an installation made before this layout keeps /etc/toutwaf, /var/lib/toutwaf, /var/log/toutwaf and is never moved
+#   * installs hardened systemd units (NoNewPrivileges, ProtectSystem=strict, seccomp SystemCallFilter, ...)
+#   * grants CAP_NET_BIND_SERVICE (ambient + setcap) so ports 80/443 work without root
+#   * opens the firewall by default when firewalld or ufw is active (80/443 + console port; --console-from, --no-firewall), labels files for SELinux, installs logrotate + sysctl tuning
+#   * prepares the panel (`toutwaf-cp bootstrap`) and prints the panel links, the one-time setup link and the ports to open
+#   * upgrades with automatic rollback when the new version fails its health check
+#
+# A node reached through a WireGuard tunnel to the main ToutWAF is NOT installed with this script by hand: the console (VPN > Add a WAF node) serves
+# a node installer (node-install.sh / node-install.ps1) that sets the tunnel up, then runs THIS script with `--component dp --cp-url <control plane in
+# the tunnel> --enroll-token <one-time token> --no-firewall` (it opens the ports itself, according to the traffic mode). See docs/vpn/noeuds-waf.md.
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 022      # files we create must not inherit a permissive/odd caller umask (secrets are chmod-ed explicitly)
+
+INSTALLER_VERSION="2"
+REPO="${TOUTWAF_REPO:-qu3ntin01/toutwaf}"                  # public binaries-only repository (see deploy/RELEASE-LAYOUT.md)
+DEFAULT_CHANNEL="stable"                                   # the copy of this script published on the dev branch has: DEFAULT_CHANNEL="dev"
+VERSION="${TOUTWAF_VERSION:-latest}"
+COMPONENT="${TOUTWAF_COMPONENT:-all}"          # dp | cp | all
+# Layout: one installation HOME (default /var/toutwaf) holding bin/ conf/ data/ logs/. An existing installation keeps its own paths
+# (the legacy /usr/local/bin + /etc/toutwaf + /var/lib/toutwaf + /var/log/toutwaf, or any HOME chosen earlier): see resolve_layout.
+HOME_DIR="${TOUTWAF_HOME:-}"; HOME_EXPLICIT=0; [ -z "$HOME_DIR" ] || HOME_EXPLICIT=1
+BIN_EXPLICIT=0; [ -z "${TOUTWAF_BIN_DIR:-}" ] || BIN_EXPLICIT=1
+LAYOUT=""; LAYOUT_NOTE=""                       # home | existing
+BIN_DIR="${TOUTWAF_BIN_DIR:-/usr/local/bin}"
+CONF_DIR="/etc/toutwaf"
+DATA_DIR="/var/lib/toutwaf"
+LOG_DIR="/var/log/toutwaf"
+SVC_USER="toutwaf"
+DESTDIR="${DESTDIR:-}"                          # staging root (packaging / tests): no system changes at all
+BASE_URL="${TOUTWAF_BASE_URL:-}"                # mirror, default: the project's own GitLab, GitHub as a fallback
+# Where releases are read: the project's own GitLab first (public project, raw files), the GitHub copy of the same signed channel when it is unreachable.
+# Release archives stay verified by the signature key of this installer, whichever source served them. TOUTWAF_REPO (another GitHub repository) disables both.
+SRC_PRIMARY="${TOUTWAF_SRC_PRIMARY:-https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw}"; SRC_FALLBACK="https://raw.githubusercontent.com/$REPO"; SRC_ROOT=""
+if [ -n "${TOUTWAF_REPO:-}" ]; then SRC_PRIMARY="$SRC_FALLBACK"; SRC_FALLBACK=""; fi
+CP_BIN="${TOUTWAF_CP_BIN:-}"                    # override of the toutwaf-cp used for `bootstrap` (tests)
+TARBALL=""                                      # local tarball instead of download
+CP_URL=""; NODE_TOKEN=""; ENROLL_TOKEN=""; NODE_GROUP=""; CP_CA=""
+CLOUD_URL=""; CLOUD_PINS=""; CLOUD_CA=""; CLOUD_ENROL_TOKEN=""   # ToutWAF Cloud: the node connects OUTBOUND to the hosted control plane (toutwaf-cloudlink)
+CLOUDLINK_PORT=9544
+CP_PORT=9443; HTTP_PORT=80; HTTPS_PORT=443; PUBLIC_HOST=""; PRIVATE_HOST=""; CHANNEL="${TOUTWAF_CHANNEL:-}"
+HTTP3="${TOUTWAF_HTTP3:-}"                      # "" = keep what toutwaf-dp.yaml says (default OFF); 1 = --http3 (HTTP/3 over UDP, opens UDP on the HTTPS port); 0 = --no-http3
+case "$HTTP3" in 1|true|yes|on) HTTP3=1;; 0|false|no|off) HTTP3=0;; *) HTTP3="";; esac
+# The authoritative DNS server of the console (port 53, docs/design/dns-autoritatif.md): "" = keep what the installation says (default OFF: nothing changes
+# for an existing or unattended installation); 1 = --dns-server (the cp unit may bind port 53 without root, the systemd-resolved stub is freed when it is the only
+# thing in the way, port 53 is opened in firewalld / ufw); 0 = --no-dns-server (what this installer did for it is undone). The role itself is given in the console.
+DNS_SERVER="${TOUTWAF_DNS_SERVER:-}"; DNS_FREE=1
+case "$DNS_SERVER" in 1|true|yes|on) DNS_SERVER=1;; 0|false|no|off) DNS_SERVER=0;; *) DNS_SERVER="";; esac
+OPEN_FW=""                                      # "" = default: open what is needed when firewalld / ufw is active; 1 = same, explicit; 0 = never touch the firewall
+CONSOLE_FROM=""                                 # restrict the console port to this address / CIDR ("" = reachable from anywhere)
+# The firewall MODULE (ToutWAF manages this machine's nftables rules) is NOT the system-firewall option above (OPEN_FW opens the ports ToutWAF needs
+# in firewalld / ufw). "" = not decided (asked in the interactive mode, default NO); 1 = switch the module on at the end of the installation
+# (no rule is applied: every change goes through the trial with automatic rollback in the console); 0 = explicitly not.
+FW_MODULE=""; case "${TOUTWAF_WITH_FIREWALL:-}" in 1|yes|true|on) FW_MODULE=1;; 0|no|false|off) FW_MODULE=0;; esac
+# The ToutWAF Backup client (the program that backs this machine up to a ToutWAF Backup server, see docs/backup/toutwaf-backup.md): installed only on request,
+# from the release channel of that product, after the Ed25519 signature of its SHA256SUMS and the SHA-256 of the archive have been verified. The public
+# key is the release key of the publisher (the one the products of this repository are signed with), built in as the default; another key can be given with
+# --backup-client-pubkey, TOUTWAF_BACKUP_PUBKEY or $CONF_DIR/backup-release.pub. The client comes from the `toutwaf-backup` branch of the public repository.
+BACKUP_CLIENT=""; case "${TOUTWAF_WITH_BACKUP_CLIENT:-}" in 1|yes|true|on) BACKUP_CLIENT=1;; esac
+BACKUP_CLIENT_BASE="${TOUTWAF_BACKUP_BASE_URL:-https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw/toutwaf-backup}"
+BACKUP_CLIENT_PUBKEY="${TOUTWAF_BACKUP_PUBKEY:-gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0=}"; BACKUP_CLIENT_VERSION=""; BACKUP_CLIENT_RESULT=""
+# Telemetry to the publisher space is OPT-IN (owner decision of 2026-11-20, GDPR: consent before any sending): a new installation sends NOTHING until
+# an administrator accepts it (unchecked box in the first-run wizard of the console, or Settings > Privacy and telemetry). --no-telemetry or
+# TOUTWAF_TELEMETRY=0 writes "enabled: false" (zero telemetry, the console shows it); --telemetry or TOUTWAF_TELEMETRY=1 writes "enabled: true",
+# the consent of whoever runs the installer; without either, the key is NOT written and the answer is asked in the console.
+NO_TELEMETRY=0; TELEMETRY_OPTIN=0
+case "$(printf '%s' "${TOUTWAF_TELEMETRY:-}" | tr 'A-Z' 'a-z')" in 0|false|off|no|none|zero) NO_TELEMETRY=1;; 1|true|on|yes) TELEMETRY_OPTIN=1;; esac
+# The database (--db): empty = ask in the interactive mode; SQLite (unchanged behaviour) otherwise. See the db-setup block.
+# common licence (ToutPanel + ToutWAF): address of the licence site and its pinned public key(s), written to the configuration before the first start
+LICENCE_API_URL="${TOUTWAF_LICENCE_API_URL:-}"; LICENCE_PINS=""; LICENCE_PIN_FILE="${TOUTWAF_LICENCE_PIN_FILE:-}"; LICENCE_PINNED=""
+DB_ENGINE="${TOUTWAF_DB:-}"; DB_DSN="${TOUTWAF_DB_DSN:-}"; DB_DSN_FILE="${TOUTWAF_DB_DSN_FILE:-}"; DB_LOCAL=""; case "${TOUTWAF_DB_INSTALL_LOCAL:-}" in 1|yes|true|on) DB_LOCAL=1;; esac
+DB_HOST=""; DB_PORT=""; DB_NAME="toutwaf"; DB_USER="toutwaf"; DB_PASSWORD_FILE="${TOUTWAF_DB_PASSWORD_FILE:-}"; DB_TLS_MODE=""; DB_CA=""
+DB_ADMIN_DSN_FILE=""; DB_BACKUP_TIMER=1; DB_SERVER_LOCAL=0; DB_RESULT=""; DB_SECRET_WRITTEN=0; DB_ASKED=0; DB_SCHEMA_LINE=""; DB_BACKUP_SCHEDULED=0
+OPEN_CP_PORT=0; NO_SELINUX=0; case "${TOUTWAF_NO_SELINUX:-}" in 1|yes|true|on) NO_SELINUX=1;; esac; NO_SYSCTL=0; NO_START=0; NO_ENABLE=0; FORCE=0; DRY_RUN=0; ASSUME_YES=0
+QUIET=0; NO_COLOR_FLAG=0; ACCEPT_DEFAULTS=0
+CHECK_COMPAT=0                                  # --check-compat: print the compatibility verdict, change nothing (exit 0 compatible, 3 not)
+# THE ANTIVIRUS SWITCH (ToutWAF Antivirus, Horizon). 0 in version 0.5.7 (owner's decision of 2026-11-14: disabled everywhere, to be reworked): the installer does not look for the
+# antivirus programs (av-dist/toutwaf-av-*), does not create <data>/av-dist, ignores them when an extras file happens to carry them, and never fails without them. Set it to 1 (with
+# controlplane/internal/avoffer, publisher/internal/pipeline/avoffer.go, docs/ANTIVIRUS-RETRAIT.md "2026-11-14") to bring them back; nothing else has to change.
+AV_OFFERED=0
+extras_key() { if [ "$AV_OFFERED" = 1 ]; then printf '%s' "$1"; else printf '%s_noav' "$1"; fi; }   # the message of the extras: with the antivirus, or the Windows agent only
+# The extras of a release (deploy/RELEASE-LAYOUT.md, "Extras"): the host agent for Windows (and, while AV_OFFERED=1, the antivirus programs), a second asset next to the archive of the platform.
+# --no-extras (or TOUTWAF_NO_EXTRAS=1) leaves them out; --extras FILE (repeatable, or TOUTWAF_EXTRAS=FILE:FILE) installs them from local files (offline).
+NO_EXTRAS=0; case "${TOUTWAF_NO_EXTRAS:-}" in 1|yes|true|on) NO_EXTRAS=1;; esac
+EXTRAS_LOCAL="${TOUTWAF_EXTRAS:-}"; EXTRAS_DIR=""; EXTRAS_RESULT=""; EXTRAS_COUNT=0; EXTRAS_VERSION=""; EXTRAS_BUILD=""; SIG_OK_FOR=""
+ACTION=""; PURGE=0; LANG_CODE="${TOUTWAF_LANG:-}"; NARGS=$#
+
+# ------------------------------------------------------------------------------------------------ message catalog
+# 10 languages (en fr es de it pt nl ru zh ar). Generated: edit deploy/tools/gen-installer-i18n.py, not these lines.
+read_catalog() { cat <<'TW_CATALOG'
+# BEGIN CATALOG (generated by tools/gen-installer-i18n.py)
+en|tagline|Web application & API protection
+fr|tagline|Protection des applications web et des API
+es|tagline|Protección de aplicaciones web y API
+de|tagline|Schutz für Webanwendungen und APIs
+it|tagline|Protezione di applicazioni web e API
+pt|tagline|Proteção de aplicações web e APIs
+nl|tagline|Bescherming van webapplicaties en API's
+ru|tagline|Защита веб-приложений и API
+zh|tagline|Web 应用与 API 防护
+ar|tagline|حماية تطبيقات الويب وواجهات API
+en|menu_title|What would you like to do?
+fr|menu_title|Que souhaitez-vous faire ?
+es|menu_title|¿Qué desea hacer?
+de|menu_title|Was möchten Sie tun?
+it|menu_title|Cosa vuoi fare?
+pt|menu_title|O que deseja fazer?
+nl|menu_title|Wat wilt u doen?
+ru|menu_title|Что вы хотите сделать?
+zh|menu_title|请选择要执行的操作
+ar|menu_title|ماذا تريد أن تفعل؟
+en|opt_install|Install (control plane + data plane + console)
+fr|opt_install|Installer (plan de contrôle + plan de données + console)
+es|opt_install|Instalar (plano de control + plano de datos + consola)
+de|opt_install|Installieren (Control Plane + Data Plane + Konsole)
+it|opt_install|Installa (control plane + data plane + console)
+pt|opt_install|Instalar (plano de controlo + plano de dados + consola)
+nl|opt_install|Installeren (control plane + data plane + console)
+ru|opt_install|Установить (control plane + data plane + консоль)
+zh|opt_install|安装（控制平面 + 数据平面 + 控制台）
+ar|opt_install|تثبيت (مستوى التحكم + مستوى البيانات + لوحة التحكم)
+en|opt_install_d|Everything on this machine: web console, policy store and reverse proxy / WAF.
+fr|opt_install_d|Tout sur cette machine : console web, base de politiques et reverse proxy / WAF.
+es|opt_install_d|Todo en esta máquina: consola web, almacén de políticas y proxy inverso / WAF.
+de|opt_install_d|Alles auf diesem Rechner: Web-Konsole, Richtlinienspeicher und Reverse-Proxy / WAF.
+it|opt_install_d|Tutto su questa macchina: console web, archivio delle policy e reverse proxy / WAF.
+pt|opt_install_d|Tudo nesta máquina: consola web, repositório de políticas e proxy reverso / WAF.
+nl|opt_install_d|Alles op deze machine: webconsole, beleidsopslag en reverse proxy / WAF.
+ru|opt_install_d|Всё на этой машине: веб-консоль, хранилище политик и reverse proxy / WAF.
+zh|opt_install_d|在本机安装全部组件：Web 控制台、策略库和反向代理 / WAF。
+ar|opt_install_d|كل شيء على هذا الجهاز: لوحة الويب ومخزن السياسات والوكيل العكسي / WAF.
+en|opt_cp|Install the control plane only
+fr|opt_cp|Installer le plan de contrôle seul
+es|opt_cp|Instalar solo el plano de control
+de|opt_cp|Nur die Control Plane installieren
+it|opt_cp|Installa solo il control plane
+pt|opt_cp|Instalar apenas o plano de controlo
+nl|opt_cp|Alleen de control plane installeren
+ru|opt_cp|Установить только control plane
+zh|opt_cp|仅安装控制平面
+ar|opt_cp|تثبيت مستوى التحكم فقط
+en|opt_cp_d|Web console, API and policy store. Data planes (nodes) join it later.
+fr|opt_cp_d|Console web, API et base de politiques. Les plans de données (nœuds) la rejoignent ensuite.
+es|opt_cp_d|Consola web, API y almacén de políticas. Los planos de datos (nodos) se unen después.
+de|opt_cp_d|Web-Konsole, API und Richtlinienspeicher. Data Planes (Knoten) treten später bei.
+it|opt_cp_d|Console web, API e archivio delle policy. I data plane (nodi) si uniscono dopo.
+pt|opt_cp_d|Console web, API e repositório de políticas. Os planos de dados (nós) aderem depois.
+nl|opt_cp_d|Webconsole, API en beleidsopslag. Data planes (nodes) sluiten later aan.
+ru|opt_cp_d|Веб-консоль, API и хранилище политик. Data plane (узлы) подключаются позже.
+zh|opt_cp_d|Web 控制台、API 与策略库。数据平面（节点）稍后加入。
+ar|opt_cp_d|لوحة الويب وواجهة API ومخزن السياسات. تنضم مستويات البيانات (العقد) لاحقا.
+en|opt_dp|Install a data plane only
+fr|opt_dp|Installer un plan de données seul
+es|opt_dp|Instalar solo un plano de datos
+de|opt_dp|Nur eine Data Plane installieren
+it|opt_dp|Installa solo un data plane
+pt|opt_dp|Instalar apenas um plano de dados
+nl|opt_dp|Alleen een data plane installeren
+ru|opt_dp|Установить только data plane
+zh|opt_dp|仅安装数据平面
+ar|opt_dp|تثبيت مستوى بيانات فقط
+en|opt_dp_d|Reverse proxy / WAF node that joins an existing control plane (asks for its URL and an enrolment token).
+fr|opt_dp_d|Nœud reverse proxy / WAF qui rejoint un plan de contrôle existant (demande son URL et un jeton d'enrôlement).
+es|opt_dp_d|Nodo de proxy inverso / WAF que se une a un plano de control existente (pide su URL y un token de alta).
+de|opt_dp_d|Reverse-Proxy- / WAF-Knoten, der einer bestehenden Control Plane beitritt (fragt URL und Registrierungstoken ab).
+it|opt_dp_d|Nodo reverse proxy / WAF che si unisce a un control plane esistente (chiede URL e token di registrazione).
+pt|opt_dp_d|Nó de proxy reverso / WAF que se junta a um plano de controlo existente (pede a URL e um token de inscrição).
+nl|opt_dp_d|Reverse-proxy- / WAF-node die zich bij een bestaande control plane voegt (vraagt om URL en inschrijftoken).
+ru|opt_dp_d|Узел reverse proxy / WAF, подключаемый к существующему control plane (запросит URL и токен регистрации).
+zh|opt_dp_d|加入现有控制平面的反向代理 / WAF 节点（需要其 URL 和注册令牌）。
+ar|opt_dp_d|عقدة وكيل عكسي / WAF تنضم إلى مستوى تحكم قائم (تطلب عنوانه ورمز التسجيل).
+en|opt_update|Update
+fr|opt_update|Mettre à jour
+es|opt_update|Actualizar
+de|opt_update|Aktualisieren
+it|opt_update|Aggiorna
+pt|opt_update|Atualizar
+nl|opt_update|Bijwerken
+ru|opt_update|Обновить
+zh|opt_update|更新
+ar|opt_update|تحديث
+en|opt_update_d|Download a newer release, verify it (SHA-256 / sigstore), back up, keep configuration and data, roll back on failure.
+fr|opt_update_d|Télécharge une version plus récente, la vérifie (SHA-256 / sigstore), sauvegarde, conserve configuration et données, annule en cas d'échec.
+es|opt_update_d|Descarga una versión más reciente, la verifica (SHA-256 / sigstore), hace copia, conserva configuración y datos y revierte si falla.
+de|opt_update_d|Lädt eine neuere Version, prüft sie (SHA-256 / sigstore), sichert, behält Konfiguration und Daten und macht bei Fehlern rückgängig.
+it|opt_update_d|Scarica una versione più recente, la verifica (SHA-256 / sigstore), esegue il backup, conserva configurazione e dati, ripristina in caso di errore.
+pt|opt_update_d|Transfere uma versão mais recente, verifica-a (SHA-256 / sigstore), faz uma cópia de segurança, mantém configuração e dados e reverte em caso de falha.
+nl|opt_update_d|Downloadt een nieuwere versie, controleert (SHA-256 / sigstore), maakt een back-up, behoudt configuratie en data en draait terug bij mislukking.
+ru|opt_update_d|Скачивает новую версию, проверяет (SHA-256 / sigstore), делает резервную копию, сохраняет настройки и данные, при сбое откатывает.
+zh|opt_update_d|下载新版本，校验（SHA-256 / sigstore），先备份，保留配置和数据，失败时回滚。
+ar|opt_update_d|ينزل إصدارا أحدث ويتحقق منه (SHA-256 / sigstore) وينشئ نسخة احتياطية ويحتفظ بالإعدادات والبيانات ويتراجع عند الفشل.
+en|opt_uninstall|Uninstall
+fr|opt_uninstall|Désinstaller
+es|opt_uninstall|Desinstalar
+de|opt_uninstall|Deinstallieren
+it|opt_uninstall|Disinstalla
+pt|opt_uninstall|Desinstalar
+nl|opt_uninstall|Verwijderen
+ru|opt_uninstall|Удалить
+zh|opt_uninstall|卸载
+ar|opt_uninstall|إزالة التثبيت
+en|opt_uninstall_d|Remove ToutWAF; you choose whether to keep or delete configuration, data and logs.
+fr|opt_uninstall_d|Supprime ToutWAF ; vous choisissez de conserver ou de supprimer configuration, données et journaux.
+es|opt_uninstall_d|Elimina ToutWAF; usted elige conservar o borrar configuración, datos y registros.
+de|opt_uninstall_d|Entfernt ToutWAF; Sie wählen, ob Konfiguration, Daten und Logs behalten oder gelöscht werden.
+it|opt_uninstall_d|Rimuove ToutWAF; scegli se mantenere o eliminare configurazione, dati e log.
+pt|opt_uninstall_d|Remove o ToutWAF; escolhe se mantém ou apaga a configuração, os dados e os logs.
+nl|opt_uninstall_d|Verwijdert ToutWAF; u kiest of configuratie, data en logs bewaard of gewist worden.
+ru|opt_uninstall_d|Удаляет ToutWAF; вы выбираете, сохранить или удалить настройки, данные и журналы.
+zh|opt_uninstall_d|移除 ToutWAF；可选择保留或删除配置、数据和日志。
+ar|opt_uninstall_d|يزيل ToutWAF؛ تختار الاحتفاظ بالإعدادات والبيانات والسجلات أو حذفها.
+en|opt_status|Status and health check
+fr|opt_status|État et vérification de santé
+es|opt_status|Estado y comprobación de salud
+de|opt_status|Status und Gesundheitsprüfung
+it|opt_status|Stato e controllo di integrità
+pt|opt_status|Estado e verificação de integridade
+nl|opt_status|Status en gezondheidscontrole
+ru|opt_status|Состояние и проверка работоспособности
+zh|opt_status|状态与健康检查
+ar|opt_status|الحالة وفحص السلامة
+en|opt_status_d|Installed versions, services, listening ports and health endpoints.
+fr|opt_status_d|Versions installées, services, ports en écoute et points de santé.
+es|opt_status_d|Versiones instaladas, servicios, puertos en escucha y endpoints de salud.
+de|opt_status_d|Installierte Versionen, Dienste, lauschende Ports und Health-Endpunkte.
+it|opt_status_d|Versioni installate, servizi, porte in ascolto ed endpoint di salute.
+pt|opt_status_d|Versões instaladas, serviços, portas em escuta e endpoints de saúde.
+nl|opt_status_d|Geïnstalleerde versies, services, luisterpoorten en health-endpoints.
+ru|opt_status_d|Установленные версии, службы, слушающие порты и health-эндпоинты.
+zh|opt_status_d|已安装版本、服务、监听端口和健康检查端点。
+ar|opt_status_d|الإصدارات المثبتة والخدمات والمنافذ المفتوحة ونقاط فحص السلامة.
+en|opt_links|Show the panel links again
+fr|opt_links|Afficher à nouveau les liens du panneau
+es|opt_links|Mostrar de nuevo los enlaces del panel
+de|opt_links|Panel-Links erneut anzeigen
+it|opt_links|Mostra di nuovo i link del pannello
+pt|opt_links|Mostrar novamente as ligações do painel
+nl|opt_links|Paneellinks opnieuw tonen
+ru|opt_links|Показать ссылки на панель ещё раз
+zh|opt_links|再次显示面板链接
+ar|opt_links|عرض روابط اللوحة مرة أخرى
+en|opt_links_d|Panel URLs, one-time setup link and the firewall ports to open.
+fr|opt_links_d|URL du panneau, lien d'installation à usage unique et ports à ouvrir dans le pare-feu.
+es|opt_links_d|URL del panel, enlace de configuración de un solo uso y puertos a abrir en el cortafuegos.
+de|opt_links_d|Panel-URLs, einmaliger Einrichtungslink und die in der Firewall zu öffnenden Ports.
+it|opt_links_d|URL del pannello, link di configurazione monouso e porte da aprire nel firewall.
+pt|opt_links_d|URLs do painel, ligação de configuração de utilização única e portas a abrir na firewall.
+nl|opt_links_d|Paneel-URL's, eenmalige installatielink en de in de firewall te openen poorten.
+ru|opt_links_d|Адреса панели, одноразовая ссылка настройки и порты для открытия в брандмауэре.
+zh|opt_links_d|面板地址、一次性设置链接以及需要在防火墙放行的端口。
+ar|opt_links_d|عناوين اللوحة ورابط الإعداد لمرة واحدة والمنافذ المطلوب فتحها في جدار الحماية.
+en|opt_quit|Quit
+fr|opt_quit|Quitter
+es|opt_quit|Salir
+de|opt_quit|Beenden
+it|opt_quit|Esci
+pt|opt_quit|Sair
+nl|opt_quit|Afsluiten
+ru|opt_quit|Выйти
+zh|opt_quit|退出
+ar|opt_quit|خروج
+en|choice|Your choice
+fr|choice|Votre choix
+es|choice|Su elección
+de|choice|Ihre Wahl
+it|choice|La tua scelta
+pt|choice|A sua escolha
+nl|choice|Uw keuze
+ru|choice|Ваш выбор
+zh|choice|您的选择
+ar|choice|اختيارك
+en|invalid_choice|Invalid choice.
+fr|invalid_choice|Choix invalide.
+es|invalid_choice|Elección no válida.
+de|invalid_choice|Ungültige Auswahl.
+it|invalid_choice|Scelta non valida.
+pt|invalid_choice|Escolha inválida.
+nl|invalid_choice|Ongeldige keuze.
+ru|invalid_choice|Неверный выбор.
+zh|invalid_choice|无效的选择。
+ar|invalid_choice|اختيار غير صالح.
+en|state_installed|Installed: %s
+fr|state_installed|Installé : %s
+es|state_installed|Instalado: %s
+de|state_installed|Installiert: %s
+it|state_installed|Installato: %s
+pt|state_installed|Instalado: %s
+nl|state_installed|Geïnstalleerd: %s
+ru|state_installed|Установлено: %s
+zh|state_installed|已安装：%s
+ar|state_installed|المثبت: %s
+en|state_none|ToutWAF is not installed on this machine.
+fr|state_none|ToutWAF n'est pas installé sur cette machine.
+es|state_none|ToutWAF no está instalado en esta máquina.
+de|state_none|ToutWAF ist auf diesem Rechner nicht installiert.
+it|state_none|ToutWAF non è installato su questa macchina.
+pt|state_none|O ToutWAF não está instalado nesta máquina.
+nl|state_none|ToutWAF is niet geïnstalleerd op deze machine.
+ru|state_none|ToutWAF не установлен на этой машине.
+zh|state_none|本机尚未安装 ToutWAF。
+ar|state_none|ToutWAF غير مثبت على هذا الجهاز.
+en|cfg_title|Installation options (Enter = default)
+fr|cfg_title|Options d'installation (Entrée = valeur par défaut)
+es|cfg_title|Opciones de instalación (Intro = valor por defecto)
+de|cfg_title|Installationsoptionen (Eingabe = Standard)
+it|cfg_title|Opzioni di installazione (Invio = predefinito)
+pt|cfg_title|Opções de instalação (Enter = padrão)
+nl|cfg_title|Installatie-opties (Enter = standaard)
+ru|cfg_title|Параметры установки (Enter = по умолчанию)
+zh|cfg_title|安装选项（回车 = 默认值）
+ar|cfg_title|خيارات التثبيت (Enter = الافتراضي)
+en|q_cp_url|Control plane URL (e.g. https://cp.example.com:9444)
+fr|q_cp_url|URL du plan de contrôle (ex. https://cp.example.com:9444)
+es|q_cp_url|URL del plano de control (p. ej. https://cp.example.com:9444)
+de|q_cp_url|URL der Control Plane (z. B. https://cp.example.com:9444)
+it|q_cp_url|URL del control plane (es. https://cp.example.com:9444)
+pt|q_cp_url|URL do plano de controlo (ex. https://cp.example.com:9444)
+nl|q_cp_url|URL van de control plane (bv. https://cp.example.com:9444)
+ru|q_cp_url|URL control plane (напр. https://cp.example.com:9444)
+zh|q_cp_url|控制平面 URL（例如 https://cp.example.com:9444）
+ar|q_cp_url|عنوان مستوى التحكم (مثال https://cp.example.com:9444)
+en|q_token|Enrolment token (console: Nodes > Add node)
+fr|q_token|Jeton d'enrôlement (console : Nœuds > Ajouter un nœud)
+es|q_token|Token de alta (consola: Nodos > Agregar nodo)
+de|q_token|Registrierungstoken (Konsole: Knoten > Knoten hinzufügen)
+it|q_token|Token di registrazione (console: Nodi > Aggiungi nodo)
+pt|q_token|Token de inscrição (consola: Nós > Adicionar nó)
+nl|q_token|Inschrijftoken (console: Nodes > Node toevoegen)
+ru|q_token|Токен регистрации (консоль: Узлы > Добавить узел)
+zh|q_token|注册令牌（控制台：节点 > 添加节点）
+ar|q_token|رمز التسجيل (لوحة التحكم: العقد > إضافة عقدة)
+en|q_cp_ca|Control plane CA / certificate PEM file (empty = system trust store)
+fr|q_cp_ca|Fichier PEM de la CA / du certificat du plan de contrôle (vide = magasin système)
+es|q_cp_ca|Archivo PEM de la CA / certificado del plano de control (vacío = almacén del sistema)
+de|q_cp_ca|PEM-Datei der CA / des Zertifikats der Control Plane (leer = Systemspeicher)
+it|q_cp_ca|File PEM della CA / certificato del control plane (vuoto = archivio di sistema)
+pt|q_cp_ca|Ficheiro PEM da CA / certificado do plano de controlo (vazio = repositório do sistema)
+nl|q_cp_ca|PEM-bestand van de CA / het certificaat van de control plane (leeg = systeemopslag)
+ru|q_cp_ca|PEM-файл CA / сертификата control plane (пусто = системное хранилище)
+zh|q_cp_ca|控制平面 CA / 证书 PEM 文件（留空 = 系统信任库）
+ar|q_cp_ca|ملف PEM لشهادة / مرجع مستوى التحكم (فارغ = مخزن النظام)
+en|q_cp_port|Console port
+fr|q_cp_port|Port de la console
+es|q_cp_port|Puerto de la consola
+de|q_cp_port|Konsolen-Port
+it|q_cp_port|Porta della console
+pt|q_cp_port|Porta da consola
+nl|q_cp_port|Consolepoort
+ru|q_cp_port|Порт консоли
+zh|q_cp_port|控制台端口
+ar|q_cp_port|منفذ لوحة التحكم
+en|q_http_port|HTTP port
+fr|q_http_port|Port HTTP
+es|q_http_port|Puerto HTTP
+de|q_http_port|HTTP-Port
+it|q_http_port|Porta HTTP
+pt|q_http_port|Porta HTTP
+nl|q_http_port|HTTP-poort
+ru|q_http_port|Порт HTTP
+zh|q_http_port|HTTP 端口
+ar|q_http_port|منفذ HTTP
+en|q_https_port|HTTPS port
+fr|q_https_port|Port HTTPS
+es|q_https_port|Puerto HTTPS
+de|q_https_port|HTTPS-Port
+it|q_https_port|Porta HTTPS
+pt|q_https_port|Porta HTTPS
+nl|q_https_port|HTTPS-poort
+ru|q_https_port|Порт HTTPS
+zh|q_https_port|HTTPS 端口
+ar|q_https_port|منفذ HTTPS
+en|q_public_host|Public host name or IP address (empty = auto-detect)
+fr|q_public_host|Nom d'hôte ou adresse IP publique (vide = détection auto)
+es|q_public_host|Nombre de host o IP pública (vacío = detección automática)
+de|q_public_host|Öffentlicher Hostname oder IP-Adresse (leer = automatisch)
+it|q_public_host|Nome host o indirizzo IP pubblico (vuoto = rilevamento automatico)
+pt|q_public_host|Nome de host ou IP público (vazio = deteção automática)
+nl|q_public_host|Publieke hostnaam of IP-adres (leeg = automatisch)
+ru|q_public_host|Публичное имя хоста или IP (пусто = автоопределение)
+zh|q_public_host|公网主机名或 IP 地址（留空 = 自动检测）
+ar|q_public_host|اسم المضيف أو عنوان IP العام (فارغ = اكتشاف تلقائي)
+en|q_dns|Enable the authoritative DNS server of the console (port 53)?
+fr|q_dns|Activer le serveur DNS autoritatif de la console (port 53) ?
+es|q_dns|¿Activar el servidor DNS autoritativo de la consola (puerto 53)?
+de|q_dns|Autoritativen DNS-Server der Konsole aktivieren (Port 53)?
+it|q_dns|Attivare il server DNS autorevole della console (porta 53)?
+pt|q_dns|Ativar o servidor DNS autoritativo da consola (porta 53)?
+nl|q_dns|De gezaghebbende DNS-server van de console inschakelen (poort 53)?
+ru|q_dns|Включить авторитетный DNS-сервер консоли (порт 53)?
+zh|q_dns|是否启用控制台的权威 DNS 服务器（端口 53）？
+ar|q_dns|تفعيل خادم DNS الموثوق الخاص بلوحة التحكم (المنفذ 53)؟
+en|dns_n1|ToutWAF can answer the DNS of your domains itself (zones, failover, protection). Recommended when no other DNS server runs here. It needs port 53 and the right to bind it without root.
+fr|dns_n1|ToutWAF peut répondre lui-même au DNS de vos domaines (zones, bascule, protection). Recommandé quand aucun autre serveur DNS ne tourne ici. Il lui faut le port 53 et le droit de l'ouvrir sans root.
+es|dns_n1|ToutWAF puede responder él mismo al DNS de sus dominios (zonas, conmutación, protección). Recomendado cuando aquí no funciona otro servidor DNS. Necesita el puerto 53 y el derecho a abrirlo sin root.
+de|dns_n1|ToutWAF kann das DNS Ihrer Domains selbst beantworten (Zonen, Failover, Schutz). Empfohlen, wenn hier kein anderer DNS-Server läuft. Es braucht Port 53 und das Recht, ihn ohne root zu öffnen.
+it|dns_n1|ToutWAF può rispondere da solo al DNS dei tuoi domini (zone, failover, protezione). Consigliato quando qui non gira un altro server DNS. Gli servono la porta 53 e il diritto di aprirla senza root.
+pt|dns_n1|O ToutWAF pode responder ele próprio ao DNS dos seus domínios (zonas, comutação, proteção). Recomendado quando aqui não corre outro servidor DNS. Precisa da porta 53 e do direito de a abrir sem root.
+nl|dns_n1|ToutWAF kan zelf de DNS van uw domeinen beantwoorden (zones, failover, bescherming). Aanbevolen als hier geen andere DNS-server draait. Het heeft poort 53 nodig en het recht die zonder root te openen.
+ru|dns_n1|ToutWAF может сам отвечать на DNS-запросы ваших доменов (зоны, переключение, защита). Рекомендуется, если здесь не работает другой DNS-сервер. Нужны порт 53 и право открыть его без root.
+zh|dns_n1|ToutWAF 可以自行应答您域名的 DNS（区域、故障切换、防护）。如果这台机器上没有其他 DNS 服务器，建议启用。它需要 53 端口以及无需 root 即可绑定该端口的权限。
+ar|dns_n1|يستطيع ToutWAF الرد بنفسه على DNS نطاقاتك (المناطق والتحويل التلقائي والحماية). يُنصح به عندما لا يعمل هنا خادم DNS آخر. يحتاج إلى المنفذ 53 وإلى حق فتحه دون root.
+en|dns_n2|No other program is ever stopped. The role itself is given later, in the console (DNS > Servers). You can switch this off again with --no-dns-server.
+fr|dns_n2|Aucun autre programme n'est jamais arrêté. Le rôle lui-même se donne ensuite dans la console (DNS > Serveurs). Vous pouvez le désactiver avec --no-dns-server.
+es|dns_n2|Nunca se detiene ningún otro programa. El rol se asigna después, en la consola (DNS > Servidores). Puede desactivarlo con --no-dns-server.
+de|dns_n2|Kein anderes Programm wird je angehalten. Die Rolle selbst vergeben Sie danach in der Konsole (DNS > Server). Mit --no-dns-server schalten Sie es wieder ab.
+it|dns_n2|Nessun altro programma viene mai fermato. Il ruolo si assegna poi nella console (DNS > Server). Puoi disattivarlo con --no-dns-server.
+pt|dns_n2|Nenhum outro programa é alguma vez parado. A função atribui-se depois, na consola (DNS > Servidores). Pode desativá-la com --no-dns-server.
+nl|dns_n2|Er wordt nooit een ander programma gestopt. De rol zelf geeft u daarna in de console (DNS > Servers). U kunt het weer uitschakelen met --no-dns-server.
+ru|dns_n2|Никакая другая программа никогда не останавливается. Саму роль вы назначите позже в консоли (DNS > Серверы). Отключить можно параметром --no-dns-server.
+zh|dns_n2|绝不会停止其他程序。角色本身稍后在控制台中授予（DNS > 服务器）。可以用 --no-dns-server 再次关闭。
+ar|dns_n2|لا يُوقَف أي برنامج آخر أبدا. يُمنح الدور نفسه لاحقا من لوحة التحكم (DNS > الخوادم). يمكنك إيقافه بالخيار --no-dns-server.
+en|q_dns_free|Free port 53 by switching off the local stub resolver of systemd-resolved (reversible)?
+fr|q_dns_free|Libérer le port 53 en coupant le résolveur local (stub) de systemd-resolved (réversible) ?
+es|q_dns_free|¿Liberar el puerto 53 desactivando el resolvedor local (stub) de systemd-resolved (reversible)?
+de|q_dns_free|Port 53 freigeben, indem der lokale Stub-Resolver von systemd-resolved abgeschaltet wird (umkehrbar)?
+it|q_dns_free|Liberare la porta 53 disattivando il resolver locale (stub) di systemd-resolved (reversibile)?
+pt|q_dns_free|Libertar a porta 53 desligando o resolvedor local (stub) do systemd-resolved (reversível)?
+nl|q_dns_free|Poort 53 vrijmaken door de lokale stub-resolver van systemd-resolved uit te schakelen (omkeerbaar)?
+ru|q_dns_free|Освободить порт 53, отключив локальный stub-резолвер systemd-resolved (обратимо)?
+zh|q_dns_free|是否通过关闭 systemd-resolved 的本地 stub 解析器来释放 53 端口（可恢复）？
+ar|q_dns_free|تحرير المنفذ 53 بإيقاف المحلّل المحلي (stub) في systemd-resolved (قابل للتراجع)؟
+en|s_dns|DNS server of the console
+fr|s_dns|Serveur DNS de la console
+es|s_dns|Servidor DNS de la consola
+de|s_dns|DNS-Server der Konsole
+it|s_dns|Server DNS della console
+pt|s_dns|Servidor DNS da consola
+nl|s_dns|DNS-server van de console
+ru|s_dns|DNS-сервер консоли
+zh|s_dns|控制台的 DNS 服务器
+ar|s_dns|خادم DNS الخاص بلوحة التحكم
+en|dns_ready|DNS server of the console prepared: port 53 can be bound without root. Give it the DNS role in the console (DNS > Servers).
+fr|dns_ready|Serveur DNS de la console préparé : le port 53 peut être ouvert sans root. Donnez-lui le rôle DNS dans la console (DNS > Serveurs).
+es|dns_ready|Servidor DNS de la consola preparado: el puerto 53 puede abrirse sin root. Asígnele el rol DNS en la consola (DNS > Servidores).
+de|dns_ready|DNS-Server der Konsole vorbereitet: Port 53 kann ohne root geöffnet werden. Vergeben Sie ihm die DNS-Rolle in der Konsole (DNS > Server).
+it|dns_ready|Server DNS della console preparato: la porta 53 può essere aperta senza root. Assegnagli il ruolo DNS nella console (DNS > Server).
+pt|dns_ready|Servidor DNS da consola preparado: a porta 53 pode ser aberta sem root. Atribua-lhe a função DNS na consola (DNS > Servidores).
+nl|dns_ready|DNS-server van de console voorbereid: poort 53 kan zonder root worden geopend. Geef hem de DNS-rol in de console (DNS > Servers).
+ru|dns_ready|DNS-сервер консоли подготовлен: порт 53 можно открыть без root. Назначьте ему роль DNS в консоли (DNS > Серверы).
+zh|dns_ready|控制台的 DNS 服务器已准备好：无需 root 即可绑定 53 端口。请在控制台中授予其 DNS 角色（DNS > 服务器）。
+ar|dns_ready|تم تجهيز خادم DNS الخاص بلوحة التحكم: يمكن فتح المنفذ 53 دون root. امنحه دور DNS من لوحة التحكم (DNS > الخوادم).
+en|dns_stub_released|Port 53 freed: the local stub resolver of systemd-resolved is switched off (reversible: %s)
+fr|dns_stub_released|Port 53 libéré : le résolveur local (stub) de systemd-resolved est coupé (réversible : %s)
+es|dns_stub_released|Puerto 53 liberado: el resolvedor local (stub) de systemd-resolved está desactivado (reversible: %s)
+de|dns_stub_released|Port 53 freigegeben: der lokale Stub-Resolver von systemd-resolved ist abgeschaltet (umkehrbar: %s)
+it|dns_stub_released|Porta 53 liberata: il resolver locale (stub) di systemd-resolved è disattivato (reversibile: %s)
+pt|dns_stub_released|Porta 53 libertada: o resolvedor local (stub) do systemd-resolved está desligado (reversível: %s)
+nl|dns_stub_released|Poort 53 vrijgemaakt: de lokale stub-resolver van systemd-resolved is uitgeschakeld (omkeerbaar: %s)
+ru|dns_stub_released|Порт 53 освобождён: локальный stub-резолвер systemd-resolved отключён (обратимо: %s)
+zh|dns_stub_released|53 端口已释放：systemd-resolved 的本地 stub 解析器已关闭（可恢复：%s）
+ar|dns_stub_released|تم تحرير المنفذ 53: أُوقف المحلّل المحلي (stub) في systemd-resolved (قابل للتراجع: %s)
+en|dns_stub_kept|Port 53 is held by the local stub resolver of systemd-resolved and was left as it is. Switch it off yourself (DNSStubListener=no in /etc/systemd/resolved.conf.d/) or run the installer again with --dns-server
+fr|dns_stub_kept|Le port 53 est tenu par le résolveur local (stub) de systemd-resolved et a été laissé tel quel. Coupez-le vous-même (DNSStubListener=no dans /etc/systemd/resolved.conf.d/) ou relancez l'installeur avec --dns-server
+es|dns_stub_kept|El puerto 53 lo ocupa el resolvedor local (stub) de systemd-resolved y se dejó como estaba. Desactívelo usted mismo (DNSStubListener=no en /etc/systemd/resolved.conf.d/) o vuelva a ejecutar el instalador con --dns-server
+de|dns_stub_kept|Port 53 wird vom lokalen Stub-Resolver von systemd-resolved belegt und blieb unverändert. Schalten Sie ihn selbst ab (DNSStubListener=no in /etc/systemd/resolved.conf.d/) oder starten Sie den Installer erneut mit --dns-server
+it|dns_stub_kept|La porta 53 è occupata dal resolver locale (stub) di systemd-resolved ed è stata lasciata com'era. Disattivalo tu (DNSStubListener=no in /etc/systemd/resolved.conf.d/) oppure riesegui l'installer con --dns-server
+pt|dns_stub_kept|A porta 53 está ocupada pelo resolvedor local (stub) do systemd-resolved e foi deixada como estava. Desligue-o pelos seus meios (DNSStubListener=no em /etc/systemd/resolved.conf.d/) ou execute o instalador de novo com --dns-server
+nl|dns_stub_kept|Poort 53 wordt bezet door de lokale stub-resolver van systemd-resolved en is ongemoeid gelaten. Schakel hem zelf uit (DNSStubListener=no in /etc/systemd/resolved.conf.d/) of start het installatieprogramma opnieuw met --dns-server
+ru|dns_stub_kept|Порт 53 занят локальным stub-резолвером systemd-resolved и оставлен как есть. Отключите его сами (DNSStubListener=no в /etc/systemd/resolved.conf.d/) или запустите установщик снова с --dns-server
+zh|dns_stub_kept|53 端口被 systemd-resolved 的本地 stub 解析器占用，已保持原样。请自行关闭（在 /etc/systemd/resolved.conf.d/ 中设置 DNSStubListener=no），或使用 --dns-server 重新运行安装程序
+ar|dns_stub_kept|المنفذ 53 تشغله المحلّل المحلي (stub) في systemd-resolved وتُرك كما هو. أوقفه بنفسك (DNSStubListener=no في /etc/systemd/resolved.conf.d/) أو أعد تشغيل المثبّت مع --dns-server
+en|dns_busy|Port 53 is already used by %s. ToutWAF never stops another program: free the port yourself, or give the DNS role of the console a specific address
+fr|dns_busy|Le port 53 est déjà utilisé par %s. ToutWAF n'arrête jamais un autre programme : libérez le port vous-même, ou donnez au rôle DNS de la console une adresse précise
+es|dns_busy|El puerto 53 ya lo usa %s. ToutWAF nunca detiene otro programa: libere el puerto usted mismo o dé al rol DNS de la consola una dirección concreta
+de|dns_busy|Port 53 wird bereits von %s verwendet. ToutWAF hält nie ein anderes Programm an: geben Sie den Port selbst frei oder weisen Sie der DNS-Rolle der Konsole eine bestimmte Adresse zu
+it|dns_busy|La porta 53 è già usata da %s. ToutWAF non ferma mai un altro programma: libera la porta tu stesso oppure assegna al ruolo DNS della console un indirizzo preciso
+pt|dns_busy|A porta 53 já é usada por %s. O ToutWAF nunca para outro programa: liberte a porta pelos seus meios ou dê à função DNS da consola um endereço concreto
+nl|dns_busy|Poort 53 wordt al gebruikt door %s. ToutWAF stopt nooit een ander programma: maak de poort zelf vrij of geef de DNS-rol van de console een bepaald adres
+ru|dns_busy|Порт 53 уже используется программой %s. ToutWAF никогда не останавливает другие программы: освободите порт сами или задайте роли DNS консоли конкретный адрес
+zh|dns_busy|53 端口已被 %s 占用。ToutWAF 绝不会停止其他程序：请自行释放该端口，或为控制台的 DNS 角色指定具体地址
+ar|dns_busy|المنفذ 53 مستخدم بالفعل من %s. لا يوقف ToutWAF أي برنامج آخر: حرّر المنفذ بنفسك أو امنح دور DNS في لوحة التحكم عنوانا محددا
+en|dns_fw|Firewall (%s): port 53 (UDP and TCP) opened
+fr|dns_fw|Pare-feu (%s) : port 53 (UDP et TCP) ouvert
+es|dns_fw|Cortafuegos (%s): puerto 53 (UDP y TCP) abierto
+de|dns_fw|Firewall (%s): Port 53 (UDP und TCP) geöffnet
+it|dns_fw|Firewall (%s): porta 53 (UDP e TCP) aperta
+pt|dns_fw|Firewall (%s): porta 53 (UDP e TCP) aberta
+nl|dns_fw|Firewall (%s): poort 53 (UDP en TCP) geopend
+ru|dns_fw|Брандмауэр (%s): порт 53 (UDP и TCP) открыт
+zh|dns_fw|防火墙（%s）：已放行 53 端口（UDP 和 TCP）
+ar|dns_fw|جدار الحماية (%s): تم فتح المنفذ 53 (UDP وTCP)
+en|dns_fw_manual|Port 53 (UDP and TCP) is not opened automatically on this firewall: open it yourself
+fr|dns_fw_manual|Le port 53 (UDP et TCP) n'est pas ouvert automatiquement sur ce pare-feu : ouvrez-le vous-même
+es|dns_fw_manual|El puerto 53 (UDP y TCP) no se abre automáticamente en este cortafuegos: ábralo usted mismo
+de|dns_fw_manual|Port 53 (UDP und TCP) wird bei dieser Firewall nicht automatisch geöffnet: öffnen Sie ihn selbst
+it|dns_fw_manual|La porta 53 (UDP e TCP) non viene aperta automaticamente su questo firewall: aprila tu stesso
+pt|dns_fw_manual|A porta 53 (UDP e TCP) não é aberta automaticamente nesta firewall: abra-a manualmente
+nl|dns_fw_manual|Poort 53 (UDP en TCP) wordt op deze firewall niet automatisch geopend: open haar zelf
+ru|dns_fw_manual|Порт 53 (UDP и TCP) в этом брандмауэре автоматически не открывается: откройте его сами
+zh|dns_fw_manual|此防火墙不会自动放行 53 端口（UDP 和 TCP）：请自行放行
+ar|dns_fw_manual|لا يُفتح المنفذ 53 (UDP وTCP) تلقائيا في جدار الحماية هذا: افتحه بنفسك
+en|dns_reverted|DNS server of the console switched off: what the installer changed for it has been undone
+fr|dns_reverted|Serveur DNS de la console désactivé : ce que l'installeur avait modifié pour lui a été annulé
+es|dns_reverted|Servidor DNS de la consola desactivado: se deshizo lo que el instalador había cambiado para él
+de|dns_reverted|DNS-Server der Konsole abgeschaltet: was der Installer dafür geändert hatte, wurde rückgängig gemacht
+it|dns_reverted|Server DNS della console disattivato: ciò che l'installer aveva modificato per lui è stato annullato
+pt|dns_reverted|Servidor DNS da consola desativado: o que o instalador tinha alterado para ele foi desfeito
+nl|dns_reverted|DNS-server van de console uitgeschakeld: wat het installatieprogramma ervoor had gewijzigd is ongedaan gemaakt
+ru|dns_reverted|DNS-сервер консоли отключён: изменения, сделанные для него установщиком, отменены
+zh|dns_reverted|控制台的 DNS 服务器已关闭：安装程序为其所做的更改已撤销
+ar|dns_reverted|تم إيقاف خادم DNS الخاص بلوحة التحكم: أُلغي ما غيّره المثبّت من أجله
+en|p_dns|DNS (authoritative server of the console)
+fr|p_dns|DNS (serveur autoritatif de la console)
+es|p_dns|DNS (servidor autoritativo de la consola)
+de|p_dns|DNS (autoritativer Server der Konsole)
+it|p_dns|DNS (server autorevole della console)
+pt|p_dns|DNS (servidor autoritativo da consola)
+nl|p_dns|DNS (gezaghebbende server van de console)
+ru|p_dns|DNS (авторитетный сервер консоли)
+zh|p_dns|DNS（控制台的权威服务器）
+ar|p_dns|DNS (الخادم الموثوق للوحة التحكم)
+en|q_firewall|Open the firewall automatically (firewalld / ufw)?
+fr|q_firewall|Ouvrir automatiquement le pare-feu (firewalld / ufw) ?
+es|q_firewall|¿Abrir el cortafuegos automáticamente (firewalld / ufw)?
+de|q_firewall|Firewall automatisch öffnen (firewalld / ufw)?
+it|q_firewall|Aprire automaticamente il firewall (firewalld / ufw)?
+pt|q_firewall|Abrir a firewall automaticamente (firewalld / ufw)?
+nl|q_firewall|Firewall automatisch openen (firewalld / ufw)?
+ru|q_firewall|Автоматически открыть порты в брандмауэре (firewalld / ufw)?
+zh|q_firewall|是否自动放行防火墙端口（firewalld / ufw）？
+ar|q_firewall|فتح جدار الحماية تلقائيا (firewalld / ufw)؟
+en|q_boot|Start the services at boot?
+fr|q_boot|Démarrer les services au démarrage ?
+es|q_boot|¿Iniciar los servicios al arrancar?
+de|q_boot|Dienste beim Systemstart starten?
+it|q_boot|Avviare i servizi all'avvio?
+pt|q_boot|Iniciar os serviços no arranque?
+nl|q_boot|Services bij het opstarten starten?
+ru|q_boot|Запускать службы при загрузке?
+zh|q_boot|是否开机自动启动服务？
+ar|q_boot|تشغيل الخدمات عند الإقلاع؟
+en|q_channel|Release channel (stable / dev)
+fr|q_channel|Canal de publication (stable / dev)
+es|q_channel|Canal de versiones (stable / dev)
+de|q_channel|Release-Kanal (stable / dev)
+it|q_channel|Canale di rilascio (stable / dev)
+pt|q_channel|Canal de lançamento (stable / dev)
+nl|q_channel|Releasekanaal (stable / dev)
+ru|q_channel|Канал релизов (stable / dev)
+zh|q_channel|发布通道（stable / dev）
+ar|q_channel|قناة الإصدارات (stable / dev)
+en|q_bindir|Install directory
+fr|q_bindir|Répertoire d'installation
+es|q_bindir|Directorio de instalación
+de|q_bindir|Installationsverzeichnis
+it|q_bindir|Directory di installazione
+pt|q_bindir|Diretório de instalação
+nl|q_bindir|Installatiemap
+ru|q_bindir|Каталог установки
+zh|q_bindir|安装目录
+ar|q_bindir|مجلد التثبيت
+en|q_confirm|Proceed with the installation?
+fr|q_confirm|Lancer l'installation ?
+es|q_confirm|¿Continuar con la instalación?
+de|q_confirm|Installation starten?
+it|q_confirm|Procedere con l'installazione?
+pt|q_confirm|Prosseguir com a instalação?
+nl|q_confirm|Doorgaan met de installatie?
+ru|q_confirm|Начать установку?
+zh|q_confirm|开始安装？
+ar|q_confirm|المتابعة في التثبيت؟
+en|q_purge|Also delete configuration, data and logs? (No = keep them)
+fr|q_purge|Supprimer aussi configuration, données et journaux ? (Non = les conserver)
+es|q_purge|¿Borrar también configuración, datos y registros? (No = conservarlos)
+de|q_purge|Auch Konfiguration, Daten und Logs löschen? (Nein = behalten)
+it|q_purge|Eliminare anche configurazione, dati e log? (No = conservali)
+pt|q_purge|Apagar também configuração, dados e logs? (Não = manter)
+nl|q_purge|Ook configuratie, data en logs wissen? (Nee = bewaren)
+ru|q_purge|Удалить также настройки, данные и журналы? (Нет = сохранить)
+zh|q_purge|同时删除配置、数据和日志？（否 = 保留）
+ar|q_purge|حذف الإعدادات والبيانات والسجلات أيضا؟ (لا = الاحتفاظ بها)
+en|q_confirm_un|Really uninstall ToutWAF?
+fr|q_confirm_un|Désinstaller vraiment ToutWAF ?
+es|q_confirm_un|¿Desinstalar ToutWAF de verdad?
+de|q_confirm_un|ToutWAF wirklich deinstallieren?
+it|q_confirm_un|Disinstallare davvero ToutWAF?
+pt|q_confirm_un|Desinstalar mesmo o ToutWAF?
+nl|q_confirm_un|ToutWAF echt verwijderen?
+ru|q_confirm_un|Действительно удалить ToutWAF?
+zh|q_confirm_un|确定要卸载 ToutWAF 吗？
+ar|q_confirm_un|هل تريد فعلا إزالة ToutWAF؟
+en|aborted|Aborted.
+fr|aborted|Abandon.
+es|aborted|Cancelado.
+de|aborted|Abgebrochen.
+it|aborted|Annullato.
+pt|aborted|Cancelado.
+nl|aborted|Afgebroken.
+ru|aborted|Отменено.
+zh|aborted|已取消。
+ar|aborted|تم الإلغاء.
+en|root_required|Run as root (sudo bash install.sh).
+fr|root_required|Exécutez en root (sudo bash install.sh).
+es|root_required|Ejecute como root (sudo bash install.sh).
+de|root_required|Als root ausführen (sudo bash install.sh).
+it|root_required|Eseguire come root (sudo bash install.sh).
+pt|root_required|Execute como root (sudo bash install.sh).
+nl|root_required|Voer uit als root (sudo bash install.sh).
+ru|root_required|Запустите от root (sudo bash install.sh).
+zh|root_required|请以 root 身份运行（sudo bash install.sh）。
+ar|root_required|شغّل السكربت بصلاحيات root (sudo bash install.sh).
+en|s_prereq|Installing prerequisites
+fr|s_prereq|Installation des prérequis
+es|s_prereq|Instalando requisitos previos
+de|s_prereq|Voraussetzungen installieren
+it|s_prereq|Installazione dei prerequisiti
+pt|s_prereq|A instalar pré-requisitos
+nl|s_prereq|Vereisten installeren
+ru|s_prereq|Установка зависимостей
+zh|s_prereq|安装依赖项
+ar|s_prereq|تثبيت المتطلبات
+en|s_fetch|Downloading ToutWAF %s (%s)
+fr|s_fetch|Téléchargement de ToutWAF %s (%s)
+es|s_fetch|Descargando ToutWAF %s (%s)
+de|s_fetch|ToutWAF %s (%s) wird heruntergeladen
+it|s_fetch|Download di ToutWAF %s (%s)
+pt|s_fetch|A transferir o ToutWAF %s (%s)
+nl|s_fetch|ToutWAF %s (%s) downloaden
+ru|s_fetch|Загрузка ToutWAF %s (%s)
+zh|s_fetch|正在下载 ToutWAF %s（%s）
+ar|s_fetch|تنزيل ToutWAF %s (%s)
+en|s_sha|SHA-256 verified
+fr|s_sha|SHA-256 vérifié
+es|s_sha|SHA-256 verificado
+de|s_sha|SHA-256 geprüft
+it|s_sha|SHA-256 verificato
+pt|s_sha|SHA-256 verificado
+nl|s_sha|SHA-256 gecontroleerd
+ru|s_sha|SHA-256 проверен
+zh|s_sha|SHA-256 校验通过
+ar|s_sha|تم التحقق من SHA-256
+en|s_sig|cosign signature verified
+fr|s_sig|Signature cosign vérifiée
+es|s_sig|Firma cosign verificada
+de|s_sig|cosign-Signatur geprüft
+it|s_sig|Firma cosign verificata
+pt|s_sig|Assinatura cosign verificada
+nl|s_sig|cosign-handtekening gecontroleerd
+ru|s_sig|Подпись cosign проверена
+zh|s_sig|cosign 签名校验通过
+ar|s_sig|تم التحقق من توقيع cosign
+en|w_nocosign|cosign not installed: signature not verified (checksum only)
+fr|w_nocosign|cosign absent : signature non vérifiée (somme de contrôle uniquement)
+es|w_nocosign|cosign no instalado: firma sin verificar (solo suma de control)
+de|w_nocosign|cosign fehlt: Signatur nicht geprüft (nur Prüfsumme)
+it|w_nocosign|cosign non installato: firma non verificata (solo checksum)
+pt|w_nocosign|cosign não instalado: assinatura não verificada (apenas checksum)
+nl|w_nocosign|cosign niet geïnstalleerd: handtekening niet gecontroleerd (alleen checksum)
+ru|w_nocosign|cosign не установлен: подпись не проверена (только контрольная сумма)
+zh|w_nocosign|未安装 cosign：未校验签名（仅校验和）
+ar|w_nocosign|cosign غير مثبت: لم يتم التحقق من التوقيع (المجموع الاختباري فقط)
+en|s_user|Creating the service account and directories
+fr|s_user|Création du compte de service et des répertoires
+es|s_user|Creando la cuenta de servicio y los directorios
+de|s_user|Dienstkonto und Verzeichnisse anlegen
+it|s_user|Creazione dell'account di servizio e delle directory
+pt|s_user|A criar a conta de serviço e os diretórios
+nl|s_user|Serviceaccount en mappen aanmaken
+ru|s_user|Создание служебной учётной записи и каталогов
+zh|s_user|创建服务账户和目录
+ar|s_user|إنشاء حساب الخدمة والمجلدات
+en|s_bin|Installing binaries
+fr|s_bin|Installation des binaires
+es|s_bin|Instalando binarios
+de|s_bin|Programme installieren
+it|s_bin|Installazione dei binari
+pt|s_bin|A instalar binários
+nl|s_bin|Binaries installeren
+ru|s_bin|Установка исполняемых файлов
+zh|s_bin|安装程序文件
+ar|s_bin|تثبيت الملفات التنفيذية
+en|s_cfg|Writing configuration (existing files are kept)
+fr|s_cfg|Écriture de la configuration (les fichiers existants sont conservés)
+es|s_cfg|Escribiendo la configuración (se conservan los archivos existentes)
+de|s_cfg|Konfiguration schreiben (vorhandene Dateien bleiben)
+it|s_cfg|Scrittura della configurazione (i file esistenti sono mantenuti)
+pt|s_cfg|A gravar a configuração (os ficheiros existentes são mantidos)
+nl|s_cfg|Configuratie schrijven (bestaande bestanden blijven)
+ru|s_cfg|Запись настроек (существующие файлы сохраняются)
+zh|s_cfg|写入配置（保留已有文件）
+ar|s_cfg|كتابة الإعدادات (تبقى الملفات الموجودة)
+en|s_units|Installing systemd units and system tuning
+fr|s_units|Installation des unités systemd et réglages système
+es|s_units|Instalando unidades systemd y ajustes del sistema
+de|s_units|systemd-Units und Systemoptimierung installieren
+it|s_units|Installazione delle unit systemd e ottimizzazioni di sistema
+pt|s_units|A instalar unidades systemd e ajustes do sistema
+nl|s_units|systemd-units en systeemtuning installeren
+ru|s_units|Установка юнитов systemd и настройка системы
+zh|s_units|安装 systemd 单元与系统调优
+ar|s_units|تثبيت وحدات systemd وضبط النظام
+en|s_selinux|Configuring SELinux
+fr|s_selinux|Configuration de SELinux
+es|s_selinux|Configurando SELinux
+de|s_selinux|SELinux konfigurieren
+it|s_selinux|Configurazione di SELinux
+pt|s_selinux|A configurar o SELinux
+nl|s_selinux|SELinux configureren
+ru|s_selinux|Настройка SELinux
+zh|s_selinux|配置 SELinux
+ar|s_selinux|إعداد SELinux
+en|q_console_from|Only allow this network to reach the console (CIDR such as 203.0.113.0/24, empty = anyone)
+fr|q_console_from|N'autoriser que ce réseau à joindre la console (CIDR, ex. 203.0.113.0/24 ; vide = tout le monde)
+es|q_console_from|Permitir solo esta red hacia la consola (CIDR, p. ej. 203.0.113.0/24; vacío = cualquiera)
+de|q_console_from|Konsole nur für dieses Netz freigeben (CIDR, z. B. 203.0.113.0/24; leer = alle)
+it|q_console_from|Consenti alla console solo questa rete (CIDR, es. 203.0.113.0/24; vuoto = chiunque)
+pt|q_console_from|Permitir apenas esta rede na consola (CIDR, ex. 203.0.113.0/24; vazio = qualquer um)
+nl|q_console_from|Console alleen voor dit netwerk openen (CIDR, bv. 203.0.113.0/24; leeg = iedereen)
+ru|q_console_from|Разрешить доступ к консоли только из этой сети (CIDR, напр. 203.0.113.0/24; пусто = всем)
+zh|q_console_from|仅允许该网络访问控制台（CIDR，如 203.0.113.0/24；留空 = 任何人）
+ar|q_console_from|السماح لهذه الشبكة فقط بالوصول إلى لوحة التحكم (CIDR مثل 203.0.113.0/24؛ فارغ = الجميع)
+en|q_console_from_bad|Not an address or CIDR (0.0.0.0/0 is the same as empty): the console port stays open to everyone.
+fr|q_console_from_bad|Ni adresse ni CIDR valide (0.0.0.0/0 revient à vide) : le port de la console reste ouvert à tous.
+es|q_console_from_bad|No es una dirección ni un CIDR (0.0.0.0/0 equivale a vacío): el puerto de la consola queda abierto a todos.
+de|q_console_from_bad|Keine Adresse und kein CIDR (0.0.0.0/0 entspricht leer): der Konsolenport bleibt für alle offen.
+it|q_console_from_bad|Non è un indirizzo né un CIDR (0.0.0.0/0 equivale a vuoto): la porta della console resta aperta a tutti.
+pt|q_console_from_bad|Não é um endereço nem um CIDR (0.0.0.0/0 equivale a vazio): a porta da consola fica aberta a todos.
+nl|q_console_from_bad|Geen adres of CIDR (0.0.0.0/0 is hetzelfde als leeg): de consolepoort blijft voor iedereen open.
+ru|q_console_from_bad|Не адрес и не CIDR (0.0.0.0/0 равно пустому): порт консоли остаётся открытым для всех.
+zh|q_console_from_bad|不是有效的地址或 CIDR（0.0.0.0/0 等同于留空）：控制台端口对所有人开放。
+ar|q_console_from_bad|ليس عنوانا ولا CIDR صالحا (0.0.0.0/0 يعادل فارغا): يبقى منفذ لوحة التحكم مفتوحا للجميع.
+en|fw_console_note|The console (port %s) holds the administration login: opening it to the whole Internet is convenient but exposed.
+fr|fw_console_note|La console (port %s) porte la connexion d'administration : l'ouvrir à tout Internet est pratique mais exposé.
+es|fw_console_note|La consola (puerto %s) contiene el acceso de administración: abrirla a todo Internet es cómodo pero expuesto.
+de|fw_console_note|Die Konsole (Port %s) enthält die Admin-Anmeldung: sie für das ganze Internet zu öffnen ist bequem, aber exponiert.
+it|fw_console_note|La console (porta %s) ospita l'accesso amministrativo: aprirla a tutta Internet è comodo ma esposto.
+pt|fw_console_note|A consola (porta %s) contém o início de sessão de administração: abri-la a toda a Internet é cómodo, mas exposto.
+nl|fw_console_note|De console (poort %s) bevat de beheerlogin: openen voor heel internet is handig maar blootgesteld.
+ru|fw_console_note|Консоль (порт %s) содержит вход администратора: открывать её всему Интернету удобно, но небезопасно.
+zh|fw_console_note|控制台（端口 %s）承载管理员登录：向整个互联网开放虽然方便，但存在暴露风险。
+ar|fw_console_note|لوحة التحكم (المنفذ %s) تحوي تسجيل دخول الإدارة: فتحها لكل الإنترنت مريح لكنه معرّض للخطر.
+en|fw_console_open|Console port %s is open to everyone: restrict it with --console-from CIDR or in the console (Settings > Firewall)
+fr|fw_console_open|Le port %s de la console est ouvert à tous : restreignez-le avec --console-from CIDR ou dans la console (Réglages > Pare-feu)
+es|fw_console_open|El puerto %s de la consola está abierto a todos: restrínjalo con --console-from CIDR o en la consola (Ajustes > Cortafuegos)
+de|fw_console_open|Konsolenport %s ist für alle offen: mit --console-from CIDR oder in der Konsole (Einstellungen > Firewall) einschränken
+it|fw_console_open|La porta %s della console è aperta a tutti: limitala con --console-from CIDR o nella console (Impostazioni > Firewall)
+pt|fw_console_open|A porta %s da consola está aberta a todos: restrinja com --console-from CIDR ou na consola (Definições > Firewall)
+nl|fw_console_open|Consolepoort %s staat open voor iedereen: beperk met --console-from CIDR of in de console (Instellingen > Firewall)
+ru|fw_console_open|Порт консоли %s открыт для всех: ограничьте его через --console-from CIDR или в консоли (Настройки > Брандмауэр)
+zh|fw_console_open|控制台端口 %s 对所有人开放：请用 --console-from CIDR 或在控制台（设置 > 防火墙）中限制
+ar|fw_console_open|منفذ لوحة التحكم %s مفتوح للجميع: قيّده بـ --console-from CIDR أو من اللوحة (الإعدادات > جدار الحماية)
+en|fw_console_from|Console port %s is only open to %s
+fr|fw_console_from|Le port %s de la console n'est ouvert qu'à %s
+es|fw_console_from|El puerto %s de la consola solo está abierto a %s
+de|fw_console_from|Konsolenport %s ist nur für %s offen
+it|fw_console_from|La porta %s della console è aperta solo a %s
+pt|fw_console_from|A porta %s da consola está aberta apenas a %s
+nl|fw_console_from|Consolepoort %s staat alleen open voor %s
+ru|fw_console_from|Порт консоли %s открыт только для %s
+zh|fw_console_from|控制台端口 %s 仅对 %s 开放
+ar|fw_console_from|منفذ لوحة التحكم %s مفتوح فقط لـ %s
+en|fw_none|No active firewall (firewalld / ufw / nftables / iptables) found: nothing filters the traffic, no port to open
+fr|fw_none|Aucun pare-feu actif (firewalld / ufw / nftables / iptables) : rien ne filtre le trafic, aucun port à ouvrir
+es|fw_none|No hay cortafuegos activo (firewalld / ufw / nftables / iptables): nada filtra el tráfico, no hay puertos que abrir
+de|fw_none|Keine aktive Firewall (firewalld / ufw / nftables / iptables) gefunden: nichts filtert den Verkehr, keine Ports zu öffnen
+it|fw_none|Nessun firewall attivo (firewalld / ufw / nftables / iptables): nulla filtra il traffico, nessuna porta da aprire
+pt|fw_none|Nenhuma firewall ativa (firewalld / ufw / nftables / iptables): nada filtra o tráfego, nenhuma porta a abrir
+nl|fw_none|Geen actieve firewall (firewalld / ufw / nftables / iptables) gevonden: niets filtert het verkeer, geen poorten te openen
+ru|fw_none|Активный брандмауэр (firewalld / ufw / nftables / iptables) не найден: трафик не фильтруется, открывать порты не нужно
+zh|fw_none|未发现活动的防火墙（firewalld / ufw / nftables / iptables）：流量未被过滤，无需放行端口
+ar|fw_none|لم يُعثر على جدار حماية نشط (firewalld / ufw / nftables / iptables): لا شيء يرشح الحركة ولا منافذ لفتحها
+en|fw_manual|The %s firewall is not modified by the installer: run these commands yourself
+fr|fw_manual|Le pare-feu %s n'est pas modifié par l'installeur : exécutez vous-même ces commandes
+es|fw_manual|El cortafuegos %s no lo modifica el instalador: ejecute usted estos comandos
+de|fw_manual|Die Firewall %s wird vom Installer nicht verändert: führen Sie diese Befehle selbst aus
+it|fw_manual|Il firewall %s non viene modificato dall'installer: esegui tu questi comandi
+pt|fw_manual|A firewall %s não é modificada pelo instalador: execute estes comandos por si
+nl|fw_manual|De firewall %s wordt niet door de installer gewijzigd: voer deze commando's zelf uit
+ru|fw_manual|Брандмауэр %s установщик не изменяет: выполните эти команды сами
+zh|fw_manual|安装程序不会修改 %s 防火墙：请自行执行以下命令
+ar|fw_manual|لا يعدّل المثبّت جدار الحماية %s: نفّذ هذه الأوامر بنفسك
+en|fw_failed|The firewall could not be configured: %s
+fr|fw_failed|Le pare-feu n'a pas pu être configuré : %s
+es|fw_failed|No se pudo configurar el cortafuegos: %s
+de|fw_failed|Die Firewall konnte nicht konfiguriert werden: %s
+it|fw_failed|Impossibile configurare il firewall: %s
+pt|fw_failed|Não foi possível configurar a firewall: %s
+nl|fw_failed|De firewall kon niet worden geconfigureerd: %s
+ru|fw_failed|Не удалось настроить брандмауэр: %s
+zh|fw_failed|无法配置防火墙：%s
+ar|fw_failed|تعذر إعداد جدار الحماية: %s
+en|home_fresh|New installation: everything goes under %s (bin, conf, data, logs)
+fr|home_fresh|Nouvelle installation : tout est placé sous %s (bin, conf, data, logs)
+es|home_fresh|Instalación nueva: todo va bajo %s (bin, conf, data, logs)
+de|home_fresh|Neuinstallation: alles liegt unter %s (bin, conf, data, logs)
+it|home_fresh|Nuova installazione: tutto sotto %s (bin, conf, data, logs)
+pt|home_fresh|Nova instalação: tudo fica em %s (bin, conf, data, logs)
+nl|home_fresh|Nieuwe installatie: alles komt onder %s (bin, conf, data, logs)
+ru|home_fresh|Новая установка: всё размещается в %s (bin, conf, data, logs)
+zh|home_fresh|全新安装：所有内容位于 %s（bin、conf、data、logs）
+ar|home_fresh|تثبيت جديد: كل شيء تحت %s (bin وconf وdata وlogs)
+en|home_legacy|Existing installation detected: its paths are kept (bin %s, conf %s, data %s). Nothing is moved; use --home DIR for the new layout.
+fr|home_legacy|Installation existante détectée : ses chemins sont conservés (bin %s, conf %s, data %s). Rien n'est déplacé ; utilisez --home DIR pour la nouvelle disposition.
+es|home_legacy|Instalación existente detectada: se mantienen sus rutas (bin %s, conf %s, data %s). No se mueve nada; use --home DIR para la nueva disposición.
+de|home_legacy|Bestehende Installation erkannt: ihre Pfade bleiben (bin %s, conf %s, data %s). Nichts wird verschoben; --home DIR für das neue Layout.
+it|home_legacy|Installazione esistente rilevata: i suoi percorsi restano (bin %s, conf %s, data %s). Nulla viene spostato; usa --home DIR per il nuovo layout.
+pt|home_legacy|Instalação existente detetada: os caminhos são mantidos (bin %s, conf %s, data %s). Nada é movido; use --home DIR para o novo layout.
+nl|home_legacy|Bestaande installatie gevonden: de paden blijven (bin %s, conf %s, data %s). Er wordt niets verplaatst; gebruik --home DIR voor de nieuwe indeling.
+ru|home_legacy|Обнаружена существующая установка: её пути сохраняются (bin %s, conf %s, data %s). Ничего не переносится; для новой схемы используйте --home DIR.
+zh|home_legacy|检测到现有安装：沿用其路径（bin %s、conf %s、data %s）。不会移动任何内容；使用 --home DIR 采用新布局。
+ar|home_legacy|تم اكتشاف تثبيت قائم: تبقى مساراته (bin %s وconf %s وdata %s). لا يُنقل شيء؛ استخدم --home DIR للتخطيط الجديد.
+en|home_explicit_legacy|--home %s was given while an installation exists in %s: its data is NOT moved
+fr|home_explicit_legacy|--home %s a été donné alors qu'une installation existe dans %s : ses données ne sont PAS déplacées
+es|home_explicit_legacy|Se indicó --home %s mientras existe una instalación en %s: sus datos NO se mueven
+de|home_explicit_legacy|--home %s wurde angegeben, obwohl in %s eine Installation existiert: deren Daten werden NICHT verschoben
+it|home_explicit_legacy|--home %s indicato mentre esiste un'installazione in %s: i suoi dati NON vengono spostati
+pt|home_explicit_legacy|--home %s foi informado enquanto existe uma instalação em %s: os dados dela NÃO são movidos
+nl|home_explicit_legacy|--home %s opgegeven terwijl er een installatie bestaat in %s: de data wordt NIET verplaatst
+ru|home_explicit_legacy|--home %s указан при существующей установке в %s: её данные НЕ переносятся
+zh|home_explicit_legacy|已指定 --home %s，但 %s 中已有安装：其数据不会被移动
+ar|home_explicit_legacy|تم تحديد --home %s بينما يوجد تثبيت في %s: بياناته لا تُنقل
+en|home_bad|--home must be an absolute path (letters, digits, . _ - + /), not / and not under /proc /sys /dev: %s
+fr|home_bad|--home doit être un chemin absolu (lettres, chiffres, . _ - + /), ni / ni sous /proc /sys /dev : %s
+es|home_bad|--home debe ser una ruta absoluta (letras, dígitos, . _ - + /), no / ni bajo /proc /sys /dev: %s
+de|home_bad|--home muss ein absoluter Pfad sein (Buchstaben, Ziffern, . _ - + /), nicht / und nicht unter /proc /sys /dev: %s
+it|home_bad|--home deve essere un percorso assoluto (lettere, cifre, . _ - + /), non / né sotto /proc /sys /dev: %s
+pt|home_bad|--home deve ser um caminho absoluto (letras, dígitos, . _ - + /), não / nem sob /proc /sys /dev: %s
+nl|home_bad|--home moet een absoluut pad zijn (letters, cijfers, . _ - + /), niet / en niet onder /proc /sys /dev: %s
+ru|home_bad|--home должен быть абсолютным путём (буквы, цифры, . _ - + /), не / и не в /proc /sys /dev: %s
+zh|home_bad|--home 必须是绝对路径（字母、数字、. _ - + /），不能是 / 也不能位于 /proc /sys /dev 下：%s
+ar|home_bad|يجب أن يكون --home مسارا مطلقا (حروف وأرقام . _ - + /) وليس / ولا تحت /proc /sys /dev: %s
+en|home_noexec|%s is on a noexec mount: the binaries could not run from there, choose another --home
+fr|home_noexec|%s est sur un montage noexec : les binaires n'y pourraient pas s'exécuter, choisissez un autre --home
+es|home_noexec|%s está en un montaje noexec: los binarios no podrían ejecutarse allí, elija otro --home
+de|home_noexec|%s liegt auf einem noexec-Mount: die Programme könnten dort nicht laufen, wählen Sie ein anderes --home
+it|home_noexec|%s si trova su un mount noexec: i binari non potrebbero girarvi, scegli un altro --home
+pt|home_noexec|%s está numa montagem noexec: os binários não poderiam executar ali, escolha outro --home
+nl|home_noexec|%s staat op een noexec-mount: de programma's kunnen daar niet draaien, kies een ander --home
+ru|home_noexec|%s находится на noexec-разделе: бинарные файлы там не запустятся, выберите другой --home
+zh|home_noexec|%s 位于 noexec 挂载上：二进制文件无法在此运行，请选择其他 --home
+ar|home_noexec|%s على نقطة تركيب noexec: لا يمكن تشغيل الملفات التنفيذية هناك، اختر --home آخر
+en|s_fw|Configuring the firewall
+fr|s_fw|Configuration du pare-feu
+es|s_fw|Configurando el cortafuegos
+de|s_fw|Firewall konfigurieren
+it|s_fw|Configurazione del firewall
+pt|s_fw|A configurar a firewall
+nl|s_fw|Firewall configureren
+ru|s_fw|Настройка брандмауэра
+zh|s_fw|配置防火墙
+ar|s_fw|إعداد جدار الحماية
+en|s_boot|Preparing the panel (administrator account, secure panel path)
+fr|s_boot|Préparation du panneau (compte administrateur, chemin sécurisé)
+es|s_boot|Preparando el panel (cuenta de administrador, ruta segura)
+de|s_boot|Panel vorbereiten (Administratorkonto, sicherer Pfad)
+it|s_boot|Preparazione del pannello (account amministratore, percorso sicuro)
+pt|s_boot|A preparar o painel (conta de administrador, caminho seguro)
+nl|s_boot|Paneel voorbereiden (beheerdersaccount, beveiligd pad)
+ru|s_boot|Подготовка панели (учётная запись администратора, защищённый путь)
+zh|s_boot|准备面板（管理员账户、安全路径）
+ar|s_boot|تجهيز اللوحة (حساب المسؤول والمسار الآمن)
+en|s_start|Starting the services
+fr|s_start|Démarrage des services
+es|s_start|Iniciando los servicios
+de|s_start|Dienste starten
+it|s_start|Avvio dei servizi
+pt|s_start|A iniciar os serviços
+nl|s_start|Services starten
+ru|s_start|Запуск служб
+zh|s_start|启动服务
+ar|s_start|بدء الخدمات
+en|s_health|Waiting for the services to become healthy
+fr|s_health|Attente de la disponibilité des services
+es|s_health|Esperando a que los servicios estén sanos
+de|s_health|Warten auf gesunde Dienste
+it|s_health|Attesa dei servizi in salute
+pt|s_health|A aguardar que os serviços fiquem saudáveis
+nl|s_health|Wachten tot de services gezond zijn
+ru|s_health|Ожидание готовности служб
+zh|s_health|等待服务就绪
+ar|s_health|انتظار جاهزية الخدمات
+en|s_backup|Backing up configuration and data
+fr|s_backup|Sauvegarde de la configuration et des données
+es|s_backup|Copia de seguridad de configuración y datos
+de|s_backup|Konfiguration und Daten sichern
+it|s_backup|Backup di configurazione e dati
+pt|s_backup|Cópia de segurança de configuração e dados
+nl|s_backup|Back-up van configuratie en data
+ru|s_backup|Резервное копирование настроек и данных
+zh|s_backup|备份配置与数据
+ar|s_backup|نسخ احتياطي للإعدادات والبيانات
+en|w_rollback|The new version is not healthy: rolling back to the previous one
+fr|w_rollback|La nouvelle version n'est pas saine : retour à la précédente
+es|w_rollback|La nueva versión no está sana: volviendo a la anterior
+de|w_rollback|Die neue Version arbeitet nicht fehlerfrei: Rückkehr zur vorherigen
+it|w_rollback|La nuova versione non funziona correttamente: ritorno alla precedente
+pt|w_rollback|A nova versão não está saudável: a voltar à anterior
+nl|w_rollback|De nieuwe versie is niet gezond: terugdraaien naar de vorige
+ru|w_rollback|Новая версия не работает: откат к предыдущей
+zh|w_rollback|新版本运行异常：正在回滚到上一版本
+ar|w_rollback|الإصدار الجديد غير سليم: جار التراجع إلى السابق
+en|up_to_date|Already up to date (%s)
+fr|up_to_date|Déjà à jour (%s)
+es|up_to_date|Ya está actualizado (%s)
+de|up_to_date|Bereits aktuell (%s)
+it|up_to_date|Già aggiornato (%s)
+pt|up_to_date|Já está atualizado (%s)
+nl|up_to_date|Al bijgewerkt (%s)
+ru|up_to_date|Уже актуально (%s)
+zh|up_to_date|已是最新版本（%s）
+ar|up_to_date|محدّث بالفعل (%s)
+en|up_refreshed|Same programs: units and helpers refreshed
+fr|up_refreshed|Mêmes programmes : unités et assistants rafraîchis
+es|up_refreshed|Mismos programas: unidades y ayudantes actualizados
+de|up_refreshed|Gleiche Programme: Units und Hilfsprogramme aufgefrischt
+it|up_refreshed|Stessi programmi: unità e helper aggiornati
+pt|up_refreshed|Mesmos programas: unidades e auxiliares atualizados
+nl|up_refreshed|Dezelfde programma's: units en hulpprogramma's vernieuwd
+ru|up_refreshed|Те же программы: юниты и помощники обновлены
+zh|up_refreshed|程序相同：已刷新单元和辅助程序
+ar|up_refreshed|البرامج نفسها: تم تحديث الوحدات والمساعدات
+en|not_installed|ToutWAF is not installed: nothing to update.
+fr|not_installed|ToutWAF n'est pas installé : rien à mettre à jour.
+es|not_installed|ToutWAF no está instalado: nada que actualizar.
+de|not_installed|ToutWAF ist nicht installiert: nichts zu aktualisieren.
+it|not_installed|ToutWAF non è installato: niente da aggiornare.
+pt|not_installed|O ToutWAF não está instalado: nada a atualizar.
+nl|not_installed|ToutWAF is niet geïnstalleerd: niets bij te werken.
+ru|not_installed|ToutWAF не установлен: обновлять нечего.
+zh|not_installed|尚未安装 ToutWAF：无需更新。
+ar|not_installed|ToutWAF غير مثبت: لا شيء للتحديث.
+en|st_channel|Channel: %s
+fr|st_channel|Canal : %s
+es|st_channel|Canal: %s
+de|st_channel|Kanal: %s
+it|st_channel|Canale: %s
+pt|st_channel|Canal: %s
+nl|st_channel|Kanaal: %s
+ru|st_channel|Канал: %s
+zh|st_channel|通道：%s
+ar|st_channel|القناة: %s
+en|st_latest|Latest available: %s
+fr|st_latest|Dernière version disponible : %s
+es|st_latest|Última versión disponible: %s
+de|st_latest|Neueste verfügbare Version: %s
+it|st_latest|Ultima versione disponibile: %s
+pt|st_latest|Última versão disponível: %s
+nl|st_latest|Laatst beschikbare versie: %s
+ru|st_latest|Последняя доступная версия: %s
+zh|st_latest|最新可用版本：%s
+ar|st_latest|أحدث إصدار متاح: %s
+en|st_newer|update available: run with --update
+fr|st_newer|mise à jour disponible : lancez avec --update
+es|st_newer|actualización disponible: ejecute con --update
+de|st_newer|Update verfügbar: mit --update ausführen
+it|st_newer|aggiornamento disponibile: esegui con --update
+pt|st_newer|atualização disponível: execute com --update
+nl|st_newer|update beschikbaar: voer uit met --update
+ru|st_newer|доступно обновление: запустите с --update
+zh|st_newer|有可用更新：请使用 --update 运行
+ar|st_newer|تحديث متاح: شغّل مع --update
+en|e_yanked|Version %s was withdrawn (yanked) and must not be installed. Run --update for the current release, or --force to override.
+fr|e_yanked|La version %s a été retirée (yanked) et ne doit pas être installée. Lancez --update pour la version courante, ou --force pour passer outre.
+es|e_yanked|La versión %s fue retirada (yanked) y no debe instalarse. Ejecute --update para la versión actual, o --force para ignorarlo.
+de|e_yanked|Version %s wurde zurückgezogen (yanked) und darf nicht installiert werden. Mit --update die aktuelle Version holen, oder --force zum Übergehen.
+it|e_yanked|La versione %s è stata ritirata (yanked) e non va installata. Esegui --update per la versione corrente, o --force per forzare.
+pt|e_yanked|A versão %s foi retirada (yanked) e não deve ser instalada. Execute --update para a versão atual, ou --force para ignorar.
+nl|e_yanked|Versie %s is ingetrokken (yanked) en mag niet worden geïnstalleerd. Gebruik --update voor de huidige versie, of --force om te negeren.
+ru|e_yanked|Версия %s отозвана (yanked) и не должна устанавливаться. Запустите --update для актуальной версии или --force, чтобы обойти.
+zh|e_yanked|版本 %s 已被撤回（yanked），不应安装。请运行 --update 获取当前版本，或使用 --force 强制。
+ar|e_yanked|تم سحب الإصدار %s (yanked) ولا يجب تثبيته. شغّل --update للإصدار الحالي أو --force للتجاوز.
+en|e_nover|No version is published on the %s channel yet, so there is nothing to install. ToutWAF was not installed or modified. To install from the %s channel instead, run the installer again with --channel %s.
+fr|e_nover|Aucune version n'est encore publiée sur le canal %s : il n'y a rien à installer. ToutWAF n'a été ni installé ni modifié. Pour installer depuis le canal %s, relancez l'installeur avec --channel %s.
+es|e_nover|Todavía no hay ninguna versión publicada en el canal %s, así que no hay nada que instalar. ToutWAF no se ha instalado ni modificado. Para instalar desde el canal %s, vuelva a ejecutar el instalador con --channel %s.
+de|e_nover|Auf dem Kanal %s ist noch keine Version veröffentlicht, es gibt also nichts zu installieren. ToutWAF wurde weder installiert noch verändert. Um vom Kanal %s zu installieren, starten Sie das Installationsprogramm erneut mit --channel %s.
+it|e_nover|Sul canale %s non è ancora pubblicata nessuna versione, quindi non c'è nulla da installare. ToutWAF non è stato installato né modificato. Per installare dal canale %s, rilancia l'installer con --channel %s.
+pt|e_nover|Ainda não há nenhuma versão publicada no canal %s, por isso não há nada para instalar. O ToutWAF não foi instalado nem alterado. Para instalar a partir do canal %s, execute o instalador de novo com --channel %s.
+nl|e_nover|Op het kanaal %s is nog geen versie gepubliceerd, dus er valt niets te installeren. ToutWAF is niet geïnstalleerd of gewijzigd. Om vanaf het kanaal %s te installeren, start u het installatieprogramma opnieuw met --channel %s.
+ru|e_nover|В канале %s пока не опубликовано ни одной версии, устанавливать нечего. ToutWAF не установлен и не изменён. Чтобы установить из канала %s, запустите установщик снова с --channel %s.
+zh|e_nover|%s 通道尚未发布任何版本，因此没有可安装的内容。未安装或更改 ToutWAF。若要改从 %s 通道安装，请使用 --channel %s 重新运行安装程序。
+ar|e_nover|لم يُنشر أي إصدار على القناة %s بعد، لذلك لا يوجد ما يمكن تثبيته. لم يتم تثبيت ToutWAF أو تغييره. للتثبيت من القناة %s شغّل المثبّت مجددًا مع --channel %s.
+en|e_installer_old|This installer is too old for this release (needs version %s): download it again from the channel URL.
+fr|e_installer_old|Cet installeur est trop ancien pour cette version (version %s requise) : retéléchargez-le depuis l'URL du canal.
+es|e_installer_old|Este instalador es demasiado antiguo para esta versión (requiere la versión %s): descárguelo de nuevo desde la URL del canal.
+de|e_installer_old|Dieses Installationsprogramm ist für diese Version zu alt (benötigt Version %s): erneut von der Kanal-URL laden.
+it|e_installer_old|Questo installer è troppo vecchio per questa versione (richiede la versione %s): scaricalo di nuovo dall'URL del canale.
+pt|e_installer_old|Este instalador é demasiado antigo para esta versão (requer a versão %s): transfira-o novamente a partir do URL do canal.
+nl|e_installer_old|Dit installatieprogramma is te oud voor deze versie (vereist versie %s): download het opnieuw van de kanaal-URL.
+ru|e_installer_old|Этот установщик слишком старый для этого релиза (нужна версия %s): скачайте его заново по URL канала.
+zh|e_installer_old|此安装程序对该版本而言太旧（需要版本 %s）：请从通道 URL 重新下载。
+ar|e_installer_old|هذا المثبّت قديم جدًا لهذا الإصدار (يتطلب الإصدار %s): نزّله من جديد من عنوان القناة.
+en|up_rebuilt|Same version, new build: installed %s, available %s. Updating.
+fr|up_rebuilt|Même version, nouvelle compilation : installée %s, disponible %s. Mise à jour en cours.
+es|up_rebuilt|Misma versión, nueva compilación: instalada %s, disponible %s. Actualizando.
+de|up_rebuilt|Gleiche Version, neuer Build: installiert %s, verfügbar %s. Aktualisierung läuft.
+it|up_rebuilt|Stessa versione, nuova build: installata %s, disponibile %s. Aggiornamento in corso.
+pt|up_rebuilt|Mesma versão, nova compilação: instalada %s, disponível %s. A atualizar.
+nl|up_rebuilt|Zelfde versie, nieuwe build: geïnstalleerd %s, beschikbaar %s. Bezig met bijwerken.
+ru|up_rebuilt|Та же версия, новая сборка: установлена %s, доступна %s. Выполняется обновление.
+zh|up_rebuilt|版本相同，有新构建：已安装 %s，可用 %s。正在更新。
+ar|up_rebuilt|الإصدار نفسه وبناء جديد: المثبّت %s، المتاح %s. جارٍ التحديث.
+en|st_newbuild|same version, new build available: run again with %s
+fr|st_newbuild|même version, nouvelle compilation disponible : relancez avec %s
+es|st_newbuild|misma versión, nueva compilación disponible: ejecute de nuevo con %s
+de|st_newbuild|gleiche Version, neuer Build verfügbar: erneut mit %s ausführen
+it|st_newbuild|stessa versione, nuova build disponibile: esegui di nuovo con %s
+pt|st_newbuild|mesma versão, nova compilação disponível: execute novamente com %s
+nl|st_newbuild|zelfde versie, nieuwe build beschikbaar: voer opnieuw uit met %s
+ru|st_newbuild|та же версия, доступна новая сборка: запустите снова с %s
+zh|st_newbuild|版本相同，有新构建：请使用 %s 再次运行
+ar|st_newbuild|الإصدار نفسه وبناء جديد متاح: شغّل مجددًا مع %s
+en|st_nochannel|Latest available: nothing published on this channel yet
+fr|st_nochannel|Dernière version disponible : rien n'est encore publié sur ce canal
+es|st_nochannel|Última versión disponible: todavía no hay nada publicado en este canal
+de|st_nochannel|Neueste verfügbare Version: in diesem Kanal ist noch nichts veröffentlicht
+it|st_nochannel|Ultima versione disponibile: su questo canale non è ancora stato pubblicato nulla
+pt|st_nochannel|Última versão disponível: ainda não há nada publicado neste canal
+nl|st_nochannel|Laatst beschikbare versie: in dit kanaal is nog niets gepubliceerd
+ru|st_nochannel|Последняя доступная версия: в этом канале пока ничего не опубликовано
+zh|st_nochannel|最新可用版本：此渠道尚未发布任何内容
+ar|st_nochannel|أحدث إصدار متاح: لم يُنشر شيء في هذه القناة بعد
+en|w_mirror|The public mirror served files that do not agree with each other (%s): it is probably still refreshing after a publication. Reading the channel again, once.
+fr|w_mirror|Le miroir public a servi des fichiers qui ne concordent pas (%s) : il est probablement encore en cours de mise à jour après une publication. Nouvelle lecture du canal, une seule fois.
+es|w_mirror|El espejo público ha servido archivos que no concuerdan entre sí (%s): probablemente aún se está actualizando tras una publicación. Se lee el canal de nuevo, una sola vez.
+de|w_mirror|Der öffentliche Spiegel hat Dateien geliefert, die nicht zusammenpassen (%s): vermutlich wird er nach einer Veröffentlichung noch aktualisiert. Der Kanal wird einmal neu gelesen.
+it|w_mirror|Il mirror pubblico ha servito file che non concordano tra loro (%s): probabilmente si sta ancora aggiornando dopo una pubblicazione. Rileggo il canale, una sola volta.
+pt|w_mirror|O espelho público serviu ficheiros que não concordam entre si (%s): provavelmente ainda está a atualizar após uma publicação. A ler o canal de novo, uma única vez.
+nl|w_mirror|De openbare mirror leverde bestanden die niet bij elkaar passen (%s): hij wordt waarschijnlijk nog bijgewerkt na een publicatie. Het kanaal wordt één keer opnieuw gelezen.
+ru|w_mirror|Публичное зеркало отдало файлы, которые не согласуются между собой (%s): вероятно, оно ещё обновляется после публикации. Канал будет прочитан заново один раз.
+zh|w_mirror|公共镜像提供的文件彼此不一致（%s）：很可能是发布后仍在刷新。将重新读取一次渠道。
+ar|w_mirror|قدّمت المرآة العامة ملفات غير متسقة فيما بينها (%s): ربما ما زالت تُحدَّث بعد النشر. ستُعاد قراءة القناة مرة واحدة.
+en|e_mismatch|checksum mismatch for %s (%s): the downloaded file does not match the checksum that was published, so nothing was installed or changed. Right after a publication the public mirror can serve the previous files for a few minutes: wait five minutes and run the installer again. If it happens again, do not install: the publication is damaged.
+fr|e_mismatch|somme de contrôle incorrecte pour %s (%s) : le fichier téléchargé ne correspond pas à la somme publiée, donc rien n'a été installé ni modifié. Juste après une publication, le miroir public peut servir les anciens fichiers pendant quelques minutes : attendez cinq minutes et relancez l'installeur. Si cela se reproduit, n'installez pas : la publication est endommagée.
+es|e_mismatch|suma de comprobación incorrecta para %s (%s): el archivo descargado no coincide con la suma publicada, por lo que no se ha instalado ni modificado nada. Justo después de una publicación, el espejo público puede servir los archivos anteriores durante unos minutos: espere cinco minutos y vuelva a ejecutar el instalador. Si se repite, no instale: la publicación está dañada.
+de|e_mismatch|Prüfsumme stimmt nicht für %s (%s): Die heruntergeladene Datei passt nicht zur veröffentlichten Prüfsumme, daher wurde nichts installiert oder geändert. Direkt nach einer Veröffentlichung kann der öffentliche Spiegel einige Minuten lang die vorherigen Dateien liefern: Warten Sie fünf Minuten und starten Sie das Installationsprogramm erneut. Tritt es erneut auf, installieren Sie nicht: Die Veröffentlichung ist beschädigt.
+it|e_mismatch|checksum non corrispondente per %s (%s): il file scaricato non corrisponde al checksum pubblicato, quindi non è stato installato né modificato nulla. Subito dopo una pubblicazione il mirror pubblico può servire per qualche minuto i file precedenti: attendi cinque minuti e rilancia l'installer. Se si ripete, non installare: la pubblicazione è danneggiata.
+pt|e_mismatch|soma de verificação incorreta para %s (%s): o ficheiro transferido não corresponde à soma publicada, por isso nada foi instalado nem alterado. Logo após uma publicação, o espelho público pode servir os ficheiros anteriores durante alguns minutos: aguarde cinco minutos e execute o instalador de novo. Se se repetir, não instale: a publicação está danificada.
+nl|e_mismatch|checksum klopt niet voor %s (%s): het gedownloade bestand komt niet overeen met de gepubliceerde checksum, dus er is niets geïnstalleerd of gewijzigd. Direct na een publicatie kan de openbare mirror enkele minuten de vorige bestanden aanbieden: wacht vijf minuten en start het installatieprogramma opnieuw. Gebeurt het opnieuw, installeer dan niet: de publicatie is beschadigd.
+ru|e_mismatch|контрольная сумма не совпадает для %s (%s): загруженный файл не соответствует опубликованной сумме, поэтому ничего не установлено и не изменено. Сразу после публикации публичное зеркало может несколько минут отдавать прежние файлы: подождите пять минут и запустите установщик снова. Если ошибка повторится, не устанавливайте: публикация повреждена.
+zh|e_mismatch|%s 的校验和不匹配（%s）：下载的文件与已发布的校验和不一致，因此未安装或更改任何内容。发布后的几分钟内，公共镜像可能仍提供旧文件：请等待五分钟后重新运行安装程序。若再次出现，请勿安装：该发布已损坏。
+ar|e_mismatch|مجموع التحقق غير مطابق لـ %s (%s): الملف الذي نُزِّل لا يطابق المجموع المنشور، لذلك لم يُثبَّت أو يُغيَّر أي شيء. بعد النشر مباشرة قد تقدّم المرآة العامة الملفات السابقة لبضع دقائق: انتظر خمس دقائق وشغّل المثبّت مجددًا. إن تكرر ذلك فلا تثبّت: النشر تالف.
+en|e_downgrade|The latest release %s of channel %s is older than the installed %s: use --force to downgrade.
+fr|e_downgrade|La dernière version %s du canal %s est plus ancienne que la version installée %s : utilisez --force pour rétrograder.
+es|e_downgrade|La última versión %s del canal %s es anterior a la instalada %s: use --force para degradar.
+de|e_downgrade|Die neueste Version %s des Kanals %s ist älter als die installierte %s: --force zum Downgrade.
+it|e_downgrade|L'ultima versione %s del canale %s è più vecchia di quella installata %s: usa --force per il downgrade.
+pt|e_downgrade|A última versão %s do canal %s é mais antiga do que a instalada %s: use --force para reverter.
+nl|e_downgrade|De nieuwste versie %s van kanaal %s is ouder dan de geïnstalleerde %s: gebruik --force om terug te gaan.
+ru|e_downgrade|Последний релиз %s канала %s старше установленного %s: используйте --force для понижения версии.
+zh|e_downgrade|最新版本 %s（通道 %s）比已安装的 %s 旧：使用 --force 降级。
+ar|e_downgrade|أحدث إصدار %s في القناة %s أقدم من المثبّت %s: استخدم --force للرجوع.
+en|ins_fp|Installer fingerprint (SHA-256): %s. Compare it with the one published with the release (README of the public repository, on GitLab and on GitHub), or check it against the signed release list: %s --verify-self
+fr|ins_fp|Empreinte de l'installateur (SHA-256) : %s. Comparez-la à celle publiée avec la version (README du dépôt public, sur GitLab et sur GitHub), ou vérifiez-la contre la liste signée de la version : %s --verify-self
+es|ins_fp|Huella del instalador (SHA-256): %s. Compárela con la publicada con la versión (README del repositorio público, en GitLab y en GitHub), o verifíquela con la lista firmada de la versión: %s --verify-self
+de|ins_fp|Fingerabdruck des Installers (SHA-256): %s. Vergleichen Sie ihn mit dem zur Version veröffentlichten (README des öffentlichen Repositorys, auf GitLab und GitHub) oder prüfen Sie ihn gegen die signierte Liste der Version: %s --verify-self
+it|ins_fp|Impronta dell'installer (SHA-256): %s. Confrontala con quella pubblicata con la versione (README del repository pubblico, su GitLab e su GitHub), oppure verificala con l'elenco firmato della versione: %s --verify-self
+pt|ins_fp|Impressão digital do instalador (SHA-256): %s. Compare-a com a publicada com a versão (README do repositório público, no GitLab e no GitHub) ou verifique-a com a lista assinada da versão: %s --verify-self
+nl|ins_fp|Vingerafdruk van het installatieprogramma (SHA-256): %s. Vergelijk die met de vingerafdruk die bij de versie is gepubliceerd (README van de openbare repository, op GitLab en GitHub) of controleer hem met de ondertekende lijst van de versie: %s --verify-self
+ru|ins_fp|Отпечаток установщика (SHA-256): %s. Сравните его с опубликованным вместе с релизом (README публичного репозитория, на GitLab и GitHub) или проверьте по подписанному списку релиза: %s --verify-self
+zh|ins_fp|安装程序指纹（SHA-256）：%s。请与随版本发布的指纹比对（公共仓库的 README，位于 GitLab 和 GitHub），或对照版本的签名清单校验：%s --verify-self
+ar|ins_fp|بصمة المثبّت (SHA-256): %s. قارنها بالبصمة المنشورة مع الإصدار (ملف README في المستودع العام على GitLab وGitHub) أو تحقق منها مقابل قائمة الإصدار الموقّعة: %s --verify-self
+en|ins_fp_pipe|This installer was started straight from the download: it cannot read itself, so it can neither show nor verify a fingerprint. To check it first, save %s as a file and run that file with --verify-self.
+fr|ins_fp_pipe|Cet installateur a été lancé directement depuis le téléchargement : il ne peut pas se relire, donc il ne peut ni afficher ni vérifier d'empreinte. Pour le vérifier d'abord, enregistrez %s dans un fichier et lancez ce fichier avec --verify-self.
+es|ins_fp_pipe|Este instalador se ha iniciado directamente desde la descarga: no puede leerse a sí mismo, así que no puede mostrar ni verificar una huella. Para verificarlo antes, guarde %s como archivo y ejecute ese archivo con --verify-self.
+de|ins_fp_pipe|Dieser Installer wurde direkt aus dem Download gestartet: Er kann sich nicht selbst lesen und daher weder einen Fingerabdruck anzeigen noch prüfen. Zum vorherigen Prüfen speichern Sie %s als Datei und führen diese Datei mit --verify-self aus.
+it|ins_fp_pipe|Questo installer è stato avviato direttamente dal download: non può rileggere se stesso, quindi non può né mostrare né verificare un'impronta. Per verificarlo prima, salva %s come file ed esegui quel file con --verify-self.
+pt|ins_fp_pipe|Este instalador foi iniciado diretamente a partir da transferência: não consegue ler-se a si próprio, por isso não pode mostrar nem verificar uma impressão digital. Para o verificar antes, guarde %s como ficheiro e execute esse ficheiro com --verify-self.
+nl|ins_fp_pipe|Dit installatieprogramma is rechtstreeks vanuit de download gestart: het kan zichzelf niet lezen en dus geen vingerafdruk tonen of controleren. Om het eerst te controleren: sla %s op als bestand en voer dat bestand uit met --verify-self.
+ru|ins_fp_pipe|Этот установщик запущен прямо из загрузки: он не может прочитать сам себя и поэтому не может ни показать, ни проверить отпечаток. Чтобы проверить его заранее, сохраните %s в файл и запустите этот файл с --verify-self.
+zh|ins_fp_pipe|此安装程序是直接从下载流启动的：它无法读取自身，因此既不能显示也不能校验指纹。若要先行校验，请将 %s 保存为文件，并用 --verify-self 运行该文件。
+ar|ins_fp_pipe|بدأ هذا المثبّت مباشرة من التنزيل: لا يستطيع قراءة نفسه، لذلك لا يمكنه عرض بصمة ولا التحقق منها. للتحقق أولاً، احفظ %s كملف وشغّل ذلك الملف مع --verify-self.
+en|ins_vs_ok|OK: this installer is the one signed for release %s (SHA-256 %s).
+fr|ins_vs_ok|OK : cet installateur est celui qui est signé pour la version %s (SHA-256 %s).
+es|ins_vs_ok|OK: este instalador es el firmado para la versión %s (SHA-256 %s).
+de|ins_vs_ok|OK: Dieser Installer ist der für Version %s signierte (SHA-256 %s).
+it|ins_vs_ok|OK: questo installer è quello firmato per la versione %s (SHA-256 %s).
+pt|ins_vs_ok|OK: este instalador é o assinado para a versão %s (SHA-256 %s).
+nl|ins_vs_ok|OK: dit installatieprogramma is het ondertekende voor versie %s (SHA-256 %s).
+ru|ins_vs_ok|OK: этот установщик — тот, что подписан для версии %s (SHA-256 %s).
+zh|ins_vs_ok|OK：此安装程序就是版本 %s 所签名的安装程序（SHA-256 %s）。
+ar|ins_vs_ok|OK: هذا المثبّت هو المثبّت الموقّع للإصدار %s (SHA-256 %s).
+en|ins_vs_nolist|The signed SHA256SUMS of release %s does not list the installer: this copy cannot be verified. Do not run it.
+fr|ins_vs_nolist|Le SHA256SUMS signé de la version %s ne liste pas l'installateur : cette copie ne peut pas être vérifiée. Ne la lancez pas.
+es|ins_vs_nolist|El SHA256SUMS firmado de la versión %s no lista el instalador: esta copia no se puede verificar. No la ejecute.
+de|ins_vs_nolist|Die signierte SHA256SUMS der Version %s führt den Installer nicht auf: Diese Kopie lässt sich nicht prüfen. Führen Sie sie nicht aus.
+it|ins_vs_nolist|Il SHA256SUMS firmato della versione %s non elenca l'installer: questa copia non può essere verificata. Non eseguirla.
+pt|ins_vs_nolist|O SHA256SUMS assinado da versão %s não lista o instalador: esta cópia não pode ser verificada. Não a execute.
+nl|ins_vs_nolist|De ondertekende SHA256SUMS van versie %s vermeldt het installatieprogramma niet: dit exemplaar kan niet worden gecontroleerd. Voer het niet uit.
+ru|ins_vs_nolist|Подписанный SHA256SUMS версии %s не содержит установщика: эту копию нельзя проверить. Не запускайте её.
+zh|ins_vs_nolist|版本 %s 的已签名 SHA256SUMS 未列出安装程序：无法校验此副本。请勿运行。
+ar|ins_vs_nolist|ملف SHA256SUMS الموقّع للإصدار %s لا يسرد المثبّت: لا يمكن التحقق من هذه النسخة. لا تشغّلها.
+en|ins_vs_diff|This installer (SHA-256 %s) is NOT the one signed for release %s (SHA-256 %s). Download a fresh copy from the repository and check again. Do not run this one.
+fr|ins_vs_diff|Cet installateur (SHA-256 %s) n'est PAS celui qui est signé pour la version %s (SHA-256 %s). Téléchargez une copie neuve depuis le dépôt et vérifiez de nouveau. Ne lancez pas celui-ci.
+es|ins_vs_diff|Este instalador (SHA-256 %s) NO es el firmado para la versión %s (SHA-256 %s). Descargue una copia nueva del repositorio y verifique de nuevo. No ejecute este.
+de|ins_vs_diff|Dieser Installer (SHA-256 %s) ist NICHT der für Version %s signierte (SHA-256 %s). Laden Sie eine frische Kopie aus dem Repository und prüfen Sie erneut. Führen Sie diesen nicht aus.
+it|ins_vs_diff|Questo installer (SHA-256 %s) NON è quello firmato per la versione %s (SHA-256 %s). Scarica una copia nuova dal repository e verifica di nuovo. Non eseguire questo.
+pt|ins_vs_diff|Este instalador (SHA-256 %s) NÃO é o assinado para a versão %s (SHA-256 %s). Transfira uma cópia nova do repositório e verifique de novo. Não execute este.
+nl|ins_vs_diff|Dit installatieprogramma (SHA-256 %s) is NIET het ondertekende voor versie %s (SHA-256 %s). Download een nieuw exemplaar uit de repository en controleer opnieuw. Voer dit exemplaar niet uit.
+ru|ins_vs_diff|Этот установщик (SHA-256 %s) НЕ тот, что подписан для версии %s (SHA-256 %s). Скачайте свежую копию из репозитория и проверьте снова. Этот не запускайте.
+zh|ins_vs_diff|此安装程序（SHA-256 %s）不是版本 %s 所签名的安装程序（SHA-256 %s）。请从仓库重新下载并再次校验，不要运行此副本。
+ar|ins_vs_diff|هذا المثبّت (SHA-256 %s) ليس المثبّت الموقّع للإصدار %s (SHA-256 %s). نزّل نسخة جديدة من المستودع وتحقق مجددًا. لا تشغّل هذه النسخة.
+en|e_archive_ver|The archive is for version %s but the release announced is %s: the files do not belong to the announced release (a mirror replaying an older signed release?). Nothing was installed or changed.
+fr|e_archive_ver|L'archive est de la version %s alors que la version annoncée est %s : les fichiers n'appartiennent pas à la version annoncée (un miroir qui rejoue une ancienne version signée ?). Rien n'a été installé ni modifié.
+es|e_archive_ver|El archivo es de la versión %s pero la versión anunciada es %s: los archivos no pertenecen a la versión anunciada (¿un espejo que reproduce una versión firmada antigua?). No se ha instalado ni modificado nada.
+de|e_archive_ver|Das Archiv ist Version %s, angekündigt ist aber %s: die Dateien gehören nicht zur angekündigten Version (spielt ein Spiegel eine ältere signierte Version ein?). Es wurde nichts installiert oder geändert.
+it|e_archive_ver|L'archivio è della versione %s ma la versione annunciata è %s: i file non appartengono alla versione annunciata (un mirror che ripropone una vecchia versione firmata?). Non è stato installato né modificato nulla.
+pt|e_archive_ver|O arquivo é da versão %s mas a versão anunciada é %s: os ficheiros não pertencem à versão anunciada (um espelho a repetir uma versão assinada antiga?). Nada foi instalado nem alterado.
+nl|e_archive_ver|Het archief is van versie %s maar de aangekondigde versie is %s: de bestanden horen niet bij de aangekondigde versie (een mirror die een oudere ondertekende versie opnieuw aanbiedt?). Er is niets geïnstalleerd of gewijzigd.
+ru|e_archive_ver|Архив относится к версии %s, а объявлена версия %s: файлы не принадлежат объявленной версии (зеркало подсовывает старую подписанную версию?). Ничего не установлено и не изменено.
+zh|e_archive_ver|压缩包的版本是 %s，但公布的版本是 %s：这些文件不属于公布的版本（镜像是否在重放旧的已签名版本？）。未安装或更改任何内容。
+ar|e_archive_ver|الأرشيف للإصدار %s لكن الإصدار المعلن هو %s: الملفات لا تخص الإصدار المعلن (هل يعيد مرآة إصدارًا موقّعًا قديمًا؟). لم يتم تثبيت أو تغيير أي شيء.
+en|s_sigok|release signature verified, key %s
+fr|s_sigok|signature de la version vérifiée, clé %s
+es|s_sigok|firma de la versión verificada, clave %s
+de|s_sigok|Release-Signatur geprüft, Schlüssel %s
+it|s_sigok|firma della release verificata, chiave %s
+pt|s_sigok|assinatura da versão verificada, chave %s
+nl|s_sigok|release-handtekening gecontroleerd, sleutel %s
+ru|s_sigok|подпись релиза проверена, ключ %s
+zh|s_sigok|发布签名校验通过，密钥 %s
+ar|s_sigok|تم التحقق من توقيع الإصدار، المفتاح %s
+en|w_sigskip|release signature NOT verified: openssl.exe was not found in PATH (Windows has no built-in Ed25519 verification), only SHA-256 was checked. Install OpenSSL 3 and run again to verify against key %s
+fr|w_sigskip|signature de la version NON vérifiée : openssl.exe est introuvable dans le PATH (Windows n'a pas de vérification Ed25519 intégrée), seul le SHA-256 a été contrôlé. Installez OpenSSL 3 et relancez pour vérifier avec la clé %s
+es|w_sigskip|firma de la versión NO verificada: no se encontró openssl.exe en el PATH (Windows no incluye verificación Ed25519), solo se comprobó el SHA-256. Instale OpenSSL 3 y vuelva a ejecutar para verificar con la clave %s
+de|w_sigskip|Release-Signatur NICHT geprüft: openssl.exe wurde im PATH nicht gefunden (Windows hat keine eingebaute Ed25519-Prüfung), nur SHA-256 wurde geprüft. OpenSSL 3 installieren und erneut ausführen, um mit Schlüssel %s zu prüfen
+it|w_sigskip|firma della release NON verificata: openssl.exe non trovato nel PATH (Windows non ha una verifica Ed25519 integrata), è stato controllato solo lo SHA-256. Installa OpenSSL 3 ed esegui di nuovo per verificare con la chiave %s
+pt|w_sigskip|assinatura da versão NÃO verificada: openssl.exe não foi encontrado no PATH (o Windows não tem verificação Ed25519 integrada), só o SHA-256 foi conferido. Instale o OpenSSL 3 e execute de novo para verificar com a chave %s
+nl|w_sigskip|release-handtekening NIET gecontroleerd: openssl.exe niet gevonden in PATH (Windows heeft geen ingebouwde Ed25519-controle), alleen SHA-256 is gecontroleerd. Installeer OpenSSL 3 en voer opnieuw uit om te controleren met sleutel %s
+ru|w_sigskip|подпись релиза НЕ проверена: openssl.exe не найден в PATH (в Windows нет встроенной проверки Ed25519), проверена только SHA-256. Установите OpenSSL 3 и запустите снова, чтобы проверить по ключу %s
+zh|w_sigskip|未校验发布签名：PATH 中找不到 openssl.exe（Windows 没有内置 Ed25519 校验），仅校验了 SHA-256。请安装 OpenSSL 3 并重新运行，以使用密钥 %s 校验
+ar|w_sigskip|لم يتم التحقق من توقيع الإصدار: لم يتم العثور على openssl.exe في PATH (لا يوفر Windows تحققا مدمجا من Ed25519) وتم التحقق من SHA-256 فقط. ثبّت OpenSSL 3 وأعد التشغيل للتحقق بالمفتاح %s
+en|done|Done.
+fr|done|Terminé.
+es|done|Hecho.
+de|done|Fertig.
+it|done|Fatto.
+pt|done|Concluído.
+nl|done|Klaar.
+ru|done|Готово.
+zh|done|完成。
+ar|done|تم.
+en|failed|Failed
+fr|failed|Échec
+es|failed|Error
+de|failed|Fehlgeschlagen
+it|failed|Fallito
+pt|failed|Falhou
+nl|failed|Mislukt
+ru|failed|Ошибка
+zh|failed|失败
+ar|failed|فشل
+en|log_hint|Full log: %s
+fr|log_hint|Journal complet : %s
+es|log_hint|Registro completo: %s
+de|log_hint|Vollständiges Protokoll: %s
+it|log_hint|Log completo: %s
+pt|log_hint|Registo completo: %s
+nl|log_hint|Volledig logboek: %s
+ru|log_hint|Полный журнал: %s
+zh|log_hint|完整日志：%s
+ar|log_hint|السجل الكامل: %s
+en|dry_done|Dry run: nothing was changed.
+fr|dry_done|Simulation : rien n'a été modifié.
+es|dry_done|Simulación: no se ha cambiado nada.
+de|dry_done|Testlauf: nichts wurde geändert.
+it|dry_done|Simulazione: nulla è stato modificato.
+pt|dry_done|Simulação: nada foi alterado.
+nl|dry_done|Proefrun: niets is gewijzigd.
+ru|dry_done|Пробный запуск: ничего не изменено.
+zh|dry_done|试运行：未做任何更改。
+ar|dry_done|تشغيل تجريبي: لم يتم تغيير أي شيء.
+en|sum_title|Installation summary
+fr|sum_title|Récapitulatif de l'installation
+es|sum_title|Resumen de la instalación
+de|sum_title|Zusammenfassung der Installation
+it|sum_title|Riepilogo dell'installazione
+pt|sum_title|Resumo da instalação
+nl|sum_title|Samenvatting van de installatie
+ru|sum_title|Итоги установки
+zh|sum_title|安装摘要
+ar|sum_title|ملخص التثبيت
+en|sum_panel|Panel links
+fr|sum_panel|Liens du panneau
+es|sum_panel|Enlaces del panel
+de|sum_panel|Panel-Links
+it|sum_panel|Link del pannello
+pt|sum_panel|Ligações do painel
+nl|sum_panel|Paneellinks
+ru|sum_panel|Ссылки на панель
+zh|sum_panel|面板链接
+ar|sum_panel|روابط اللوحة
+en|sum_tls_note|HTTPS only. The certificate is self-signed until you install your own: the browser will show a warning.
+fr|sum_tls_note|HTTPS uniquement. Le certificat est auto-signé tant que vous n'installez pas le vôtre : le navigateur affichera un avertissement.
+es|sum_tls_note|Solo HTTPS. El certificado es autofirmado hasta que instale el suyo: el navegador mostrará una advertencia.
+de|sum_tls_note|Nur HTTPS. Das Zertifikat ist selbstsigniert, bis Sie ein eigenes installieren: der Browser warnt.
+it|sum_tls_note|Solo HTTPS. Il certificato è autofirmato finché non installi il tuo: il browser mostrerà un avviso.
+pt|sum_tls_note|Apenas HTTPS. O certificado é autoassinado até instalar o seu: o navegador mostrará um aviso.
+nl|sum_tls_note|Alleen HTTPS. Het certificaat is zelfondertekend tot u uw eigen installeert: de browser toont een waarschuwing.
+ru|sum_tls_note|Только HTTPS. Сертификат самоподписанный, пока вы не установите свой: браузер покажет предупреждение.
+zh|sum_tls_note|仅 HTTPS。在安装您自己的证书之前使用自签名证书：浏览器会显示警告。
+ar|sum_tls_note|HTTPS فقط. الشهادة موقعة ذاتيا حتى تثبت شهادتك: سيعرض المتصفح تحذيرا.
+en|sum_local|Local addresses
+fr|sum_local|Adresses locales
+es|sum_local|Direcciones locales
+de|sum_local|Lokale Adressen
+it|sum_local|Indirizzi locali
+pt|sum_local|Endereços locais
+nl|sum_local|Lokale adressen
+ru|sum_local|Локальные адреса
+zh|sum_local|本地地址
+ar|sum_local|العناوين المحلية
+en|sum_public|Public address
+fr|sum_public|Adresse publique
+es|sum_public|Dirección pública
+de|sum_public|Öffentliche Adresse
+it|sum_public|Indirizzo pubblico
+pt|sum_public|Endereço público
+nl|sum_public|Publiek adres
+ru|sum_public|Публичный адрес
+zh|sum_public|公网地址
+ar|sum_public|العنوان العام
+en|sum_public_unknown|The public IP address could not be detected (offline or blocked). Use your server's public IP or DNS name instead of the local addresses, or re-run with --public-host.
+fr|sum_public_unknown|L'adresse IP publique n'a pas pu être détectée (hors ligne ou bloquée). Utilisez l'IP publique ou le nom DNS de votre serveur à la place des adresses locales, ou relancez avec --public-host.
+es|sum_public_unknown|No se pudo detectar la IP pública (sin conexión o bloqueada). Use la IP pública o el nombre DNS de su servidor en lugar de las direcciones locales, o vuelva a ejecutar con --public-host.
+de|sum_public_unknown|Die öffentliche IP konnte nicht ermittelt werden (offline oder blockiert). Verwenden Sie die öffentliche IP oder den DNS-Namen Ihres Servers statt der lokalen Adressen oder starten Sie mit --public-host neu.
+it|sum_public_unknown|Impossibile rilevare l'IP pubblico (offline o bloccato). Usa l'IP pubblico o il nome DNS del server al posto degli indirizzi locali, oppure riesegui con --public-host.
+pt|sum_public_unknown|Não foi possível detetar o IP público (offline ou bloqueado). Use o IP público ou o nome DNS do servidor no lugar dos endereços locais, ou execute de novo com --public-host.
+nl|sum_public_unknown|Het publieke IP kon niet worden gedetecteerd (offline of geblokkeerd). Gebruik het publieke IP of de DNS-naam van uw server in plaats van de lokale adressen, of voer opnieuw uit met --public-host.
+ru|sum_public_unknown|Не удалось определить публичный IP (нет сети или блокировка). Используйте публичный IP или DNS-имя сервера вместо локальных адресов или запустите снова с --public-host.
+zh|sum_public_unknown|无法检测公网 IP（离线或被拦截）。请使用服务器的公网 IP 或域名代替本地地址，或使用 --public-host 重新运行。
+ar|sum_public_unknown|تعذر اكتشاف عنوان IP العام (دون اتصال أو محجوب). استخدم عنوان IP العام لخادمك أو اسم DNS بدلا من العناوين المحلية، أو أعد التشغيل مع --public-host.
+en|sum_admin|Administrator account
+fr|sum_admin|Compte administrateur
+es|sum_admin|Cuenta de administrador
+de|sum_admin|Administratorkonto
+it|sum_admin|Account amministratore
+pt|sum_admin|Conta de administrador
+nl|sum_admin|Beheerdersaccount
+ru|sum_admin|Учётная запись администратора
+zh|sum_admin|管理员账户
+ar|sum_admin|حساب المسؤول
+en|sum_user|Username
+fr|sum_user|Identifiant
+es|sum_user|Usuario
+de|sum_user|Benutzername
+it|sum_user|Nome utente
+pt|sum_user|Utilizador
+nl|sum_user|Gebruikersnaam
+ru|sum_user|Имя пользователя
+zh|sum_user|用户名
+ar|sum_user|اسم المستخدم
+en|sum_password|Password
+fr|sum_password|Mot de passe
+es|sum_password|Contraseña
+de|sum_password|Passwort
+it|sum_password|Password
+pt|sum_password|Palavra-passe
+nl|sum_password|Wachtwoord
+ru|sum_password|Пароль
+zh|sum_password|密码
+ar|sum_password|كلمة المرور
+en|sum_pw_once|shown ONCE only - change it in Settings > Access / Account
+fr|sum_pw_once|affiché UNE SEULE fois - modifiable dans Réglages > Accès / Compte
+es|sum_pw_once|se muestra UNA sola vez - cámbiela en Ajustes > Acceso / Cuenta
+de|sum_pw_once|wird nur EINMAL angezeigt - änderbar unter Einstellungen > Zugang / Konto
+it|sum_pw_once|mostrata UNA sola volta - modificabile in Impostazioni > Accesso / Account
+pt|sum_pw_once|mostrada apenas UMA vez - altere em Definições > Acesso / Conta
+nl|sum_pw_once|slechts EENMAAL getoond - wijzig het in Instellingen > Toegang / Account
+ru|sum_pw_once|показывается ТОЛЬКО ОДИН раз - измените в Настройки > Доступ / Аккаунт
+zh|sum_pw_once|仅显示一次 - 可在 设置 > 访问 / 账户 中修改
+ar|sum_pw_once|تظهر مرة واحدة فقط - يمكن تغييرها في الإعدادات > الوصول / الحساب
+en|sum_pw_unchanged|unchanged (never regenerated). Reset it with: toutwaf-cp admin reset-password --user %s
+fr|sum_pw_unchanged|inchangé (jamais régénéré). Réinitialisez-le avec : toutwaf-cp admin reset-password --user %s
+es|sum_pw_unchanged|sin cambios (nunca se regenera). Restablézcala con: toutwaf-cp admin reset-password --user %s
+de|sum_pw_unchanged|unverändert (wird nie neu erzeugt). Zurücksetzen mit: toutwaf-cp admin reset-password --user %s
+it|sum_pw_unchanged|invariata (mai rigenerata). Reimpostala con: toutwaf-cp admin reset-password --user %s
+pt|sum_pw_unchanged|inalterada (nunca regenerada). Reponha com: toutwaf-cp admin reset-password --user %s
+nl|sum_pw_unchanged|ongewijzigd (nooit opnieuw gegenereerd). Reset met: toutwaf-cp admin reset-password --user %s
+ru|sum_pw_unchanged|не изменён (никогда не генерируется заново). Сброс: toutwaf-cp admin reset-password --user %s
+zh|sum_pw_unchanged|保持不变（不会重新生成）。重置命令：toutwaf-cp admin reset-password --user %s
+ar|sum_pw_unchanged|دون تغيير (لا يعاد توليدها أبدا). لإعادة التعيين: toutwaf-cp admin reset-password --user %s
+en|sum_setup|One-time setup link
+fr|sum_setup|Lien d'installation à usage unique
+es|sum_setup|Enlace de configuración de un solo uso
+de|sum_setup|Einmaliger Einrichtungslink
+it|sum_setup|Link di configurazione monouso
+pt|sum_setup|Ligação de configuração de utilização única
+nl|sum_setup|Eenmalige installatielink
+ru|sum_setup|Одноразовая ссылка настройки
+zh|sum_setup|一次性设置链接
+ar|sum_setup|رابط الإعداد لمرة واحدة
+en|sum_setup_note|Open it to configure the panel link, the account and the password in the web installer.
+fr|sum_setup_note|Ouvrez-le pour configurer le lien du panneau, le compte et le mot de passe dans l'assistant web.
+es|sum_setup_note|Ábralo para configurar el enlace del panel, la cuenta y la contraseña en el asistente web.
+de|sum_setup_note|Öffnen Sie ihn, um Panel-Link, Konto und Passwort im Web-Assistenten festzulegen.
+it|sum_setup_note|Aprilo per configurare il link del pannello, l'account e la password nell'installer web.
+pt|sum_setup_note|Abra-a para configurar a ligação do painel, a conta e a palavra-passe no assistente web.
+nl|sum_setup_note|Open hem om de paneellink, het account en het wachtwoord in de webinstallatie in te stellen.
+ru|sum_setup_note|Откройте её, чтобы настроить ссылку панели, учётную запись и пароль в веб-установщике.
+zh|sum_setup_note|打开它即可在 Web 安装向导中设置面板链接、账户和密码。
+ar|sum_setup_note|افتحه لضبط رابط اللوحة والحساب وكلمة المرور في معالج الويب.
+en|p_dpapi_warn|Port 9444 (data-plane API) is NOT opened: allow it only from your data-plane nodes
+fr|p_dpapi_warn|Le port 9444 (API data plane) n'est PAS ouvert : autorisez-le uniquement depuis vos nœuds data plane
+es|p_dpapi_warn|El puerto 9444 (API del data plane) NO está abierto: permítalo solo desde sus nodos data plane
+de|p_dpapi_warn|Port 9444 (Data-Plane-API) ist NICHT geöffnet: nur von Ihren Data-Plane-Knoten freigeben
+it|p_dpapi_warn|La porta 9444 (API data plane) NON è aperta: consentila solo dai tuoi nodi data plane
+pt|p_dpapi_warn|A porta 9444 (API do data plane) NÃO está aberta: permita-a apenas a partir dos seus nós data plane
+nl|p_dpapi_warn|Poort 9444 (data-plane-API) is NIET geopend: sta alleen toe vanuit uw data-plane-nodes
+ru|p_dpapi_warn|Порт 9444 (API data plane) НЕ открыт: разрешайте его только с ваших узлов data plane
+zh|p_dpapi_warn|端口 9444（数据平面 API）未开放：仅允许来自您的数据平面节点的访问
+ar|p_dpapi_warn|المنفذ 9444 (واجهة data plane) غير مفتوح: اسمح به فقط من عقد data plane الخاصة بك
+en|p_dpapi_only|9444/tcp only from your data planes, e.g.:
+fr|p_dpapi_only|9444/tcp uniquement depuis vos data planes, par ex. :
+es|p_dpapi_only|9444/tcp solo desde sus data planes, p. ej.:
+de|p_dpapi_only|9444/tcp nur von Ihren Data Planes, z. B.:
+it|p_dpapi_only|9444/tcp solo dai tuoi data plane, ad es.:
+pt|p_dpapi_only|9444/tcp apenas a partir dos seus data planes, ex.:
+nl|p_dpapi_only|9444/tcp alleen vanuit uw data planes, bijv.:
+ru|p_dpapi_only|9444/tcp только с ваших data plane, например:
+zh|p_dpapi_only|9444/tcp 仅允许来自您的数据平面，例如：
+ar|p_dpapi_only|9444/tcp فقط من data planes الخاصة بك، مثال:
+en|sum_setup_none|No setup link this time (already issued, or the account already existed). Create a new one with: toutwaf-cp setup-link --regenerate
+fr|sum_setup_none|Pas de lien d'installation cette fois (déjà émis, ou compte déjà existant). Pour en créer un : toutwaf-cp setup-link --regenerate
+es|sum_setup_none|Esta vez no hay enlace de configuración (ya emitido, o la cuenta ya existía). Cree uno con: toutwaf-cp setup-link --regenerate
+de|sum_setup_none|Diesmal kein Einrichtungslink (bereits ausgestellt oder Konto bestand schon). Neu erzeugen: toutwaf-cp setup-link --regenerate
+it|sum_setup_none|Nessun link di configurazione questa volta (già emesso, o account già esistente). Creane uno con: toutwaf-cp setup-link --regenerate
+pt|sum_setup_none|Sem ligação de configuração desta vez (já emitida, ou a conta já existia). Crie uma com: toutwaf-cp setup-link --regenerate
+nl|sum_setup_none|Nu geen installatielink (al uitgegeven, of account bestond al). Maak een nieuwe met: toutwaf-cp setup-link --regenerate
+ru|sum_setup_none|Ссылки настройки сейчас нет (уже выдана или учётная запись уже существовала). Создать новую: toutwaf-cp setup-link --regenerate
+zh|sum_setup_none|本次没有设置链接（已签发，或账户已存在）。重新生成：toutwaf-cp setup-link --regenerate
+ar|sum_setup_none|لا يوجد رابط إعداد هذه المرة (صدر سابقا أو الحساب موجود). لإنشاء رابط جديد: toutwaf-cp setup-link --regenerate
+en|sum_ports|Ports to open in the firewall
+fr|sum_ports|Ports à ouvrir dans le pare-feu
+es|sum_ports|Puertos a abrir en el cortafuegos
+de|sum_ports|In der Firewall zu öffnende Ports
+it|sum_ports|Porte da aprire nel firewall
+pt|sum_ports|Portas a abrir na firewall
+nl|sum_ports|Te openen poorten in de firewall
+ru|sum_ports|Порты для открытия в брандмауэре
+zh|sum_ports|需要在防火墙放行的端口
+ar|sum_ports|المنافذ المطلوب فتحها في جدار الحماية
+en|sum_cmds|Commands
+fr|sum_cmds|Commandes
+es|sum_cmds|Comandos
+de|sum_cmds|Befehle
+it|sum_cmds|Comandi
+pt|sum_cmds|Comandos
+nl|sum_cmds|Opdrachten
+ru|sum_cmds|Команды
+zh|sum_cmds|命令
+ar|sum_cmds|الأوامر
+en|sum_cloud|Cloud / hosting: also open these ports in the provider's security group / network ACL.
+fr|sum_cloud|Cloud / hébergeur : ouvrez aussi ces ports dans le groupe de sécurité / les ACL réseau du fournisseur.
+es|sum_cloud|Nube / hosting: abra también estos puertos en el grupo de seguridad / ACL de red del proveedor.
+de|sum_cloud|Cloud / Hosting: Öffnen Sie diese Ports auch in der Sicherheitsgruppe / Netzwerk-ACL des Anbieters.
+it|sum_cloud|Cloud / hosting: apri queste porte anche nel security group / ACL di rete del provider.
+pt|sum_cloud|Cloud / alojamento: abra também estas portas no grupo de segurança / ACL de rede do fornecedor.
+nl|sum_cloud|Cloud / hosting: open deze poorten ook in de beveiligingsgroep / netwerk-ACL van de provider.
+ru|sum_cloud|Облако / хостинг: откройте эти порты также в группе безопасности / сетевом ACL провайдера.
+zh|sum_cloud|云服务器 / 托管：还需在服务商的安全组 / 网络 ACL 中放行这些端口。
+ar|sum_cloud|السحابة / الاستضافة: افتح هذه المنافذ أيضا في مجموعة الأمان / قائمة ACL لدى المزود.
+en|sum_file|Summary saved (root only): %s
+fr|sum_file|Récapitulatif enregistré (root uniquement) : %s
+es|sum_file|Resumen guardado (solo root): %s
+de|sum_file|Zusammenfassung gespeichert (nur root): %s
+it|sum_file|Riepilogo salvato (solo root): %s
+pt|sum_file|Resumo guardado (apenas root): %s
+nl|sum_file|Samenvatting opgeslagen (alleen root): %s
+ru|sum_file|Итоги сохранены (только root): %s
+zh|sum_file|摘要已保存（仅 root 可读）：%s
+ar|sum_file|تم حفظ الملخص (root فقط): %s
+en|sum_fallback|This control plane has no 'bootstrap' command yet: open the console URL and follow the setup page.
+fr|sum_fallback|Ce plan de contrôle n'a pas encore de commande 'bootstrap' : ouvrez l'URL de la console et suivez la page de configuration.
+es|sum_fallback|Este plano de control aún no tiene el comando 'bootstrap': abra la URL de la consola y siga la página de configuración.
+de|sum_fallback|Diese Control Plane hat noch kein 'bootstrap'-Kommando: öffnen Sie die Konsolen-URL und folgen Sie der Einrichtungsseite.
+it|sum_fallback|Questo control plane non ha ancora il comando 'bootstrap': apri l'URL della console e segui la pagina di configurazione.
+pt|sum_fallback|Este plano de controlo ainda não tem o comando 'bootstrap': abra a URL da consola e siga a página de configuração.
+nl|sum_fallback|Deze control plane heeft nog geen 'bootstrap'-opdracht: open de console-URL en volg de installatiepagina.
+ru|sum_fallback|У этого control plane пока нет команды 'bootstrap': откройте URL консоли и следуйте странице настройки.
+zh|sum_fallback|该控制平面尚无 'bootstrap' 命令：请打开控制台地址并按设置页面操作。
+ar|sum_fallback|مستوى التحكم هذا لا يتضمن أمر 'bootstrap' بعد: افتح عنوان لوحة التحكم واتبع صفحة الإعداد.
+en|sum_node_hint|To manage this node from the console: Nodes > Add node, then set control_plane.url / enroll_token in %s.
+fr|sum_node_hint|Pour piloter ce nœud depuis la console : Nœuds > Ajouter un nœud, puis renseignez control_plane.url / enroll_token dans %s.
+es|sum_node_hint|Para gestionar este nodo desde la consola: Nodos > Agregar nodo y configure control_plane.url / enroll_token en %s.
+de|sum_node_hint|Um diesen Knoten über die Konsole zu verwalten: Knoten > Knoten hinzufügen, dann control_plane.url / enroll_token in %s setzen.
+it|sum_node_hint|Per gestire questo nodo dalla console: Nodi > Aggiungi nodo, poi imposta control_plane.url / enroll_token in %s.
+pt|sum_node_hint|Para gerir este nó a partir da consola: Nós > Adicionar nó e defina control_plane.url / enroll_token em %s.
+nl|sum_node_hint|Om deze node via de console te beheren: Nodes > Node toevoegen, stel daarna control_plane.url / enroll_token in %s in.
+ru|sum_node_hint|Чтобы управлять этим узлом из консоли: Узлы > Добавить узел, затем задайте control_plane.url / enroll_token в %s.
+zh|sum_node_hint|要在控制台管理此节点：节点 > 添加节点，然后在 %s 中设置 control_plane.url / enroll_token。
+ar|sum_node_hint|لإدارة هذه العقدة من لوحة التحكم: العقد > إضافة عقدة، ثم اضبط control_plane.url / enroll_token في %s.
+en|q_fwmodule|Do you also want ToutWAF to manage this machine's firewall?
+fr|q_fwmodule|Voulez-vous aussi que ToutWAF gère le pare-feu de cette machine ?
+es|q_fwmodule|¿Quiere que ToutWAF gestione también el cortafuegos de esta máquina?
+de|q_fwmodule|Soll ToutWAF auch die Firewall dieses Rechners verwalten?
+it|q_fwmodule|Vuoi che ToutWAF gestisca anche il firewall di questa macchina?
+pt|q_fwmodule|Quer que o ToutWAF também faça a gestão da firewall desta máquina?
+nl|q_fwmodule|Wilt u dat ToutWAF ook de firewall van deze machine beheert?
+ru|q_fwmodule|Хотите, чтобы ToutWAF также управлял брандмауэром этой машины?
+zh|q_fwmodule|是否也让 ToutWAF 管理本机的防火墙？
+ar|q_fwmodule|هل تريد أن يدير ToutWAF جدار الحماية لهذا الجهاز أيضا؟
+en|fwmod_n1|Optional module, off unless you say yes. Nothing is applied during the installation: you review every change in the console.
+fr|fwmod_n1|Module optionnel, éteint sauf si vous répondez oui. Rien n'est appliqué pendant l'installation : vous relisez chaque changement dans la console.
+es|fwmod_n1|Módulo opcional, apagado salvo que diga sí. No se aplica nada durante la instalación: revisa cada cambio en la consola.
+de|fwmod_n1|Optionales Modul, aus, außer Sie sagen ja. Während der Installation wird nichts angewendet: Sie prüfen jede Änderung in der Konsole.
+it|fwmod_n1|Modulo opzionale, spento salvo risposta affermativa. Durante l'installazione non viene applicato nulla: ogni modifica si rivede nella console.
+pt|fwmod_n1|Módulo opcional, desligado a não ser que diga que sim. Nada é aplicado durante a instalação: revê cada alteração na consola.
+nl|fwmod_n1|Optionele module, uit tenzij u ja zegt. Tijdens de installatie wordt niets toegepast: u controleert elke wijziging in de console.
+ru|fwmod_n1|Необязательный модуль, выключен, если вы не ответите «да». Во время установки ничего не применяется: каждое изменение вы проверяете в консоли.
+zh|fwmod_n1|可选模块，除非回答“是”否则保持关闭。安装期间不会应用任何规则：每项更改都在控制台中审核。
+ar|fwmod_n1|وحدة اختيارية، متوقفة ما لم تجب بنعم. لا يُطبَّق شيء أثناء التثبيت: تراجع كل تغيير في لوحة التحكم.
+en|s_bkclient|Installing the ToutWAF Backup client (signature checked)
+fr|s_bkclient|Installation du client ToutWAF Backup (signature vérifiée)
+es|s_bkclient|Instalando el cliente ToutWAF Backup (firma verificada)
+de|s_bkclient|ToutWAF-Backup-Client wird installiert (Signatur geprüft)
+it|s_bkclient|Installazione del client ToutWAF Backup (firma verificata)
+pt|s_bkclient|A instalar o cliente ToutWAF Backup (assinatura verificada)
+nl|s_bkclient|ToutWAF Backup-client wordt geïnstalleerd (handtekening gecontroleerd)
+ru|s_bkclient|Установка клиента ToutWAF Backup (подпись проверена)
+zh|s_bkclient|正在安装 ToutWAF Backup 客户端（已校验签名）
+ar|s_bkclient|تثبيت عميل ToutWAF Backup (تم التحقق من التوقيع)
+en|bkc_done|ToutWAF Backup client installed. Next: console, Backups > Backup servers, to pair a backup server.
+fr|bkc_done|Client ToutWAF Backup installé. Étape suivante : console, Sauvegardes > Serveurs de sauvegarde, pour associer un serveur.
+es|bkc_done|Cliente ToutWAF Backup instalado. Siguiente: consola, Copias > Servidores de copia, para vincular un servidor.
+de|bkc_done|ToutWAF-Backup-Client installiert. Weiter: Konsole, Backups > Backup-Server, um einen Server zu koppeln.
+it|bkc_done|Client ToutWAF Backup installato. Poi: console, Backup > Server di backup, per associare un server.
+pt|bkc_done|Cliente ToutWAF Backup instalado. Seguinte: consola, Cópias > Servidores de cópia, para associar um servidor.
+nl|bkc_done|ToutWAF Backup-client geïnstalleerd. Volgende stap: console, Back-ups > Back-upservers, om een server te koppelen.
+ru|bkc_done|Клиент ToutWAF Backup установлен. Далее: консоль, Резервные копии > Серверы копирования, чтобы привязать сервер.
+zh|bkc_done|ToutWAF Backup 客户端已安装。下一步：控制台“备份 > 备份服务器”，配对备份服务器。
+ar|bkc_done|تم تثبيت عميل ToutWAF Backup. التالي: الوحدة، النسخ الاحتياطي > خوادم النسخ، لربط خادم.
+en|bkc_fail|The ToutWAF Backup client was NOT installed (%s). The installation goes on; install it later with --with-backup-client.
+fr|bkc_fail|Le client ToutWAF Backup n’a PAS été installé (%s). L’installation continue ; installez-le plus tard avec --with-backup-client.
+es|bkc_fail|El cliente ToutWAF Backup NO se instaló (%s). La instalación continúa; instálelo después con --with-backup-client.
+de|bkc_fail|Der ToutWAF-Backup-Client wurde NICHT installiert (%s). Die Installation läuft weiter; später mit --with-backup-client nachholen.
+it|bkc_fail|Il client ToutWAF Backup NON è stato installato (%s). L’installazione prosegue; installalo più tardi con --with-backup-client.
+pt|bkc_fail|O cliente ToutWAF Backup NÃO foi instalado (%s). A instalação continua; instale-o depois com --with-backup-client.
+nl|bkc_fail|De ToutWAF Backup-client is NIET geïnstalleerd (%s). De installatie gaat door; installeer hem later met --with-backup-client.
+ru|bkc_fail|Клиент ToutWAF Backup НЕ установлен (%s). Установка продолжается; установите его позже с --with-backup-client.
+zh|bkc_fail|ToutWAF Backup 客户端未安装（%s）。安装继续；稍后可用 --with-backup-client 安装。
+ar|bkc_fail|لم يتم تثبيت عميل ToutWAF Backup (%s). يستمر التثبيت؛ ثبّته لاحقا باستخدام --with-backup-client.
+en|bkc_nokey|The ToutWAF Backup client was NOT installed: no release public key. Give it with --backup-client-pubkey (or TOUTWAF_BACKUP_PUBKEY, or the file backup-release.pub in the configuration folder); nothing is installed without a verified signature.
+fr|bkc_nokey|Le client ToutWAF Backup n’a PAS été installé : aucune clé publique de version. Donnez-la avec --backup-client-pubkey (ou TOUTWAF_BACKUP_PUBKEY, ou le fichier backup-release.pub du dossier de configuration) ; rien n’est installé sans signature vérifiée.
+es|bkc_nokey|El cliente ToutWAF Backup NO se instaló: falta la clave pública de la versión. Indíquela con --backup-client-pubkey (o TOUTWAF_BACKUP_PUBKEY, o el archivo backup-release.pub de la carpeta de configuración); nada se instala sin firma verificada.
+de|bkc_nokey|Der ToutWAF-Backup-Client wurde NICHT installiert: kein öffentlicher Release-Schlüssel. Angeben mit --backup-client-pubkey (oder TOUTWAF_BACKUP_PUBKEY oder der Datei backup-release.pub im Konfigurationsordner); ohne geprüfte Signatur wird nichts installiert.
+it|bkc_nokey|Il client ToutWAF Backup NON è stato installato: manca la chiave pubblica della release. Indicala con --backup-client-pubkey (o TOUTWAF_BACKUP_PUBKEY, o il file backup-release.pub nella cartella di configurazione); senza firma verificata non si installa nulla.
+pt|bkc_nokey|O cliente ToutWAF Backup NÃO foi instalado: falta a chave pública da versão. Indique-a com --backup-client-pubkey (ou TOUTWAF_BACKUP_PUBKEY, ou o ficheiro backup-release.pub na pasta de configuração); nada é instalado sem assinatura verificada.
+nl|bkc_nokey|De ToutWAF Backup-client is NIET geïnstalleerd: geen publieke releasesleutel. Geef die op met --backup-client-pubkey (of TOUTWAF_BACKUP_PUBKEY, of het bestand backup-release.pub in de configuratiemap); zonder gecontroleerde handtekening wordt niets geïnstalleerd.
+ru|bkc_nokey|Клиент ToutWAF Backup НЕ установлен: нет открытого ключа релиза. Укажите его через --backup-client-pubkey (или TOUTWAF_BACKUP_PUBKEY, или файл backup-release.pub в каталоге конфигурации); без проверенной подписи ничего не устанавливается.
+zh|bkc_nokey|ToutWAF Backup 客户端未安装：缺少发布公钥。请用 --backup-client-pubkey（或 TOUTWAF_BACKUP_PUBKEY，或配置目录中的 backup-release.pub）提供；没有通过校验的签名就不会安装任何内容。
+ar|bkc_nokey|لم يتم تثبيت عميل ToutWAF Backup: لا يوجد مفتاح عام للإصدار. مرّره عبر --backup-client-pubkey (أو TOUTWAF_BACKUP_PUBKEY أو الملف backup-release.pub في مجلد الإعدادات)؛ لا يُثبَّت شيء دون توقيع مُتحقَّق منه.
+en|bkc_badsig|The ToutWAF Backup client was NOT installed: the signature of the release is NOT valid. Nothing was installed.
+fr|bkc_badsig|Le client ToutWAF Backup n’a PAS été installé : la signature de la version n’est PAS valide. Rien n’a été installé.
+es|bkc_badsig|El cliente ToutWAF Backup NO se instaló: la firma de la versión NO es válida. No se instaló nada.
+de|bkc_badsig|Der ToutWAF-Backup-Client wurde NICHT installiert: die Signatur der Version ist NICHT gültig. Es wurde nichts installiert.
+it|bkc_badsig|Il client ToutWAF Backup NON è stato installato: la firma della release NON è valida. Non è stato installato nulla.
+pt|bkc_badsig|O cliente ToutWAF Backup NÃO foi instalado: a assinatura da versão NÃO é válida. Nada foi instalado.
+nl|bkc_badsig|De ToutWAF Backup-client is NIET geïnstalleerd: de handtekening van de release is NIET geldig. Er is niets geïnstalleerd.
+ru|bkc_badsig|Клиент ToutWAF Backup НЕ установлен: подпись релиза НЕДЕЙСТВИТЕЛЬНА. Ничего не установлено.
+zh|bkc_badsig|ToutWAF Backup 客户端未安装：发布签名无效。未安装任何内容。
+ar|bkc_badsig|لم يتم تثبيت عميل ToutWAF Backup: توقيع الإصدار غير صالح. لم يُثبَّت شيء.
+en|tele_on|Telemetry: NOTHING is sent to the publisher space (app.toutwaf.com) until an administrator accepts, with an unchecked box, in the setup wizard of the console (or later in Settings, Privacy and telemetry). If accepted, the attacks ToutWAF blocked (attacker address, country, type of attack, rule) and aggregate figures are sent, never the content of requests, the names of your sites or legitimate visitors; it can be withdrawn at any time and the data erased. To accept from the start, install with --telemetry (or TOUTWAF_TELEMETRY=1). Details: docs/confidentialite-telemetrie.md
+fr|tele_on|Télémétrie : RIEN n'est envoyé à l'espace éditeur (app.toutwaf.com) tant qu'un administrateur n'a pas accepté, avec une case décochée, dans l'assistant de première configuration de la console (ou plus tard dans Paramètres, Confidentialité et télémétrie). Si vous acceptez, les attaques bloquées par ToutWAF (adresse de l'attaquant, pays, type d'attaque, règle) et des chiffres agrégés sont envoyés, jamais le contenu des requêtes, les noms de vos sites ni les visiteurs légitimes ; retrait à tout moment et effacement des données. Pour accepter dès le départ, installez avec --telemetry (ou TOUTWAF_TELEMETRY=1). Détails : docs/confidentialite-telemetrie.md
+es|tele_on|Telemetría: NO se envía NADA al espacio del editor (app.toutwaf.com) hasta que un administrador lo acepte, con una casilla sin marcar, en el asistente de primera configuración de la consola (o más tarde en Ajustes, Privacidad y telemetría). Si lo acepta, se envían los ataques bloqueados por ToutWAF (dirección del atacante, país, tipo de ataque, regla) y cifras agregadas, nunca el contenido de las solicitudes, los nombres de sus sitios ni los visitantes legítimos; puede retirarse en cualquier momento y borrar los datos. Para aceptar desde el principio, instale con --telemetry (o TOUTWAF_TELEMETRY=1). Detalles: docs/confidentialite-telemetrie.md
+de|tele_on|Telemetrie: Es wird NICHTS an den Herausgeberbereich (app.toutwaf.com) gesendet, bis ein Administrator im Einrichtungsassistenten der Konsole (oder später unter Einstellungen, Datenschutz und Telemetrie) mit einem nicht vorangekreuzten Feld zugestimmt hat. Bei Zustimmung werden die von ToutWAF blockierten Angriffe (Adresse des Angreifers, Land, Angriffsart, Regel) und aggregierte Zahlen gesendet, niemals der Inhalt von Anfragen, die Namen Ihrer Sites oder legitime Besucher; Widerruf jederzeit möglich, die Daten werden gelöscht. Um von Anfang an zuzustimmen, installieren Sie mit --telemetry (oder TOUTWAF_TELEMETRY=1). Details: docs/confidentialite-telemetrie.md
+it|tele_on|Telemetria: NON viene inviato NULLA allo spazio dell'editore (app.toutwaf.com) finché un amministratore non accetta, con una casella non selezionata, nella procedura guidata di prima configurazione della console (o più tardi in Impostazioni, Privacy e telemetria). Se accetta, vengono inviati gli attacchi bloccati da ToutWAF (indirizzo dell'attaccante, paese, tipo di attacco, regola) e cifre aggregate, mai il contenuto delle richieste, i nomi dei suoi siti né i visitatori legittimi; revoca in qualsiasi momento e cancellazione dei dati. Per accettare fin dall'inizio, installi con --telemetry (o TOUTWAF_TELEMETRY=1). Dettagli: docs/confidentialite-telemetrie.md
+pt|tele_on|Telemetria: NADA é enviado ao espaço do editor (app.toutwaf.com) até que um administrador aceite, com uma caixa desmarcada, no assistente de primeira configuração da consola (ou mais tarde em Definições, Privacidade e telemetria). Se aceitar, são enviados os ataques bloqueados pelo ToutWAF (endereço do atacante, país, tipo de ataque, regra) e números agregados, nunca o conteúdo dos pedidos, os nomes dos seus sites nem os visitantes legítimos; retirada a qualquer momento e apagamento dos dados. Para aceitar desde o início, instale com --telemetry (ou TOUTWAF_TELEMETRY=1). Detalhes: docs/confidentialite-telemetrie.md
+nl|tele_on|Telemetrie: er wordt NIETS naar de ruimte van de uitgever (app.toutwaf.com) gestuurd tot een beheerder akkoord gaat, met een niet-aangevinkt vakje, in de installatiewizard van de console (of later bij Instellingen, Privacy en telemetrie). Bij akkoord worden de door ToutWAF geblokkeerde aanvallen (adres van de aanvaller, land, type aanval, regel) en geaggregeerde cijfers verstuurd, nooit de inhoud van verzoeken, de namen van uw sites of legitieme bezoekers; intrekken kan altijd en de gegevens worden gewist. Om vanaf het begin akkoord te gaan, installeert u met --telemetry (of TOUTWAF_TELEMETRY=1). Details: docs/confidentialite-telemetrie.md
+ru|tele_on|Телеметрия: НИЧЕГО не отправляется в пространство издателя (app.toutwaf.com), пока администратор не согласится (неотмеченный флажок) в мастере первоначальной настройки консоли или позже в разделе «Настройки, Конфиденциальность и телеметрия». При согласии отправляются атаки, заблокированные ToutWAF (адрес атакующего, страна, тип атаки, правило) и агрегированные показатели, но никогда содержимое запросов, названия ваших сайтов и законные посетители; согласие можно отозвать в любой момент, данные будут удалены. Чтобы согласиться с самого начала, установите с --telemetry (или TOUTWAF_TELEMETRY=1). Подробности: docs/confidentialite-telemetrie.md
+zh|tele_on|遥测：在管理员于控制台的首次设置向导（或之后在“设置、隐私与遥测”）中通过未勾选的复选框明确同意之前，不会向发布方空间（app.toutwaf.com）发送任何内容。一旦同意，会发送ToutWAF 拦截的攻击（攻击者地址、国家、攻击类型、规则）和汇总数字，绝不包括请求内容、您的站点名称或合法访问者；可随时撤回并删除数据。若要从一开始就同意，请使用 --telemetry（或 TOUTWAF_TELEMETRY=1）安装。详情：docs/confidentialite-telemetrie.md
+ar|tele_on|القياس عن بُعد: لا يُرسل أي شيء إلى فضاء الناشر (app.toutwaf.com) حتى يوافق مسؤول، بخانة غير محددة، في معالج الإعداد الأول للوحدة (أو لاحقاً في الإعدادات، الخصوصية والقياس عن بُعد). عند الموافقة تُرسل الهجمات التي حجبها ToutWAF (عنوان المهاجم والبلد ونوع الهجوم والقاعدة) وأرقام مجمّعة، ولا يُرسل أبداً محتوى الطلبات ولا أسماء مواقعك ولا الزوار الشرعيون؛ ويمكن الانسحاب في أي وقت ومحو البيانات. للموافقة منذ البداية، ثبّت باستخدام --telemetry (أو TOUTWAF_TELEMETRY=1). التفاصيل: docs/confidentialite-telemetrie.md
+en|tele_off|Telemetry: zero telemetry was requested (--no-telemetry / TOUTWAF_TELEMETRY=0). Nothing will be sent to the publisher space, nothing will be received from it, and the console starts with the "Zero telemetry" switch on. You can change this later in the console (Settings, Privacy and telemetry).
+fr|tele_off|Télémétrie : la télémétrie zéro a été demandée (--no-telemetry / TOUTWAF_TELEMETRY=0). Rien ne sera envoyé à l'espace éditeur, rien n'en sera reçu, et la console démarre avec l'interrupteur « Télémétrie zéro » activé. Vous pourrez changer cela plus tard dans la console (Paramètres, Confidentialité et télémétrie).
+es|tele_off|Telemetría: se pidió telemetría cero (--no-telemetry / TOUTWAF_TELEMETRY=0). No se enviará nada al espacio del editor, no se recibirá nada de él y la consola arrancará con el interruptor «Telemetría cero» activado. Podrá cambiarlo más tarde en la consola (Ajustes, Privacidad y telemetría).
+de|tele_off|Telemetrie: Null-Telemetrie wurde angefordert (--no-telemetry / TOUTWAF_TELEMETRY=0). Es wird nichts an den Herausgeberbereich gesendet und nichts von ihm empfangen; die Konsole startet mit aktivem Schalter „Null-Telemetrie“. Sie können das später in der Konsole ändern (Einstellungen, Datenschutz und Telemetrie).
+it|tele_off|Telemetria: è stata richiesta la telemetria zero (--no-telemetry / TOUTWAF_TELEMETRY=0). Non verrà inviato nulla allo spazio dell'editore né ricevuto da esso, e la console parte con l'interruttore «Telemetria zero» attivo. Potrai cambiarlo più tardi nella console (Impostazioni, Privacy e telemetria).
+pt|tele_off|Telemetria: foi pedida a telemetria zero (--no-telemetry / TOUTWAF_TELEMETRY=0). Nada será enviado ao espaço do editor nem recebido dele, e a consola arranca com o interruptor «Telemetria zero» ativo. Poderá alterá-lo mais tarde na consola (Definições, Privacidade e telemetria).
+nl|tele_off|Telemetrie: nultelemetrie is aangevraagd (--no-telemetry / TOUTWAF_TELEMETRY=0). Er wordt niets naar de ruimte van de uitgever gestuurd en niets van hem ontvangen; de console start met de schakelaar «Nultelemetrie» aan. U kunt dit later wijzigen in de console (Instellingen, Privacy en telemetrie).
+ru|tele_off|Телеметрия: запрошена нулевая телеметрия (--no-telemetry / TOUTWAF_TELEMETRY=0). Ничего не будет отправлено в пространство издателя и ничего не будет получено от него; консоль запустится с включённым переключателем «Нулевая телеметрия». Позже это можно изменить в консоли (Настройки, Конфиденциальность и телеметрия).
+zh|tele_off|遥测：已请求零遥测（--no-telemetry / TOUTWAF_TELEMETRY=0）。不会向发布方空间发送任何内容，也不会从它接收任何内容；控制台启动时“零遥测”开关为开启状态。您以后可在控制台中更改（设置 > 隐私与遥测）。
+ar|tele_off|القياس عن بُعد: طُلب القياس الصفري (--no-telemetry / TOUTWAF_TELEMETRY=0). لن يُرسل شيء إلى فضاء الناشر ولن يُستقبل منه شيء، وتبدأ الوحدة والمفتاح «القياس الصفري» مفعّل. يمكنك تغيير ذلك لاحقًا في الوحدة (الإعدادات، الخصوصية والقياس عن بُعد).
+en|fwmod_n2|Every change runs as a trial with a countdown and rolls back by itself unless you keep it; an anti-lockout guard refuses any rule that would cut SSH or the console.
+fr|fwmod_n2|Chaque changement passe par un essai avec compte à rebours et revient en arrière tout seul si vous ne le gardez pas ; un garde-fou anti-lockout refuse toute règle qui couperait SSH ou la console.
+es|fwmod_n2|Cada cambio se prueba con cuenta atrás y se revierte solo si no lo conserva; una protección anti-bloqueo rechaza toda regla que cortaría SSH o la consola.
+de|fwmod_n2|Jede Änderung läuft als Test mit Countdown und wird von selbst zurückgenommen, wenn Sie sie nicht behalten; ein Aussperrschutz lehnt jede Regel ab, die SSH oder die Konsole kappen würde.
+it|fwmod_n2|Ogni modifica passa da una prova con conto alla rovescia e torna indietro da sola se non la conservi; una protezione anti-lockout rifiuta ogni regola che taglierebbe SSH o la console.
+pt|fwmod_n2|Cada alteração passa por um ensaio com contagem decrescente e volta atrás sozinha se não a mantiver; uma proteção anti-bloqueio recusa qualquer regra que cortaria o SSH ou a consola.
+nl|fwmod_n2|Elke wijziging draait als proef met aftelling en wordt vanzelf teruggedraaid als u haar niet behoudt; een anti-lockout-beveiliging weigert elke regel die SSH of de console zou afsnijden.
+ru|fwmod_n2|Каждое изменение проходит пробный период с обратным отсчётом и откатывается само, если вы его не сохраните; защита от блокировки отклоняет любое правило, которое отрезало бы SSH или консоль.
+zh|fwmod_n2|每项更改都先试用并倒计时，若不保留会自动回退；防锁死保护会拒绝任何可能切断 SSH 或控制台的规则。
+ar|fwmod_n2|كل تغيير يمر بتجربة مع عد تنازلي ويتراجع تلقائيا ما لم تحتفظ به؛ وتمنع حماية مضادة للإقفال أي قاعدة قد تقطع SSH أو لوحة التحكم.
+en|fwmod_n3|This is not the question above, which only opens the ports ToutWAF needs in the system firewall (--no-firewall).
+fr|fwmod_n3|Ce n'est pas la question précédente, qui ouvre seulement les ports dont ToutWAF a besoin dans le pare-feu du système (--no-firewall).
+es|fwmod_n3|No es la pregunta anterior, que solo abre los puertos que ToutWAF necesita en el cortafuegos del sistema (--no-firewall).
+de|fwmod_n3|Das ist nicht die Frage davor, die nur die von ToutWAF benötigten Ports in der System-Firewall öffnet (--no-firewall).
+it|fwmod_n3|Non è la domanda precedente, che apre solo le porte necessarie a ToutWAF nel firewall di sistema (--no-firewall).
+pt|fwmod_n3|Não é a pergunta anterior, que apenas abre as portas de que o ToutWAF precisa na firewall do sistema (--no-firewall).
+nl|fwmod_n3|Dit is niet de vorige vraag, die alleen de poorten opent die ToutWAF nodig heeft in de systeemfirewall (--no-firewall).
+ru|fwmod_n3|Это не предыдущий вопрос, который лишь открывает нужные ToutWAF порты в системном брандмауэре (--no-firewall).
+zh|fwmod_n3|这不同于上一个问题（它只在系统防火墙中放行 ToutWAF 需要的端口，对应 --no-firewall）。
+ar|fwmod_n3|هذا ليس السؤال السابق الذي يفتح فقط المنافذ التي يحتاجها ToutWAF في جدار حماية النظام (--no-firewall).
+en|s_fwmod|Enabling the firewall module (no rule applied)
+fr|s_fwmod|Activation du module pare-feu (aucune règle appliquée)
+es|s_fwmod|Activando el módulo de cortafuegos (ninguna regla aplicada)
+de|s_fwmod|Firewall-Modul wird aktiviert (keine Regel angewendet)
+it|s_fwmod|Attivazione del modulo firewall (nessuna regola applicata)
+pt|s_fwmod|A ativar o módulo de firewall (nenhuma regra aplicada)
+nl|s_fwmod|Firewallmodule wordt ingeschakeld (geen regel toegepast)
+ru|s_fwmod|Включение модуля брандмауэра (правила не применяются)
+zh|s_fwmod|正在启用防火墙模块（不应用任何规则）
+ar|s_fwmod|تفعيل وحدة جدار الحماية (دون تطبيق أي قاعدة)
+en|fwmod_done|Firewall module enabled. Nothing was applied: open Firewall in the console to review and try rules.
+fr|fwmod_done|Module pare-feu activé. Rien n'a été appliqué : ouvrez Pare-feu dans la console pour relire et essayer des règles.
+es|fwmod_done|Módulo de cortafuegos activado. No se aplicó nada: abra Cortafuegos en la consola para revisar y probar reglas.
+de|fwmod_done|Firewall-Modul aktiviert. Es wurde nichts angewendet: Öffnen Sie Firewall in der Konsole, um Regeln zu prüfen und zu testen.
+it|fwmod_done|Modulo firewall attivato. Non è stato applicato nulla: apri Firewall nella console per rivedere e provare le regole.
+pt|fwmod_done|Módulo de firewall ativado. Nada foi aplicado: abra Firewall na consola para rever e testar regras.
+nl|fwmod_done|Firewallmodule ingeschakeld. Er is niets toegepast: open Firewall in de console om regels te bekijken en te proberen.
+ru|fwmod_done|Модуль брандмауэра включён. Ничего не применено: откройте «Брандмауэр» в консоли, чтобы проверить и опробовать правила.
+zh|fwmod_done|防火墙模块已启用。未应用任何规则：请在控制台打开“防火墙”来审核并试用规则。
+ar|fwmod_done|تم تفعيل وحدة جدار الحماية. لم يُطبَّق شيء: افتح «جدار الحماية» في لوحة التحكم لمراجعة القواعد وتجربتها.
+en|fwmod_fail|Could not enable the firewall module (%s). The installation goes on; switch it on later in Settings > Modules.
+fr|fwmod_fail|Impossible d'activer le module pare-feu (%s). L'installation continue ; activez-le plus tard dans Paramètres > Modules.
+es|fwmod_fail|No se pudo activar el módulo de cortafuegos (%s). La instalación continúa; actívelo después en Ajustes > Módulos.
+de|fwmod_fail|Das Firewall-Modul konnte nicht aktiviert werden (%s). Die Installation läuft weiter; aktivieren Sie es später unter Einstellungen > Module.
+it|fwmod_fail|Impossibile attivare il modulo firewall (%s). L'installazione prosegue; attivalo più tardi in Impostazioni > Moduli.
+pt|fwmod_fail|Não foi possível ativar o módulo de firewall (%s). A instalação continua; ative-o depois em Definições > Módulos.
+nl|fwmod_fail|Het firewallmodule kon niet worden ingeschakeld (%s). De installatie gaat door; schakel het later in via Instellingen > Modules.
+ru|fwmod_fail|Не удалось включить модуль брандмауэра (%s). Установка продолжается; включите его позже в «Настройки > Модули».
+zh|fwmod_fail|无法启用防火墙模块（%s）。安装继续；稍后可在“设置 > 模块”中启用。
+ar|fwmod_fail|تعذّر تفعيل وحدة جدار الحماية (%s). يستمر التثبيت؛ فعّلها لاحقا من الإعدادات > الوحدات.
+en|s_link|Linking the data plane to the console
+fr|s_link|Liaison du plan de données à la console
+es|s_link|Vinculando el plano de datos a la consola
+de|s_link|Data Plane wird mit der Konsole verbunden
+it|s_link|Collegamento del data plane alla console
+pt|s_link|A ligar o plano de dados à consola
+nl|s_link|Dataplane koppelen aan de console
+ru|s_link|Привязка плоскости данных к консоли
+zh|s_link|正在将数据平面关联到控制台
+ar|s_link|ربط مستوى البيانات بلوحة التحكم
+en|dp_link_ok|Data plane linked to the console automatically: nothing to configure by hand.
+fr|dp_link_ok|Plan de données lié automatiquement à la console : rien à configurer à la main.
+es|dp_link_ok|Plano de datos vinculado automáticamente a la consola: nada que configurar a mano.
+de|dp_link_ok|Data Plane automatisch mit der Konsole verbunden: nichts von Hand zu konfigurieren.
+it|dp_link_ok|Data plane collegato automaticamente alla console: nulla da configurare a mano.
+pt|dp_link_ok|Plano de dados ligado automaticamente à consola: nada a configurar à mão.
+nl|dp_link_ok|Dataplane automatisch aan de console gekoppeld: niets handmatig te configureren.
+ru|dp_link_ok|Плоскость данных автоматически привязана к консоли: вручную настраивать ничего не нужно.
+zh|dp_link_ok|数据平面已自动关联到控制台：无需手动配置。
+ar|dp_link_ok|تم ربط مستوى البيانات بلوحة التحكم تلقائيًا: لا شيء لضبطه يدويًا.
+en|dp_link_same|Data plane already linked to the console; its configuration was not touched.
+fr|dp_link_same|Plan de données déjà lié à la console ; sa configuration n'a pas été modifiée.
+es|dp_link_same|El plano de datos ya está vinculado a la consola; su configuración no se modificó.
+de|dp_link_same|Data Plane bereits mit der Konsole verbunden; die Konfiguration blieb unverändert.
+it|dp_link_same|Data plane già collegato alla console; la sua configurazione non è stata modificata.
+pt|dp_link_same|O plano de dados já está ligado à consola; a configuração não foi alterada.
+nl|dp_link_same|Dataplane is al aan de console gekoppeld; de configuratie is ongewijzigd gelaten.
+ru|dp_link_same|Плоскость данных уже привязана к консоли; её конфигурация не изменена.
+zh|dp_link_same|数据平面已关联到控制台；其配置未作修改。
+ar|dp_link_same|مستوى البيانات مرتبط بلوحة التحكم بالفعل؛ لم يتم تعديل تكوينه.
+en|dp_link_fixed|Data-plane configuration repaired (duplicated control_plane blocks merged into one); the previous file was kept.
+fr|dp_link_fixed|Configuration du plan de données réparée (blocs control_plane en double fusionnés en un seul) ; l'ancien fichier est conservé.
+es|dp_link_fixed|Configuración del plano de datos reparada (bloques control_plane duplicados fusionados en uno); se conservó el archivo anterior.
+de|dp_link_fixed|Data-Plane-Konfiguration repariert (doppelte control_plane-Blöcke zu einem zusammengeführt); die vorherige Datei blieb erhalten.
+it|dp_link_fixed|Configurazione del data plane riparata (blocchi control_plane duplicati uniti in uno); il file precedente è stato conservato.
+pt|dp_link_fixed|Configuração do plano de dados reparada (blocos control_plane duplicados fundidos num só); o ficheiro anterior foi mantido.
+nl|dp_link_fixed|Dataplane-configuratie hersteld (dubbele control_plane-blokken samengevoegd); het vorige bestand is bewaard.
+ru|dp_link_fixed|Конфигурация плоскости данных исправлена (дублирующиеся блоки control_plane объединены); прежний файл сохранён.
+zh|dp_link_fixed|数据平面配置已修复（重复的 control_plane 块已合并为一个）；原文件已保留。
+ar|dp_link_fixed|تم إصلاح تكوين مستوى البيانات (دُمجت كتل control_plane المكررة في كتلة واحدة)؛ تم الاحتفاظ بالملف السابق.
+en|dp_link_remote|The data plane on this machine is configured for another console; it was left unchanged.
+fr|dp_link_remote|Le plan de données de cette machine est configuré pour une autre console ; il n'a pas été modifié.
+es|dp_link_remote|El plano de datos de esta máquina está configurado para otra consola; no se modificó.
+de|dp_link_remote|Die Data Plane dieses Rechners ist für eine andere Konsole konfiguriert und blieb unverändert.
+it|dp_link_remote|Il data plane di questa macchina è configurato per un'altra console; non è stato modificato.
+pt|dp_link_remote|O plano de dados desta máquina está configurado para outra consola; não foi alterado.
+nl|dp_link_remote|Het dataplane op deze machine is voor een andere console geconfigureerd en is ongewijzigd gelaten.
+ru|dp_link_remote|Плоскость данных на этой машине настроена на другую консоль; она не изменена.
+zh|dp_link_remote|此机器上的数据平面已配置为使用另一个控制台；未作修改。
+ar|dp_link_remote|مستوى البيانات على هذا الجهاز مضبوط للعمل مع لوحة تحكم أخرى؛ لم يتم تعديله.
+en|dp_link_fail|The data plane could not be linked to the console automatically: %s
+fr|dp_link_fail|Le plan de données n'a pas pu être lié automatiquement à la console : %s
+es|dp_link_fail|No se pudo vincular automáticamente el plano de datos a la consola: %s
+de|dp_link_fail|Die Data Plane konnte nicht automatisch mit der Konsole verbunden werden: %s
+it|dp_link_fail|Non è stato possibile collegare automaticamente il data plane alla console: %s
+pt|dp_link_fail|Não foi possível ligar automaticamente o plano de dados à consola: %s
+nl|dp_link_fail|Het dataplane kon niet automatisch aan de console worden gekoppeld: %s
+ru|dp_link_fail|Не удалось автоматически привязать плоскость данных к консоли: %s
+zh|dp_link_fail|无法自动将数据平面关联到控制台：%s
+ar|dp_link_fail|تعذّر ربط مستوى البيانات بلوحة التحكم تلقائيًا: %s
+en|dp_link_fail_hint|The data plane keeps its standalone configuration, so sites answer HTTP 421 until it is linked. Fix the cause above and run this installer again: it links the node by itself.
+fr|dp_link_fail_hint|Le plan de données garde sa configuration autonome : les sites répondent HTTP 421 tant qu'il n'est pas lié. Corrigez la cause ci-dessus et relancez cet installateur : il lie le nœud tout seul.
+es|dp_link_fail_hint|El plano de datos conserva su configuración autónoma, por lo que los sitios responden HTTP 421 hasta que se vincule. Corrija la causa indicada y vuelva a ejecutar este instalador: vincula el nodo por sí solo.
+de|dp_link_fail_hint|Die Data Plane behält ihre eigenständige Konfiguration; Sites antworten mit HTTP 421, bis sie verbunden ist. Beheben Sie die oben genannte Ursache und starten Sie diesen Installer erneut: Er verbindet den Knoten selbst.
+it|dp_link_fail_hint|Il data plane mantiene la configurazione autonoma, quindi i siti rispondono HTTP 421 finché non è collegato. Correggi la causa indicata sopra ed esegui di nuovo questo installer: collega il nodo da solo.
+pt|dp_link_fail_hint|O plano de dados mantém a configuração autónoma, por isso os sites respondem HTTP 421 até ser ligado. Corrija a causa acima e execute novamente este instalador: liga o nó sozinho.
+nl|dp_link_fail_hint|Het dataplane behoudt zijn zelfstandige configuratie, dus sites antwoorden met HTTP 421 tot het is gekoppeld. Los de oorzaak hierboven op en voer dit installatieprogramma opnieuw uit: het koppelt de node zelf.
+ru|dp_link_fail_hint|Плоскость данных сохраняет автономную конфигурацию, поэтому сайты отвечают HTTP 421, пока она не привязана. Устраните причину выше и запустите установщик снова: он привяжет узел сам.
+zh|dp_link_fail_hint|数据平面保留其独立配置，在关联之前站点将返回 HTTP 421。请排除上述原因后重新运行此安装程序：它会自动关联该节点。
+ar|dp_link_fail_hint|يحتفظ مستوى البيانات بتكوينه المستقل، لذا تردّ المواقع بالرمز HTTP 421 إلى أن يتم ربطه. أصلح السبب أعلاه وأعد تشغيل هذا المثبّت: فهو يربط العقدة بنفسه.
+en|st_title|Status
+fr|st_title|État
+es|st_title|Estado
+de|st_title|Status
+it|st_title|Stato
+pt|st_title|Estado
+nl|st_title|Status
+ru|st_title|Состояние
+zh|st_title|状态
+ar|st_title|الحالة
+en|st_healthy|healthy
+fr|st_healthy|sain
+es|st_healthy|sano
+de|st_healthy|gesund
+it|st_healthy|funzionante
+pt|st_healthy|saudável
+nl|st_healthy|gezond
+ru|st_healthy|работает
+zh|st_healthy|正常
+ar|st_healthy|سليم
+en|st_unhealthy|NOT healthy
+fr|st_unhealthy|NON sain
+es|st_unhealthy|NO sano
+de|st_unhealthy|NICHT gesund
+it|st_unhealthy|NON funzionante
+pt|st_unhealthy|NÃO saudável
+nl|st_unhealthy|NIET gezond
+ru|st_unhealthy|НЕ работает
+zh|st_unhealthy|异常
+ar|st_unhealthy|غير سليم
+en|st_active|active
+fr|st_active|actif
+es|st_active|activo
+de|st_active|aktiv
+it|st_active|attivo
+pt|st_active|ativo
+nl|st_active|actief
+ru|st_active|активна
+zh|st_active|运行中
+ar|st_active|نشط
+en|st_inactive|inactive
+fr|st_inactive|inactif
+es|st_inactive|inactivo
+de|st_inactive|inaktiv
+it|st_inactive|inattivo
+pt|st_inactive|inativo
+nl|st_inactive|inactief
+ru|st_inactive|не активна
+zh|st_inactive|未运行
+ar|st_inactive|غير نشط
+en|st_listening|listening
+fr|st_listening|en écoute
+es|st_listening|escuchando
+de|st_listening|lauscht
+it|st_listening|in ascolto
+pt|st_listening|a escutar
+nl|st_listening|luistert
+ru|st_listening|слушает
+zh|st_listening|监听中
+ar|st_listening|يستمع
+en|st_closed|not listening
+fr|st_closed|fermé
+es|st_closed|no escucha
+de|st_closed|lauscht nicht
+it|st_closed|non in ascolto
+pt|st_closed|não escuta
+nl|st_closed|luistert niet
+ru|st_closed|не слушает
+zh|st_closed|未监听
+ar|st_closed|لا يستمع
+en|un_title|Uninstalling ToutWAF
+fr|un_title|Désinstallation de ToutWAF
+es|un_title|Desinstalando ToutWAF
+de|un_title|ToutWAF wird deinstalliert
+it|un_title|Disinstallazione di ToutWAF
+pt|un_title|A desinstalar o ToutWAF
+nl|un_title|ToutWAF verwijderen
+ru|un_title|Удаление ToutWAF
+zh|un_title|正在卸载 ToutWAF
+ar|un_title|جار إزالة ToutWAF
+en|un_kept|Configuration kept in %s, data in %s (use --purge to delete).
+fr|un_kept|Configuration conservée dans %s, données dans %s (--purge pour supprimer).
+es|un_kept|Configuración conservada en %s, datos en %s (use --purge para borrar).
+de|un_kept|Konfiguration bleibt in %s, Daten in %s (--purge zum Löschen).
+it|un_kept|Configurazione mantenuta in %s, dati in %s (usa --purge per eliminare).
+pt|un_kept|Configuração mantida em %s, dados em %s (use --purge para apagar).
+nl|un_kept|Configuratie bewaard in %s, data in %s (gebruik --purge om te wissen).
+ru|un_kept|Настройки сохранены в %s, данные в %s (--purge для удаления).
+zh|un_kept|配置保留在 %s，数据保留在 %s（使用 --purge 删除）。
+ar|un_kept|تم الاحتفاظ بالإعدادات في %s والبيانات في %s (استخدم --purge للحذف).
+en|un_purged|Configuration, data and logs deleted.
+fr|un_purged|Configuration, données et journaux supprimés.
+es|un_purged|Configuración, datos y registros eliminados.
+de|un_purged|Konfiguration, Daten und Logs gelöscht.
+it|un_purged|Configurazione, dati e log eliminati.
+pt|un_purged|Configuração, dados e logs apagados.
+nl|un_purged|Configuratie, data en logs gewist.
+ru|un_purged|Настройки, данные и журналы удалены.
+zh|un_purged|配置、数据和日志已删除。
+ar|un_purged|تم حذف الإعدادات والبيانات والسجلات.
+en|p_console|web console + API
+fr|p_console|console web + API
+es|p_console|consola web + API
+de|p_console|Web-Konsole + API
+it|p_console|console web + API
+pt|p_console|consola web + API
+nl|p_console|webconsole + API
+ru|p_console|веб-консоль + API
+zh|p_console|Web 控制台 + API
+ar|p_console|وحدة تحكم الويب + API
+en|p_http|HTTP (reverse proxy)
+fr|p_http|HTTP (reverse proxy)
+es|p_http|HTTP (proxy inverso)
+de|p_http|HTTP (Reverse-Proxy)
+it|p_http|HTTP (reverse proxy)
+pt|p_http|HTTP (proxy reverso)
+nl|p_http|HTTP (reverse proxy)
+ru|p_http|HTTP (reverse proxy)
+zh|p_http|HTTP（反向代理）
+ar|p_http|HTTP (وكيل عكسي)
+en|p_https|HTTPS (reverse proxy)
+fr|p_https|HTTPS (reverse proxy)
+es|p_https|HTTPS (proxy inverso)
+de|p_https|HTTPS (Reverse-Proxy)
+it|p_https|HTTPS (reverse proxy)
+pt|p_https|HTTPS (proxy reverso)
+nl|p_https|HTTPS (reverse proxy)
+ru|p_https|HTTPS (reverse proxy)
+zh|p_https|HTTPS（反向代理）
+ar|p_https|HTTPS (وكيل عكسي)
+en|p_dpapi|data-plane API: ONLY if data planes run on OTHER hosts (restrict to their IPs)
+fr|p_dpapi|API des plans de données : UNIQUEMENT si des plans de données sont sur D'AUTRES hôtes (limiter à leurs IP)
+es|p_dpapi|API de planos de datos: SOLO si hay planos de datos en OTROS hosts (limitar a sus IP)
+de|p_dpapi|Data-Plane-API: NUR wenn Data Planes auf ANDEREN Hosts laufen (auf deren IPs beschränken)
+it|p_dpapi|API dei data plane: SOLO se i data plane sono su ALTRI host (limita ai loro IP)
+pt|p_dpapi|API dos planos de dados: APENAS se houver planos de dados noutros hosts (limite aos seus IPs)
+nl|p_dpapi|data-plane-API: ALLEEN als data planes op ANDERE hosts draaien (beperk tot hun IP's)
+ru|p_dpapi|API data plane: ТОЛЬКО если data plane работают на ДРУГИХ хостах (ограничьте их IP)
+zh|p_dpapi|数据平面 API：仅当数据平面运行在其他主机时才需要（限制为其 IP）
+ar|p_dpapi|واجهة API لمستوى البيانات: فقط إذا كانت مستويات البيانات على مضيفات أخرى (قيّدها بعناوينها)
+en|w_fw_manual|Port %s/tcp was not opened automatically: see the commands in the summary.
+fr|w_fw_manual|Le port %s/tcp n'a pas été ouvert automatiquement : voir les commandes du récapitulatif.
+es|w_fw_manual|El puerto %s/tcp no se abrió automáticamente: vea los comandos del resumen.
+de|w_fw_manual|Port %s/tcp wurde nicht automatisch geöffnet: siehe Befehle in der Zusammenfassung.
+it|w_fw_manual|La porta %s/tcp non è stata aperta automaticamente: vedi i comandi nel riepilogo.
+pt|w_fw_manual|A porta %s/tcp não foi aberta automaticamente: veja os comandos no resumo.
+nl|w_fw_manual|Poort %s/tcp is niet automatisch geopend: zie de opdrachten in de samenvatting.
+ru|w_fw_manual|Порт %s/tcp не открыт автоматически: см. команды в итогах.
+zh|w_fw_manual|端口 %s/tcp 未自动放行：请见摘要中的命令。
+ar|w_fw_manual|لم يتم فتح المنفذ %s/tcp تلقائيا: راجع الأوامر في الملخص.
+en|need_cp|A control plane URL is required when an enrolment token is given.
+fr|need_cp|Une URL de plan de contrôle est nécessaire lorsqu'un jeton d'enrôlement est fourni.
+es|need_cp|Se necesita la URL de un plano de control cuando se indica un token de alta.
+de|need_cp|Mit einem Registrierungstoken wird die URL einer Control Plane benötigt.
+it|need_cp|Serve l'URL di un control plane quando si indica un token di registrazione.
+pt|need_cp|É necessária a URL de um plano de controlo quando se indica um token de inscrição.
+nl|need_cp|Met een inschrijftoken is een control-plane-URL nodig.
+ru|need_cp|При указании токена регистрации нужен URL control plane.
+zh|need_cp|提供注册令牌时需要控制平面 URL。
+ar|need_cp|يلزم عنوان مستوى التحكم عند تقديم رمز التسجيل.
+en|cp_title|System compatibility
+fr|cp_title|Compatibilité du système
+es|cp_title|Compatibilidad del sistema
+de|cp_title|Systemkompatibilität
+it|cp_title|Compatibilità del sistema
+pt|cp_title|Compatibilidade do sistema
+nl|cp_title|Systeemcompatibiliteit
+ru|cp_title|Совместимость системы
+zh|cp_title|系统兼容性
+ar|cp_title|توافق النظام
+en|cp_detected|Detected: %s, arch %s, glibc %s, systemd %s, kernel %s
+fr|cp_detected|Détecté : %s, arch %s, glibc %s, systemd %s, noyau %s
+es|cp_detected|Detectado: %s, arq. %s, glibc %s, systemd %s, kernel %s
+de|cp_detected|Erkannt: %s, Arch %s, glibc %s, systemd %s, Kernel %s
+it|cp_detected|Rilevato: %s, arch %s, glibc %s, systemd %s, kernel %s
+pt|cp_detected|Detetado: %s, arq. %s, glibc %s, systemd %s, kernel %s
+nl|cp_detected|Gedetecteerd: %s, arch %s, glibc %s, systemd %s, kernel %s
+ru|cp_detected|Обнаружено: %s, арх. %s, glibc %s, systemd %s, ядро %s
+zh|cp_detected|检测到：%s，架构 %s，glibc %s，systemd %s，内核 %s
+ar|cp_detected|تم الكشف: %s، المعمارية %s، glibc %s، systemd %s، النواة %s
+en|cp_ok|Compatible: %s (%s)
+fr|cp_ok|Compatible : %s (%s)
+es|cp_ok|Compatible: %s (%s)
+de|cp_ok|Kompatibel: %s (%s)
+it|cp_ok|Compatibile: %s (%s)
+pt|cp_ok|Compatível: %s (%s)
+nl|cp_ok|Compatibel: %s (%s)
+ru|cp_ok|Совместимо: %s (%s)
+zh|cp_ok|兼容：%s（%s）
+ar|cp_ok|متوافق: %s (%s)
+en|cp_tested|tested
+fr|cp_tested|testé
+es|cp_tested|probado
+de|cp_tested|getestet
+it|cp_tested|testato
+pt|cp_tested|testado
+nl|cp_tested|getest
+ru|cp_tested|проверено
+zh|cp_tested|已测试
+ar|cp_tested|تم اختباره
+en|cp_expected|expected
+fr|cp_expected|attendu
+es|cp_expected|esperado
+de|cp_expected|erwartet
+it|cp_expected|previsto
+pt|cp_expected|esperado
+nl|cp_expected|verwacht
+ru|cp_expected|ожидается
+zh|cp_expected|预期兼容
+ar|cp_expected|متوقع
+en|cp_branch|tested on %s; yours (%s): same branch, not tested separately
+fr|cp_branch|testé sur %s ; la vôtre (%s) : même branche, non testée séparément
+es|cp_branch|probado en %s; la suya (%s): misma rama, no probada por separado
+de|cp_branch|getestet auf %s; Ihre Version (%s): gleicher Zweig, nicht gesondert getestet
+it|cp_branch|testato su %s; la sua (%s): stesso ramo, non testata separatamente
+pt|cp_branch|testado em %s; a sua (%s): mesmo ramo, não testada separadamente
+nl|cp_branch|getest op %s; uw versie (%s): dezelfde tak, niet apart getest
+ru|cp_branch|проверено на %s; ваша версия (%s): та же ветка, отдельно не проверялась
+zh|cp_branch|已在 %s 上测试；您的版本（%s）：同一分支，未单独测试
+ar|cp_branch|تم الاختبار على %s؛ إصدارك (%s): الفرع نفسه، ولم يُختبر بشكل منفصل
+en|cp_w_like|%s is not in the compatibility table: treated as the %s family (expected). Continuing.
+fr|cp_w_like|%s n'est pas dans la table de compatibilité : traité comme la famille %s (attendu). On continue.
+es|cp_w_like|%s no figura en la tabla de compatibilidad: se trata como la familia %s (esperado). Se continúa.
+de|cp_w_like|%s steht nicht in der Kompatibilitätstabelle: wird als Familie %s behandelt (erwartet). Es geht weiter.
+it|cp_w_like|%s non è nella tabella di compatibilità: trattato come famiglia %s (previsto). Si continua.
+pt|cp_w_like|%s não consta da tabela de compatibilidade: tratado como a família %s (esperado). A continuar.
+nl|cp_w_like|%s staat niet in de compatibiliteitstabel: behandeld als de familie %s (verwacht). Er wordt doorgegaan.
+ru|cp_w_like|%s нет в таблице совместимости: обрабатывается как семейство %s (ожидается). Продолжаем.
+zh|cp_w_like|%s 不在兼容性表中：按 %s 系列处理（预期兼容）。继续。
+ar|cp_w_like|%s غير موجود في جدول التوافق: يُعامل كعائلة %s (متوقع). المتابعة.
+en|cp_w_newer|%s %s is newer than the listed versions: not validated yet (expected). Continuing.
+fr|cp_w_newer|%s %s est plus récent que les versions listées : pas encore validé (attendu). On continue.
+es|cp_w_newer|%s %s es más reciente que las versiones listadas: aún no validado (esperado). Se continúa.
+de|cp_w_newer|%s %s ist neuer als die gelisteten Versionen: noch nicht validiert (erwartet). Es geht weiter.
+it|cp_w_newer|%s %s è più recente delle versioni elencate: non ancora validato (previsto). Si continua.
+pt|cp_w_newer|%s %s é mais recente do que as versões listadas: ainda não validado (esperado). A continuar.
+nl|cp_w_newer|%s %s is nieuwer dan de vermelde versies: nog niet gevalideerd (verwacht). Er wordt doorgegaan.
+ru|cp_w_newer|%s %s новее перечисленных версий: ещё не проверено (ожидается). Продолжаем.
+zh|cp_w_newer|%s %s 比列出的版本更新：尚未验证（预期兼容）。继续。
+ar|cp_w_newer|%s %s أحدث من الإصدارات المدرجة: لم يتم التحقق منه بعد (متوقع). المتابعة.
+en|cp_w_unlisted|%s %s is not listed in the table: treated as expected. Continuing.
+fr|cp_w_unlisted|%s %s n'est pas listé dans la table : traité comme attendu. On continue.
+es|cp_w_unlisted|%s %s no figura en la tabla: se trata como esperado. Se continúa.
+de|cp_w_unlisted|%s %s steht nicht in der Tabelle: wird als erwartet behandelt. Es geht weiter.
+it|cp_w_unlisted|%s %s non è elencato nella tabella: trattato come previsto. Si continua.
+pt|cp_w_unlisted|%s %s não consta da tabela: tratado como esperado. A continuar.
+nl|cp_w_unlisted|%s %s staat niet in de tabel: behandeld als verwacht. Er wordt doorgegaan.
+ru|cp_w_unlisted|%s %s нет в таблице: считается ожидаемо совместимой. Продолжаем.
+zh|cp_w_unlisted|%s %s 不在表中：按预期兼容处理。继续。
+ar|cp_w_unlisted|%s %s غير مدرج في الجدول: يُعامل كمتوقع. المتابعة.
+en|cp_w_nover|%s reports no version (rolling or testing release): treated as expected. Continuing.
+fr|cp_w_nover|%s ne déclare aucune version (distribution en continu ou testing) : traité comme attendu. On continue.
+es|cp_w_nover|%s no declara versión (rolling o testing): se trata como esperado. Se continúa.
+de|cp_w_nover|%s meldet keine Version (Rolling oder Testing): wird als erwartet behandelt. Es geht weiter.
+it|cp_w_nover|%s non dichiara una versione (rolling o testing): trattato come previsto. Si continua.
+pt|cp_w_nover|%s não declara versão (rolling ou testing): tratado como esperado. A continuar.
+nl|cp_w_nover|%s meldt geen versie (rolling of testing): behandeld als verwacht. Er wordt doorgegaan.
+ru|cp_w_nover|%s не сообщает версию (rolling или testing): считается ожидаемо совместимой. Продолжаем.
+zh|cp_w_nover|%s 未报告版本（滚动或测试版）：按预期兼容处理。继续。
+ar|cp_w_nover|%s لا يعلن عن إصدار (تحديث مستمر أو اختباري): يُعامل كمتوقع. المتابعة.
+en|cp_w_glibc|The glibc version could not be determined; continuing.
+fr|cp_w_glibc|La version de glibc n'a pas pu être déterminée ; on continue.
+es|cp_w_glibc|No se pudo determinar la versión de glibc; se continúa.
+de|cp_w_glibc|Die glibc-Version konnte nicht ermittelt werden; es geht weiter.
+it|cp_w_glibc|Impossibile determinare la versione di glibc; si continua.
+pt|cp_w_glibc|Não foi possível determinar a versão da glibc; continuando.
+nl|cp_w_glibc|De glibc-versie kon niet worden bepaald; er wordt doorgegaan.
+ru|cp_w_glibc|Не удалось определить версию glibc; продолжаем.
+zh|cp_w_glibc|无法确定 glibc 版本；继续。
+ar|cp_w_glibc|تعذر تحديد إصدار glibc؛ المتابعة.
+en|cp_w_skip|--skip-os-check: the compatibility check is bypassed. This system is NOT supported: continuing at your own risk.
+fr|cp_w_skip|--skip-os-check : le contrôle de compatibilité est ignoré. Ce système n'est PAS pris en charge : vous continuez à vos risques.
+es|cp_w_skip|--skip-os-check: se omite la comprobación de compatibilidad. Este sistema NO es compatible: continúa bajo su responsabilidad.
+de|cp_w_skip|--skip-os-check: die Kompatibilitätsprüfung wird übergangen. Dieses System wird NICHT unterstützt: Fortfahren auf eigenes Risiko.
+it|cp_w_skip|--skip-os-check: il controllo di compatibilità è ignorato. Questo sistema NON è supportato: si continua a proprio rischio.
+pt|cp_w_skip|--skip-os-check: a verificação de compatibilidade foi ignorada. Este sistema NÃO é suportado: a continuar por sua conta e risco.
+nl|cp_w_skip|--skip-os-check: de compatibiliteitscontrole wordt overgeslagen. Dit systeem wordt NIET ondersteund: doorgaan op eigen risico.
+ru|cp_w_skip|--skip-os-check: проверка совместимости пропущена. Эта система НЕ поддерживается: продолжаем на ваш риск.
+zh|cp_w_skip|--skip-os-check：已跳过兼容性检查。此系统不受支持：风险自负，继续。
+ar|cp_w_skip|--skip-os-check: تم تجاوز فحص التوافق. هذا النظام غير مدعوم: المتابعة على مسؤوليتك.
+en|cp_w_stage|Staging (--destdir): the compatibility verdict is informational only, nothing is refused.
+fr|cp_w_stage|Préparation (--destdir) : le verdict de compatibilité est informatif, rien n'est refusé.
+es|cp_w_stage|Preparación (--destdir): el veredicto de compatibilidad es informativo, no se rechaza nada.
+de|cp_w_stage|Staging (--destdir): das Kompatibilitätsergebnis ist nur informativ, nichts wird abgelehnt.
+it|cp_w_stage|Staging (--destdir): il verdetto di compatibilità è solo informativo, nulla viene rifiutato.
+pt|cp_w_stage|Staging (--destdir): o veredito de compatibilidade é apenas informativo, nada é recusado.
+nl|cp_w_stage|Staging (--destdir): het compatibiliteitsoordeel is slechts informatief, er wordt niets geweigerd.
+ru|cp_w_stage|Staging (--destdir): вердикт совместимости носит информационный характер, ничего не отклоняется.
+zh|cp_w_stage|暂存模式（--destdir）：兼容性结论仅供参考，不会拒绝。
+ar|cp_w_stage|التجهيز (--destdir): نتيجة التوافق للعلم فقط ولا يُرفض شيء.
+en|cp_refused|This system is not compatible with ToutWAF:
+fr|cp_refused|Ce système n'est pas compatible avec ToutWAF :
+es|cp_refused|Este sistema no es compatible con ToutWAF:
+de|cp_refused|Dieses System ist nicht mit ToutWAF kompatibel:
+it|cp_refused|Questo sistema non è compatibile con ToutWAF:
+pt|cp_refused|Este sistema não é compatível com o ToutWAF:
+nl|cp_refused|Dit systeem is niet compatibel met ToutWAF:
+ru|cp_refused|Эта система несовместима с ToutWAF:
+zh|cp_refused|此系统与 ToutWAF 不兼容：
+ar|cp_refused|هذا النظام غير متوافق مع ToutWAF:
+en|cp_r_old|%s %s is older than the minimum supported version (%s).
+fr|cp_r_old|%s %s est plus ancien que la version minimale prise en charge (%s).
+es|cp_r_old|%s %s es anterior a la versión mínima compatible (%s).
+de|cp_r_old|%s %s ist älter als die minimal unterstützte Version (%s).
+it|cp_r_old|%s %s è più vecchio della versione minima supportata (%s).
+pt|cp_r_old|%s %s é mais antigo do que a versão mínima suportada (%s).
+nl|cp_r_old|%s %s is ouder dan de minimaal ondersteunde versie (%s).
+ru|cp_r_old|%s %s старше минимальной поддерживаемой версии (%s).
+zh|cp_r_old|%s %s 低于支持的最低版本（%s）。
+ar|cp_r_old|%s %s أقدم من الحد الأدنى للإصدار المدعوم (%s).
+en|cp_r_eol|%s %s is end of life, or its glibc / systemd is too old.
+fr|cp_r_eol|%s %s est en fin de vie, ou sa glibc / son systemd est trop ancien.
+es|cp_r_eol|%s %s ha llegado al fin de su vida útil, o su glibc / systemd es demasiado antiguo.
+de|cp_r_eol|%s %s ist am Ende seines Lebenszyklus oder seine glibc / systemd ist zu alt.
+it|cp_r_eol|%s %s è a fine vita, oppure la sua glibc / systemd è troppo vecchia.
+pt|cp_r_eol|%s %s chegou ao fim de vida, ou a sua glibc / systemd é demasiado antiga.
+nl|cp_r_eol|%s %s is end-of-life, of de glibc / systemd is te oud.
+ru|cp_r_eol|%s %s снята с поддержки, либо её glibc / systemd слишком стар.
+zh|cp_r_eol|%s %s 已停止维护，或其 glibc / systemd 过旧。
+ar|cp_r_eol|%s %s انتهى عمره أو أن glibc / systemd فيه قديم جدا.
+en|cp_r_glibc|glibc %s found: %s or newer is required.
+fr|cp_r_glibc|glibc %s trouvée : %s ou plus récente est requise.
+es|cp_r_glibc|glibc %s encontrada: se requiere %s o posterior.
+de|cp_r_glibc|glibc %s gefunden: %s oder neuer ist erforderlich.
+it|cp_r_glibc|glibc %s trovata: serve %s o successiva.
+pt|cp_r_glibc|glibc %s encontrada: é necessária a %s ou posterior.
+nl|cp_r_glibc|glibc %s gevonden: %s of nieuwer is vereist.
+ru|cp_r_glibc|Найдена glibc %s: требуется %s или новее.
+zh|cp_r_glibc|发现 glibc %s：需要 %s 或更新版本。
+ar|cp_r_glibc|تم العثور على glibc %s: مطلوب %s أو أحدث.
+en|cp_r_musl|musl libc found: glibc %s or newer is required.
+fr|cp_r_musl|musl libc trouvée : glibc %s ou plus récente est requise.
+es|cp_r_musl|musl libc encontrada: se requiere glibc %s o posterior.
+de|cp_r_musl|musl libc gefunden: glibc %s oder neuer ist erforderlich.
+it|cp_r_musl|musl libc trovata: serve glibc %s o successiva.
+pt|cp_r_musl|musl libc encontrada: é necessária a glibc %s ou posterior.
+nl|cp_r_musl|musl libc gevonden: glibc %s of nieuwer is vereist.
+ru|cp_r_musl|Найдена musl libc: требуется glibc %s или новее.
+zh|cp_r_musl|发现 musl libc：需要 glibc %s 或更新版本。
+ar|cp_r_musl|تم العثور على musl libc: مطلوب glibc %s أو أحدث.
+en|cp_r_init|%s %s does not use systemd, which ToutWAF requires.
+fr|cp_r_init|%s %s n'utilise pas systemd, requis par ToutWAF.
+es|cp_r_init|%s %s no usa systemd, que ToutWAF requiere.
+de|cp_r_init|%s %s verwendet kein systemd, das ToutWAF benötigt.
+it|cp_r_init|%s %s non usa systemd, richiesto da ToutWAF.
+pt|cp_r_init|%s %s não usa systemd, exigido pelo ToutWAF.
+nl|cp_r_init|%s %s gebruikt geen systemd, dat ToutWAF vereist.
+ru|cp_r_init|%s %s не использует systemd, который нужен ToutWAF.
+zh|cp_r_init|%s %s 不使用 systemd，而 ToutWAF 需要它。
+ar|cp_r_init|%s %s لا يستخدم systemd الذي يتطلبه ToutWAF.
+en|cp_r_immutable|%s %s has an immutable root filesystem (not supported).
+fr|cp_r_immutable|%s %s a un système de fichiers racine immuable (non pris en charge).
+es|cp_r_immutable|%s %s tiene un sistema de archivos raíz inmutable (no compatible).
+de|cp_r_immutable|%s %s hat ein unveränderliches Root-Dateisystem (nicht unterstützt).
+it|cp_r_immutable|%s %s ha un filesystem root immutabile (non supportato).
+pt|cp_r_immutable|%s %s tem um sistema de ficheiros raiz imutável (não suportado).
+nl|cp_r_immutable|%s %s heeft een onveranderlijk root-bestandssysteem (niet ondersteund).
+ru|cp_r_immutable|%s %s использует неизменяемую корневую ФС (не поддерживается).
+zh|cp_r_immutable|%s %s 使用不可变根文件系统（不支持）。
+ar|cp_r_immutable|%s %s يستخدم نظام ملفات جذر غير قابل للتعديل (غير مدعوم).
+en|cp_r_layout|%s %s does not follow the standard Linux filesystem layout (not supported).
+fr|cp_r_layout|%s %s ne suit pas l'arborescence Linux standard (non pris en charge).
+es|cp_r_layout|%s %s no sigue la estructura estándar de Linux (no compatible).
+de|cp_r_layout|%s %s folgt nicht der Linux-Standardverzeichnisstruktur (nicht unterstützt).
+it|cp_r_layout|%s %s non segue la struttura standard di Linux (non supportato).
+pt|cp_r_layout|%s %s não segue a estrutura padrão do Linux (não suportado).
+nl|cp_r_layout|%s %s volgt niet de standaard Linux-mapstructuur (niet ondersteund).
+ru|cp_r_layout|%s %s не следует стандартной структуре каталогов Linux (не поддерживается).
+zh|cp_r_layout|%s %s 不遵循标准 Linux 目录结构（不支持）。
+ar|cp_r_layout|%s %s لا يتبع بنية ملفات Linux القياسية (غير مدعوم).
+en|cp_r_arch|Architecture %s is not supported (supported: %s).
+fr|cp_r_arch|L'architecture %s n'est pas prise en charge (prise en charge : %s).
+es|cp_r_arch|La arquitectura %s no es compatible (compatible: %s).
+de|cp_r_arch|Die Architektur %s wird nicht unterstützt (unterstützt: %s).
+it|cp_r_arch|L'architettura %s non è supportata (supportata: %s).
+pt|cp_r_arch|A arquitetura %s não é suportada (suportada: %s).
+nl|cp_r_arch|Architectuur %s wordt niet ondersteund (ondersteund: %s).
+ru|cp_r_arch|Архитектура %s не поддерживается (поддерживается: %s).
+zh|cp_r_arch|不支持架构 %s（支持：%s）。
+ar|cp_r_arch|المعمارية %s غير مدعومة (المدعوم: %s).
+en|cp_r_distro_arch|%s %s runs on an architecture without a ToutWAF build.
+fr|cp_r_distro_arch|%s %s tourne sur une architecture sans build ToutWAF.
+es|cp_r_distro_arch|%s %s funciona en una arquitectura sin compilación de ToutWAF.
+de|cp_r_distro_arch|%s %s läuft auf einer Architektur ohne ToutWAF-Build.
+it|cp_r_distro_arch|%s %s gira su un'architettura senza build di ToutWAF.
+pt|cp_r_distro_arch|%s %s corre numa arquitetura sem build do ToutWAF.
+nl|cp_r_distro_arch|%s %s draait op een architectuur zonder ToutWAF-build.
+ru|cp_r_distro_arch|%s %s работает на архитектуре без сборки ToutWAF.
+zh|cp_r_distro_arch|%s %s 运行在没有 ToutWAF 构建的架构上。
+ar|cp_r_distro_arch|%s %s يعمل على معمارية بلا إصدار من ToutWAF.
+en|cp_r_systemd|systemd is not running as the init system (/run/systemd/system is missing): it is required for the services.
+fr|cp_r_systemd|systemd ne tourne pas comme système d'init (/run/systemd/system est absent) : il est requis pour les services.
+es|cp_r_systemd|systemd no se ejecuta como sistema init (falta /run/systemd/system): es necesario para los servicios.
+de|cp_r_systemd|systemd läuft nicht als Init-System (/run/systemd/system fehlt): es wird für die Dienste benötigt.
+it|cp_r_systemd|systemd non è in esecuzione come init (manca /run/systemd/system): è necessario per i servizi.
+pt|cp_r_systemd|o systemd não está em execução como init (falta /run/systemd/system): é necessário para os serviços.
+nl|cp_r_systemd|systemd draait niet als init-systeem (/run/systemd/system ontbreekt): het is vereist voor de diensten.
+ru|cp_r_systemd|systemd не запущен как init (нет /run/systemd/system): он нужен для служб.
+zh|cp_r_systemd|systemd 未作为 init 系统运行（缺少 /run/systemd/system）：服务需要它。
+ar|cp_r_systemd|systemd لا يعمل كنظام init (المجلد /run/systemd/system غير موجود): مطلوب للخدمات.
+en|cp_r_systemd_old|systemd %s found: %s or newer is required.
+fr|cp_r_systemd_old|systemd %s trouvé : %s ou plus récent est requis.
+es|cp_r_systemd_old|systemd %s encontrado: se requiere %s o posterior.
+de|cp_r_systemd_old|systemd %s gefunden: %s oder neuer ist erforderlich.
+it|cp_r_systemd_old|systemd %s trovato: serve %s o successivo.
+pt|cp_r_systemd_old|systemd %s encontrado: é necessário %s ou posterior.
+nl|cp_r_systemd_old|systemd %s gevonden: %s of nieuwer is vereist.
+ru|cp_r_systemd_old|Найден systemd %s: требуется %s или новее.
+zh|cp_r_systemd_old|发现 systemd %s：需要 %s 或更新版本。
+ar|cp_r_systemd_old|تم العثور على systemd %s: مطلوب %s أو أحدث.
+en|cp_r_kernel|Linux kernel %s found: %s or newer is required.
+fr|cp_r_kernel|Noyau Linux %s trouvé : %s ou plus récent est requis.
+es|cp_r_kernel|Kernel Linux %s encontrado: se requiere %s o posterior.
+de|cp_r_kernel|Linux-Kernel %s gefunden: %s oder neuer ist erforderlich.
+it|cp_r_kernel|Kernel Linux %s trovato: serve %s o successivo.
+pt|cp_r_kernel|Kernel Linux %s encontrado: é necessário %s ou posterior.
+nl|cp_r_kernel|Linux-kernel %s gevonden: %s of nieuwer is vereist.
+ru|cp_r_kernel|Найдено ядро Linux %s: требуется %s или новее.
+zh|cp_r_kernel|发现 Linux 内核 %s：需要 %s 或更新版本。
+ar|cp_r_kernel|تم العثور على نواة Linux %s: مطلوب %s أو أحدث.
+en|cp_r_unknown|Distribution '%s' is not recognised and declares no known family (ID_LIKE='%s').
+fr|cp_r_unknown|La distribution '%s' n'est pas reconnue et ne déclare aucune famille connue (ID_LIKE='%s').
+es|cp_r_unknown|La distribución '%s' no se reconoce y no declara ninguna familia conocida (ID_LIKE='%s').
+de|cp_r_unknown|Die Distribution '%s' ist unbekannt und nennt keine bekannte Familie (ID_LIKE='%s').
+it|cp_r_unknown|La distribuzione '%s' non è riconosciuta e non dichiara alcuna famiglia nota (ID_LIKE='%s').
+pt|cp_r_unknown|A distribuição '%s' não é reconhecida e não declara nenhuma família conhecida (ID_LIKE='%s').
+nl|cp_r_unknown|Distributie '%s' wordt niet herkend en vermeldt geen bekende familie (ID_LIKE='%s').
+ru|cp_r_unknown|Дистрибутив '%s' не распознан и не указывает известного семейства (ID_LIKE='%s').
+zh|cp_r_unknown|无法识别发行版 '%s'，且未声明已知系列（ID_LIKE='%s'）。
+ar|cp_r_unknown|التوزيعة '%s' غير معروفة ولا تعلن عن عائلة معروفة (ID_LIKE='%s').
+en|cp_r_noosr|/etc/os-release is missing: the distribution cannot be identified.
+fr|cp_r_noosr|/etc/os-release est absent : la distribution ne peut pas être identifiée.
+es|cp_r_noosr|Falta /etc/os-release: no se puede identificar la distribución.
+de|cp_r_noosr|/etc/os-release fehlt: die Distribution kann nicht erkannt werden.
+it|cp_r_noosr|Manca /etc/os-release: impossibile identificare la distribuzione.
+pt|cp_r_noosr|Falta /etc/os-release: não é possível identificar a distribuição.
+nl|cp_r_noosr|/etc/os-release ontbreekt: de distributie kan niet worden herkend.
+ru|cp_r_noosr|Нет /etc/os-release: дистрибутив определить невозможно.
+zh|cp_r_noosr|缺少 /etc/os-release：无法识别发行版。
+ar|cp_r_noosr|الملف /etc/os-release غير موجود: لا يمكن تحديد التوزيعة.
+en|cp_nochange|Nothing has been changed on this system.
+fr|cp_nochange|Rien n'a été modifié sur ce système.
+es|cp_nochange|No se ha modificado nada en este sistema.
+de|cp_nochange|An diesem System wurde nichts geändert.
+it|cp_nochange|Nessuna modifica è stata apportata a questo sistema.
+pt|cp_nochange|Nada foi alterado neste sistema.
+nl|cp_nochange|Er is niets gewijzigd op dit systeem.
+ru|cp_nochange|В системе ничего не изменено.
+zh|cp_nochange|未对此系统做任何更改。
+ar|cp_nochange|لم يتم تغيير أي شيء في هذا النظام.
+en|cp_list|Compatible systems (amd64 and arm64, glibc %s or newer, systemd %s or newer):
+fr|cp_list|Systèmes compatibles (amd64 et arm64, glibc %s ou plus récente, systemd %s ou plus récent) :
+es|cp_list|Sistemas compatibles (amd64 y arm64, glibc %s o posterior, systemd %s o posterior):
+de|cp_list|Kompatible Systeme (amd64 und arm64, glibc %s oder neuer, systemd %s oder neuer):
+it|cp_list|Sistemi compatibili (amd64 e arm64, glibc %s o successiva, systemd %s o successivo):
+pt|cp_list|Sistemas compatíveis (amd64 e arm64, glibc %s ou posterior, systemd %s ou posterior):
+nl|cp_list|Compatibele systemen (amd64 en arm64, glibc %s of nieuwer, systemd %s of nieuwer):
+ru|cp_list|Совместимые системы (amd64 и arm64, glibc %s или новее, systemd %s или новее):
+zh|cp_list|兼容的系统（amd64 和 arm64，glibc %s 或更新，systemd %s 或更新）：
+ar|cp_list|الأنظمة المتوافقة (amd64 وarm64، glibc %s أو أحدث، systemd %s أو أحدث):
+en|cp_rolling|rolling
+fr|cp_rolling|en continu
+es|cp_rolling|rolling
+de|cp_rolling|Rolling
+it|cp_rolling|rolling
+pt|cp_rolling|rolling
+nl|cp_rolling|rolling
+ru|cp_rolling|rolling
+zh|cp_rolling|滚动发行
+ar|cp_rolling|تحديث مستمر
+en|cp_any|any version
+fr|cp_any|toute version
+es|cp_any|cualquier versión
+de|cp_any|jede Version
+it|cp_any|qualsiasi versione
+pt|cp_any|qualquer versão
+nl|cp_any|elke versie
+ru|cp_any|любая версия
+zh|cp_any|任意版本
+ar|cp_any|أي إصدار
+en|cp_override|To install anyway, at your own risk: --skip-os-check. Details: docs/install/platforms.md
+fr|cp_override|Pour installer quand même, à vos risques : --skip-os-check. Détails : docs/install/platforms.md
+es|cp_override|Para instalar de todos modos, bajo su responsabilidad: --skip-os-check. Detalles: docs/install/platforms.md
+de|cp_override|Trotzdem installieren, auf eigenes Risiko: --skip-os-check. Details: docs/install/platforms.md
+it|cp_override|Per installare comunque, a proprio rischio: --skip-os-check. Dettagli: docs/install/platforms.md
+pt|cp_override|Para instalar mesmo assim, por sua conta e risco: --skip-os-check. Detalhes: docs/install/platforms.md
+nl|cp_override|Toch installeren, op eigen risico: --skip-os-check. Details: docs/install/platforms.md
+ru|cp_override|Установить всё равно, на свой риск: --skip-os-check. Подробности: docs/install/platforms.md
+zh|cp_override|仍要安装（风险自负）：--skip-os-check。详情：docs/install/platforms.md
+ar|cp_override|للتثبيت رغم ذلك على مسؤوليتك: --skip-os-check. التفاصيل: docs/install/platforms.md
+en|cp_not_root|Not running as root: use sudo to install (the check itself does not need root).
+fr|cp_not_root|Pas exécuté en root : utilisez sudo pour installer (le contrôle lui-même n'en a pas besoin).
+es|cp_not_root|No se ejecuta como root: use sudo para instalar (la comprobación no lo necesita).
+de|cp_not_root|Nicht als root ausgeführt: zum Installieren sudo verwenden (die Prüfung selbst braucht kein root).
+it|cp_not_root|Non eseguito come root: usare sudo per installare (il controllo non lo richiede).
+pt|cp_not_root|Não executado como root: use sudo para instalar (a verificação não precisa).
+nl|cp_not_root|Niet als root uitgevoerd: gebruik sudo om te installeren (de controle zelf heeft geen root nodig).
+ru|cp_not_root|Запущено не от root: для установки используйте sudo (сама проверка root не требует).
+zh|cp_not_root|未以 root 运行：安装请使用 sudo（检查本身不需要 root）。
+ar|cp_not_root|لا يعمل كمستخدم root: استخدم sudo للتثبيت (الفحص نفسه لا يحتاج root).
+en|sum_compat|Compatibility
+fr|sum_compat|Compatibilité
+es|sum_compat|Compatibilidad
+de|sum_compat|Kompatibilität
+it|sum_compat|Compatibilità
+pt|sum_compat|Compatibilidade
+nl|sum_compat|Compatibiliteit
+ru|sum_compat|Совместимость
+zh|sum_compat|兼容性
+ar|sum_compat|التوافق
+en|sel_ok|SELinux %s: the services run in the unconfined_service_t domain with the right file labels (%s rule(s) and %s port label(s) added); labels verified.
+fr|sel_ok|SELinux %s : les services s'exécutent dans le domaine unconfined_service_t avec les bonnes étiquettes de fichiers (%s règle(s) et %s étiquette(s) de port ajoutée(s)) ; étiquettes vérifiées.
+es|sel_ok|SELinux %s: los servicios se ejecutan en el dominio unconfined_service_t con las etiquetas de archivo correctas (%s regla(s) y %s etiqueta(s) de puerto añadidas); etiquetas verificadas.
+de|sel_ok|SELinux %s: Die Dienste laufen in der Domäne unconfined_service_t mit den richtigen Datei-Labels (%s Regel(n) und %s Port-Label hinzugefügt); Labels geprüft.
+it|sel_ok|SELinux %s: i servizi girano nel dominio unconfined_service_t con le giuste etichette dei file (%s regola/e e %s etichetta/e di porta aggiunte); etichette verificate.
+pt|sel_ok|SELinux %s: os serviços correm no domínio unconfined_service_t com as etiquetas de ficheiro certas (%s regra(s) e %s etiqueta(s) de porta adicionadas); etiquetas verificadas.
+nl|sel_ok|SELinux %s: de diensten draaien in het domein unconfined_service_t met de juiste bestandslabels (%s regel(s) en %s poortlabel(s) toegevoegd); labels gecontroleerd.
+ru|sel_ok|SELinux %s: службы работают в домене unconfined_service_t с правильными метками файлов (добавлено правил: %s, меток портов: %s); метки проверены.
+zh|sel_ok|SELinux %s：服务运行在 unconfined_service_t 域，文件标签正确（新增 %s 条规则、%s 个端口标签）；标签已验证。
+ar|sel_ok|SELinux %s: تعمل الخدمات في النطاق unconfined_service_t بأوسمة الملفات الصحيحة (أُضيفت %s قاعدة و%s وسم منفذ)؛ تم التحقق من الأوسمة.
+en|sel_bad|SELinux %s: %s file(s) still carry a wrong label. As root: restorecon -RFv %s
+fr|sel_bad|SELinux %s : %s fichier(s) portent encore une mauvaise étiquette. En root : restorecon -RFv %s
+es|sel_bad|SELinux %s: %s archivo(s) aún llevan una etiqueta incorrecta. Como root: restorecon -RFv %s
+de|sel_bad|SELinux %s: %s Datei(en) tragen noch ein falsches Label. Als root: restorecon -RFv %s
+it|sel_bad|SELinux %s: %s file hanno ancora un'etichetta errata. Come root: restorecon -RFv %s
+pt|sel_bad|SELinux %s: %s ficheiro(s) ainda têm uma etiqueta errada. Como root: restorecon -RFv %s
+nl|sel_bad|SELinux %s: %s bestand(en) hebben nog een verkeerd label. Als root: restorecon -RFv %s
+ru|sel_bad|SELinux %s: у %s файл(ов) всё ещё неверная метка. От root: restorecon -RFv %s
+zh|sel_bad|SELinux %s：仍有 %s 个文件标签错误。以 root 执行：restorecon -RFv %s
+ar|sel_bad|SELinux %s: لا يزال %s ملفًا بوسم خاطئ. بصلاحيات root: restorecon -RFv %s
+en|sel_nosem|SELinux %s, but semanage is missing: file contexts and ports were not registered. Install policycoreutils-python-utils and run the installer again.
+fr|sel_nosem|SELinux %s, mais semanage est absent : contextes de fichiers et ports non enregistrés. Installez policycoreutils-python-utils et relancez l'installateur.
+es|sel_nosem|SELinux %s, pero falta semanage: no se registraron contextos de archivo ni puertos. Instale policycoreutils-python-utils y vuelva a ejecutar el instalador.
+de|sel_nosem|SELinux %s, aber semanage fehlt: Dateikontexte und Ports wurden nicht registriert. Installieren Sie policycoreutils-python-utils und starten Sie den Installer erneut.
+it|sel_nosem|SELinux %s, ma semanage manca: contesti dei file e porte non registrati. Installa policycoreutils-python-utils e rilancia l'installer.
+pt|sel_nosem|SELinux %s, mas falta o semanage: contextos de ficheiro e portas não registados. Instale policycoreutils-python-utils e execute o instalador de novo.
+nl|sel_nosem|SELinux %s, maar semanage ontbreekt: bestandscontexten en poorten zijn niet geregistreerd. Installeer policycoreutils-python-utils en voer het installatieprogramma opnieuw uit.
+ru|sel_nosem|SELinux %s, но semanage отсутствует: контексты файлов и порты не зарегистрированы. Установите policycoreutils-python-utils и запустите установщик снова.
+zh|sel_nosem|SELinux %s，但缺少 semanage：未登记文件上下文和端口。请安装 policycoreutils-python-utils 后重新运行安装程序。
+ar|sel_nosem|SELinux %s، لكن semanage غير موجود: لم تُسجَّل سياقات الملفات ولا المنافذ. ثبّت policycoreutils-python-utils وأعد تشغيل المثبّت.
+en|sel_skip|SELinux left untouched (--no-selinux). In enforcing mode the commands to run by hand are in docs/install/selinux.md.
+fr|sel_skip|SELinux laissé intact (--no-selinux). En mode enforcing, les commandes à lancer à la main figurent dans docs/install/selinux.md.
+es|sel_skip|SELinux sin tocar (--no-selinux). En modo enforcing, los comandos manuales están en docs/install/selinux.md.
+de|sel_skip|SELinux unverändert (--no-selinux). Im Modus enforcing stehen die manuellen Befehle in docs/install/selinux.md.
+it|sel_skip|SELinux lasciato intatto (--no-selinux). In modalità enforcing i comandi manuali sono in docs/install/selinux.md.
+pt|sel_skip|SELinux deixado intacto (--no-selinux). No modo enforcing, os comandos manuais estão em docs/install/selinux.md.
+nl|sel_skip|SELinux ongemoeid gelaten (--no-selinux). In enforcing-modus staan de handmatige commando's in docs/install/selinux.md.
+ru|sel_skip|SELinux не изменялся (--no-selinux). В режиме enforcing команды для ручного выполнения — в docs/install/selinux.md.
+zh|sel_skip|未改动 SELinux（--no-selinux）。在 enforcing 模式下，需手动执行的命令见 docs/install/selinux.md。
+ar|sel_skip|لم يُغيَّر SELinux (--no-selinux). في وضع enforcing توجد الأوامر اليدوية في docs/install/selinux.md.
+en|sel_removed|SELinux file contexts and port labels added by ToutWAF removed (the mode is untouched).
+fr|sel_removed|Contextes de fichiers et étiquettes de port SELinux ajoutés par ToutWAF supprimés (le mode n'est pas modifié).
+es|sel_removed|Contextos de archivo y etiquetas de puerto de SELinux añadidos por ToutWAF eliminados (el modo no se toca).
+de|sel_removed|Von ToutWAF hinzugefügte SELinux-Dateikontexte und Port-Labels entfernt (der Modus bleibt unverändert).
+it|sel_removed|Contesti dei file ed etichette di porta SELinux aggiunti da ToutWAF rimossi (la modalità non viene toccata).
+pt|sel_removed|Contextos de ficheiro e etiquetas de porta do SELinux adicionados pelo ToutWAF removidos (o modo não é alterado).
+nl|sel_removed|Door ToutWAF toegevoegde SELinux-bestandscontexten en poortlabels verwijderd (de modus blijft ongewijzigd).
+ru|sel_removed|Контексты файлов и метки портов SELinux, добавленные ToutWAF, удалены (режим не изменялся).
+zh|sel_removed|已移除 ToutWAF 添加的 SELinux 文件上下文和端口标签（模式未更改）。
+ar|sel_removed|أُزيلت سياقات ملفات SELinux وأوسمة المنافذ التي أضافها ToutWAF (لم يتغيّر الوضع).
+en|cp_prereq_arch|The package databases are not synchronised. Run 'pacman -Syu' first (a partial upgrade is not supported on Arch), then re-run the installer.
+fr|cp_prereq_arch|Les bases de paquets ne sont pas synchronisées. Lancez d'abord 'pacman -Syu' (une mise à jour partielle n'est pas prise en charge sur Arch), puis relancez l'installateur.
+es|cp_prereq_arch|Las bases de datos de paquetes no están sincronizadas. Ejecute primero 'pacman -Syu' (una actualización parcial no es compatible en Arch) y vuelva a ejecutar el instalador.
+de|cp_prereq_arch|Die Paketdatenbanken sind nicht synchronisiert. Führen Sie zuerst 'pacman -Syu' aus (ein Teil-Update wird unter Arch nicht unterstützt) und starten Sie den Installer erneut.
+it|cp_prereq_arch|I database dei pacchetti non sono sincronizzati. Eseguire prima 'pacman -Syu' (un aggiornamento parziale non è supportato su Arch), poi rilanciare l'installer.
+pt|cp_prereq_arch|As bases de dados de pacotes não estão sincronizadas. Execute primeiro 'pacman -Syu' (uma atualização parcial não é suportada no Arch) e volte a executar o instalador.
+nl|cp_prereq_arch|De pakketdatabases zijn niet gesynchroniseerd. Voer eerst 'pacman -Syu' uit (een gedeeltelijke update wordt op Arch niet ondersteund) en start het installatieprogramma opnieuw.
+ru|cp_prereq_arch|Базы пакетов не синхронизированы. Сначала выполните 'pacman -Syu' (частичное обновление в Arch не поддерживается), затем запустите установщик снова.
+zh|cp_prereq_arch|软件包数据库未同步。请先运行 'pacman -Syu'（Arch 不支持部分升级），然后重新运行安装程序。
+ar|cp_prereq_arch|قواعد بيانات الحزم غير متزامنة. شغّل 'pacman -Syu' أولا (التحديث الجزئي غير مدعوم في Arch) ثم أعد تشغيل المثبت.
+en|cp_wdetected|Detected: %s (build %s), arch %s
+fr|cp_wdetected|Détecté : %s (build %s), arch %s
+es|cp_wdetected|Detectado: %s (build %s), arq. %s
+de|cp_wdetected|Erkannt: %s (Build %s), Arch %s
+it|cp_wdetected|Rilevato: %s (build %s), arch %s
+pt|cp_wdetected|Detetado: %s (build %s), arq. %s
+nl|cp_wdetected|Gedetecteerd: %s (build %s), arch %s
+ru|cp_wdetected|Обнаружено: %s (сборка %s), арх. %s
+zh|cp_wdetected|检测到：%s（内部版本 %s），架构 %s
+ar|cp_wdetected|تم الكشف: %s (البنية %s)، المعمارية %s
+en|cp_wlist|Compatible Windows versions (amd64 and arm64; arm64 untested on real hardware):
+fr|cp_wlist|Versions de Windows compatibles (amd64 et arm64 ; arm64 non testé sur du matériel réel) :
+es|cp_wlist|Versiones de Windows compatibles (amd64 y arm64; arm64 sin probar en hardware real):
+de|cp_wlist|Kompatible Windows-Versionen (amd64 und arm64; arm64 nicht auf echter Hardware getestet):
+it|cp_wlist|Versioni di Windows compatibili (amd64 e arm64; arm64 non testato su hardware reale):
+pt|cp_wlist|Versões do Windows compatíveis (amd64 e arm64; arm64 não testado em hardware real):
+nl|cp_wlist|Compatibele Windows-versies (amd64 en arm64; arm64 niet getest op echte hardware):
+ru|cp_wlist|Совместимые версии Windows (amd64 и arm64; arm64 не проверялась на реальном оборудовании):
+zh|cp_wlist|兼容的 Windows 版本（amd64 和 arm64；arm64 未在真实硬件上测试）：
+ar|cp_wlist|إصدارات Windows المتوافقة (amd64 وarm64؛ arm64 لم يُختبر على أجهزة حقيقية):
+en|cp_r_arm32|32-bit ARM (armv7) is not supported by ToutWAF. Install a 64-bit OS (Raspberry Pi OS 64-bit, Ubuntu or Debian arm64; Raspberry Pi 3, 4, 5 or Zero 2 W), then run the installer again.
+fr|cp_r_arm32|L'ARM 32 bits (armv7) n'est pas pris en charge par ToutWAF. Installez un système 64 bits (Raspberry Pi OS 64 bits, Ubuntu ou Debian arm64 ; Raspberry Pi 3, 4, 5 ou Zero 2 W), puis relancez l'installateur.
+es|cp_r_arm32|ARM de 32 bits (armv7) no es compatible con ToutWAF. Instale un sistema de 64 bits (Raspberry Pi OS 64 bits, Ubuntu o Debian arm64; Raspberry Pi 3, 4, 5 o Zero 2 W) y vuelva a ejecutar el instalador.
+de|cp_r_arm32|32-Bit-ARM (armv7) wird von ToutWAF nicht unterstützt. Installieren Sie ein 64-Bit-System (Raspberry Pi OS 64 Bit, Ubuntu oder Debian arm64; Raspberry Pi 3, 4, 5 oder Zero 2 W) und starten Sie den Installer erneut.
+it|cp_r_arm32|ARM a 32 bit (armv7) non è supportato da ToutWAF. Installare un sistema a 64 bit (Raspberry Pi OS 64 bit, Ubuntu o Debian arm64; Raspberry Pi 3, 4, 5 o Zero 2 W) e rilanciare l'installer.
+pt|cp_r_arm32|ARM de 32 bits (armv7) não é suportado pelo ToutWAF. Instale um sistema de 64 bits (Raspberry Pi OS 64 bits, Ubuntu ou Debian arm64; Raspberry Pi 3, 4, 5 ou Zero 2 W) e execute o instalador novamente.
+nl|cp_r_arm32|32-bits ARM (armv7) wordt niet ondersteund door ToutWAF. Installeer een 64-bits besturingssysteem (Raspberry Pi OS 64-bit, Ubuntu of Debian arm64; Raspberry Pi 3, 4, 5 of Zero 2 W) en start het installatieprogramma opnieuw.
+ru|cp_r_arm32|32-разрядный ARM (armv7) не поддерживается ToutWAF. Установите 64-разрядную ОС (Raspberry Pi OS 64-bit, Ubuntu или Debian arm64; Raspberry Pi 3, 4, 5 или Zero 2 W) и запустите установщик снова.
+zh|cp_r_arm32|ToutWAF 不支持 32 位 ARM（armv7）。请安装 64 位系统（64 位 Raspberry Pi OS、Ubuntu 或 Debian arm64；Raspberry Pi 3、4、5 或 Zero 2 W），然后重新运行安装程序。
+ar|cp_r_arm32|ToutWAF لا يدعم ARM بنظام 32 بت (armv7). ثبّت نظاما بنظام 64 بت (Raspberry Pi OS 64 بت أو Ubuntu أو Debian arm64؛ Raspberry Pi 3 أو 4 أو 5 أو Zero 2 W) ثم أعد تشغيل المثبت.
+en|cp_r_arm_userland32|The kernel is 64-bit but the system (userland) is 32-bit. ToutWAF needs a 64-bit OS: reinstall with Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) or Ubuntu / Debian arm64.
+fr|cp_r_arm_userland32|Le noyau est 64 bits mais le système (userland) est en 32 bits. ToutWAF exige un système 64 bits : réinstallez avec Raspberry Pi OS 64 bits (Raspberry Pi Imager : Raspberry Pi OS (64-bit)) ou Ubuntu / Debian arm64.
+es|cp_r_arm_userland32|El kernel es de 64 bits pero el sistema (userland) es de 32 bits. ToutWAF necesita un sistema de 64 bits: reinstale con Raspberry Pi OS 64 bits (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) o Ubuntu / Debian arm64.
+de|cp_r_arm_userland32|Der Kernel ist 64-Bit, das System (Userland) aber 32-Bit. ToutWAF benötigt ein 64-Bit-System: Installieren Sie Raspberry Pi OS 64 Bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) oder Ubuntu / Debian arm64 neu.
+it|cp_r_arm_userland32|Il kernel è a 64 bit ma il sistema (userland) è a 32 bit. ToutWAF richiede un sistema a 64 bit: reinstallare con Raspberry Pi OS 64 bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) o Ubuntu / Debian arm64.
+pt|cp_r_arm_userland32|O kernel é de 64 bits mas o sistema (userland) é de 32 bits. O ToutWAF precisa de um sistema de 64 bits: reinstale com Raspberry Pi OS 64 bits (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) ou Ubuntu / Debian arm64.
+nl|cp_r_arm_userland32|De kernel is 64-bits maar het systeem (userland) is 32-bits. ToutWAF vereist een 64-bits besturingssysteem: installeer opnieuw met Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) of Ubuntu / Debian arm64.
+ru|cp_r_arm_userland32|Ядро 64-разрядное, но система (userland) 32-разрядная. ToutWAF нужна 64-разрядная ОС: переустановите с Raspberry Pi OS 64-bit (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) или Ubuntu / Debian arm64.
+zh|cp_r_arm_userland32|内核是 64 位，但系统（用户空间）是 32 位。ToutWAF 需要 64 位系统：请重新安装 64 位 Raspberry Pi OS（Raspberry Pi Imager：Raspberry Pi OS (64-bit)）或 Ubuntu / Debian arm64。
+ar|cp_r_arm_userland32|النواة 64 بت لكن النظام (userland) 32 بت. يحتاج ToutWAF إلى نظام 64 بت: أعد التثبيت باستخدام Raspberry Pi OS 64 بت (Raspberry Pi Imager: Raspberry Pi OS (64-bit)) أو Ubuntu / Debian arm64.
+en|cp_w_pi|Raspberry Pi detected: arm64 is only smoke-tested under emulation, not on real hardware. Put the data and logs on an SSD / USB drive rather than the SD card, and avoid the all-in-one install below 2 GB of RAM (see docs/install/raspberry-pi.md).
+fr|cp_w_pi|Raspberry Pi détecté : l'arm64 n'a été éprouvé que sous émulation, pas sur du matériel réel. Placez données et journaux sur un SSD / disque USB plutôt que sur la carte SD, et évitez l'installation tout-en-un sous 2 Go de RAM (voir docs/install/raspberry-pi.md).
+es|cp_w_pi|Raspberry Pi detectada: arm64 solo se ha probado bajo emulación, no en hardware real. Ponga datos y registros en un SSD / disco USB en lugar de la tarjeta SD y evite la instalación todo en uno con menos de 2 GB de RAM (vea docs/install/raspberry-pi.md).
+de|cp_w_pi|Raspberry Pi erkannt: arm64 wurde nur unter Emulation getestet, nicht auf echter Hardware. Legen Sie Daten und Logs auf eine SSD / ein USB-Laufwerk statt auf die SD-Karte und vermeiden Sie die All-in-one-Installation unter 2 GB RAM (siehe docs/install/raspberry-pi.md).
+it|cp_w_pi|Raspberry Pi rilevato: arm64 è stato provato solo in emulazione, non su hardware reale. Mettere dati e log su un SSD / disco USB invece che sulla scheda SD ed evitare l'installazione tutto-in-uno sotto 2 GB di RAM (vedere docs/install/raspberry-pi.md).
+pt|cp_w_pi|Raspberry Pi detetado: o arm64 só foi testado em emulação, não em hardware real. Coloque dados e registos num SSD / disco USB em vez do cartão SD e evite a instalação tudo-em-um com menos de 2 GB de RAM (ver docs/install/raspberry-pi.md).
+nl|cp_w_pi|Raspberry Pi gedetecteerd: arm64 is alleen onder emulatie getest, niet op echte hardware. Zet data en logs op een SSD / USB-schijf in plaats van op de SD-kaart en vermijd de alles-in-één-installatie onder 2 GB RAM (zie docs/install/raspberry-pi.md).
+ru|cp_w_pi|Обнаружен Raspberry Pi: arm64 проверялась только в эмуляции, не на реальном оборудовании. Храните данные и журналы на SSD / USB-диске, а не на SD-карте, и избегайте установки «всё в одном» при менее чем 2 ГБ ОЗУ (см. docs/install/raspberry-pi.md).
+zh|cp_w_pi|检测到 Raspberry Pi：arm64 仅在仿真下做过冒烟测试，未在真实硬件上测试。请把数据和日志放在 SSD / USB 盘而不是 SD 卡上，内存低于 2 GB 时避免一体化安装（见 docs/install/raspberry-pi.md）。
+ar|cp_w_pi|تم اكتشاف Raspberry Pi: لم تُختبر arm64 إلا تحت المحاكاة وليس على أجهزة حقيقية. ضع البيانات والسجلات على SSD / قرص USB بدلا من بطاقة SD وتجنب التثبيت الشامل بأقل من 2 جيجابايت من الذاكرة (راجع docs/install/raspberry-pi.md).
+en|pf_title|Checking what this machine needs
+fr|pf_title|Vérification de ce dont cette machine a besoin
+es|pf_title|Comprobando lo que necesita esta máquina
+de|pf_title|Prüfung dessen, was dieser Rechner braucht
+it|pf_title|Verifica di ciò di cui ha bisogno questa macchina
+pt|pf_title|A verificar o que esta máquina precisa
+nl|pf_title|Controle van wat deze machine nodig heeft
+ru|pf_title|Проверка того, что нужно этой машине
+zh|pf_title|正在检查这台机器的需求
+ar|pf_title|التحقق مما يحتاجه هذا الجهاز
+en|pf_ok|Nothing is in the way: the ports ToutWAF needs are free.
+fr|pf_ok|Rien ne gêne : les ports dont ToutWAF a besoin sont libres.
+es|pf_ok|Nada estorba: los puertos que necesita ToutWAF están libres.
+de|pf_ok|Nichts steht im Weg: Die Ports, die ToutWAF braucht, sind frei.
+it|pf_ok|Nulla è d'intralcio: le porte di cui ha bisogno ToutWAF sono libere.
+pt|pf_ok|Nada está no caminho: as portas de que o ToutWAF precisa estão livres.
+nl|pf_ok|Niets staat in de weg: de poorten die ToutWAF nodig heeft zijn vrij.
+ru|pf_ok|Ничто не мешает: порты, нужные ToutWAF, свободны.
+zh|pf_ok|没有任何阻碍：ToutWAF 需要的端口都是空闲的。
+ar|pf_ok|لا شيء يعيق: المنافذ التي يحتاجها ToutWAF حرة.
+en|pf_refused|ToutWAF cannot be installed on this machine as it is. Nothing was changed.
+fr|pf_refused|ToutWAF ne peut pas être installé sur cette machine en l'état. Rien n'a été modifié.
+es|pf_refused|ToutWAF no se puede instalar en esta máquina tal como está. No se ha cambiado nada.
+de|pf_refused|ToutWAF kann auf diesem Rechner so nicht installiert werden. Es wurde nichts geändert.
+it|pf_refused|ToutWAF non può essere installato su questa macchina così com'è. Non è stato modificato nulla.
+pt|pf_refused|O ToutWAF não pode ser instalado nesta máquina como está. Nada foi alterado.
+nl|pf_refused|ToutWAF kan niet op deze machine worden geïnstalleerd zoals ze nu is. Er is niets gewijzigd.
+ru|pf_refused|ToutWAF нельзя установить на эту машину в её нынешнем состоянии. Ничего не изменено.
+zh|pf_refused|ToutWAF 无法在这台机器的当前状态下安装。未做任何更改。
+ar|pf_refused|لا يمكن تثبيت ToutWAF على هذا الجهاز بحالته الحالية. لم يتغير شيء.
+en|pf_ok_warn|Nothing prevents the installation, but read the points above.
+fr|pf_ok_warn|Rien n'empêche l'installation, mais lisez les points ci-dessus.
+es|pf_ok_warn|Nada impide la instalación, pero lea los puntos anteriores.
+de|pf_ok_warn|Nichts verhindert die Installation, aber lesen Sie die Punkte oben.
+it|pf_ok_warn|Nulla impedisce l'installazione, ma leggi i punti qui sopra.
+pt|pf_ok_warn|Nada impede a instalação, mas leia os pontos acima.
+nl|pf_ok_warn|Niets verhindert de installatie, maar lees de punten hierboven.
+ru|pf_ok_warn|Установке ничто не мешает, но прочитайте пункты выше.
+zh|pf_ok_warn|没有什么会阻止安装，但请阅读上面的几点。
+ar|pf_ok_warn|لا شيء يمنع التثبيت، لكن اقرأ النقاط أعلاه.
+en|pf_l_refuse|refused
+fr|pf_l_refuse|refusé
+es|pf_l_refuse|rechazado
+de|pf_l_refuse|abgelehnt
+it|pf_l_refuse|rifiutato
+pt|pf_l_refuse|recusado
+nl|pf_l_refuse|geweigerd
+ru|pf_l_refuse|отказ
+zh|pf_l_refuse|拒绝
+ar|pf_l_refuse|مرفوض
+en|pf_l_warn|warning
+fr|pf_l_warn|attention
+es|pf_l_warn|atención
+de|pf_l_warn|Hinweis
+it|pf_l_warn|attenzione
+pt|pf_l_warn|atenção
+nl|pf_l_warn|let op
+ru|pf_l_warn|внимание
+zh|pf_l_warn|注意
+ar|pf_l_warn|تنبيه
+en|pf_l_info|note
+fr|pf_l_info|à savoir
+es|pf_l_info|nota
+de|pf_l_info|Info
+it|pf_l_info|nota
+pt|pf_l_info|nota
+nl|pf_l_info|opmerking
+ru|pf_l_info|заметка
+zh|pf_l_info|说明
+ar|pf_l_info|ملاحظة
+en|pf_port_busy|Port %s is already used by %s.
+fr|pf_port_busy|Le port %s est déjà utilisé par %s.
+es|pf_port_busy|El puerto %s ya lo usa %s.
+de|pf_port_busy|Port %s wird bereits von %s verwendet.
+it|pf_port_busy|La porta %s è già usata da %s.
+pt|pf_port_busy|A porta %s já é usada por %s.
+nl|pf_port_busy|Poort %s wordt al gebruikt door %s.
+ru|pf_port_busy|Порт %s уже занят: %s.
+zh|pf_port_busy|%s 端口已被 %s 占用。
+ar|pf_port_busy|المنفذ %s مستخدم بالفعل من %s.
+en|pf_prog_other|another program
+fr|pf_prog_other|un autre programme
+es|pf_prog_other|otro programa
+de|pf_prog_other|ein anderes Programm
+it|pf_prog_other|un altro programma
+pt|pf_prog_other|outro programa
+nl|pf_prog_other|een ander programma
+ru|pf_prog_other|другая программа
+zh|pf_prog_other|另一个程序
+ar|pf_prog_other|برنامج آخر
+en|pf_prog_unknown|another program (its name could not be read)
+fr|pf_prog_unknown|un autre programme (son nom n'a pas pu être lu)
+es|pf_prog_unknown|otro programa (no se pudo leer su nombre)
+de|pf_prog_unknown|ein anderes Programm (sein Name konnte nicht gelesen werden)
+it|pf_prog_unknown|un altro programma (il suo nome non è leggibile)
+pt|pf_prog_unknown|outro programa (não foi possível ler o nome)
+nl|pf_prog_unknown|een ander programma (de naam kon niet worden gelezen)
+ru|pf_prog_unknown|другая программа (её имя не удалось прочитать)
+zh|pf_prog_unknown|另一个程序（无法读取其名称）
+ar|pf_prog_unknown|برنامج آخر (تعذّرت قراءة اسمه)
+en|pf_act_web|ToutWAF needs ports %s and %s to protect your sites. Stop that program, or move it to other ports (ToutPanel, installed beside ToutWAF, places its web server on 8080 and 8443), then run the installer again.
+fr|pf_act_web|ToutWAF a besoin des ports %s et %s pour protéger vos sites. Arrêtez ce programme ou déplacez-le sur d'autres ports (ToutPanel, installé à côté de ToutWAF, place son serveur web sur 8080 et 8443), puis relancez l'installateur.
+es|pf_act_web|ToutWAF necesita los puertos %s y %s para proteger sus sitios. Detenga ese programa o muévalo a otros puertos (ToutPanel, instalado junto a ToutWAF, coloca su servidor web en 8080 y 8443) y vuelva a ejecutar el instalador.
+de|pf_act_web|ToutWAF braucht die Ports %s und %s, um Ihre Sites zu schützen. Beenden Sie dieses Programm oder verlegen Sie es auf andere Ports (ToutPanel, neben ToutWAF installiert, legt seinen Webserver auf 8080 und 8443) und starten Sie den Installer erneut.
+it|pf_act_web|ToutWAF ha bisogno delle porte %s e %s per proteggere i tuoi siti. Ferma quel programma o spostalo su altre porte (ToutPanel, installato accanto a ToutWAF, mette il suo server web su 8080 e 8443), poi rilancia l'installer.
+pt|pf_act_web|O ToutWAF precisa das portas %s e %s para proteger os seus sites. Pare esse programa ou mova-o para outras portas (o ToutPanel, instalado ao lado do ToutWAF, coloca o seu servidor web em 8080 e 8443) e volte a executar o instalador.
+nl|pf_act_web|ToutWAF heeft poort %s en %s nodig om uw sites te beschermen. Stop dat programma of verplaats het naar andere poorten (ToutPanel zet, naast ToutWAF geïnstalleerd, zijn webserver op 8080 en 8443) en start het installatieprogramma opnieuw.
+ru|pf_act_web|ToutWAF нужны порты %s и %s, чтобы защищать ваши сайты. Остановите эту программу или перенесите её на другие порты (ToutPanel, установленный рядом с ToutWAF, размещает свой веб-сервер на портах 8080 и 8443) и запустите установщик снова.
+zh|pf_act_web|ToutWAF 需要 %s 和 %s 端口来保护您的站点。请停止该程序，或将其移到其他端口（与 ToutWAF 安装在一起的 ToutPanel 会把它的 Web 服务器放在 8080 和 8443 端口），然后重新运行安装程序。
+ar|pf_act_web|يحتاج ToutWAF إلى المنفذين %s و%s لحماية مواقعك. أوقف هذا البرنامج أو انقله إلى منافذ أخرى (يضع ToutPanel المثبّت بجانب ToutWAF خادم الويب الخاص به على 8080 و8443) ثم أعد تشغيل المثبت.
+en|pf_act_console|The console of ToutWAF needs this port. Free it, or choose another console port (the installer asks for it in its menu), then run the installer again.
+fr|pf_act_console|La console de ToutWAF a besoin de ce port. Libérez-le, ou choisissez un autre port pour la console (l'installateur le demande dans son menu), puis relancez l'installateur.
+es|pf_act_console|La consola de ToutWAF necesita este puerto. Libérelo o elija otro puerto para la consola (el instalador lo pregunta en su menú) y vuelva a ejecutar el instalador.
+de|pf_act_console|Die Konsole von ToutWAF braucht diesen Port. Geben Sie ihn frei oder wählen Sie einen anderen Konsolen-Port (der Installer fragt in seinem Menü danach) und starten Sie den Installer erneut.
+it|pf_act_console|La console di ToutWAF ha bisogno di questa porta. Liberala oppure scegli un'altra porta per la console (l'installer la chiede nel suo menu), poi rilancia l'installer.
+pt|pf_act_console|A consola do ToutWAF precisa desta porta. Liberte-a ou escolha outra porta para a consola (o instalador pergunta no seu menu) e volte a executar o instalador.
+nl|pf_act_console|De console van ToutWAF heeft deze poort nodig. Maak de poort vrij of kies een andere consolepoort (het installatieprogramma vraagt ernaar in zijn menu) en start het installatieprogramma opnieuw.
+ru|pf_act_console|Этот порт нужен консоли ToutWAF. Освободите его или выберите другой порт консоли (установщик спрашивает об этом в своём меню) и запустите установщик снова.
+zh|pf_act_console|ToutWAF 的控制台需要使用此端口。请释放该端口，或为控制台选择其他端口（安装程序会在菜单中询问），然后重新运行安装程序。
+ar|pf_act_console|تحتاج لوحة تحكم ToutWAF إلى هذا المنفذ. حرّره أو اختر منفذًا آخر للوحة (يسأل المثبت عنه في قائمته) ثم أعد تشغيل المثبت.
+en|pf_act_agent|ToutWAF uses this port for the data planes and agents that connect to it. Free it, then run the installer again.
+fr|pf_act_agent|ToutWAF utilise ce port pour les plans de données et les agents qui s'y connectent. Libérez-le, puis relancez l'installateur.
+es|pf_act_agent|ToutWAF usa este puerto para los planos de datos y los agentes que se conectan a él. Libérelo y vuelva a ejecutar el instalador.
+de|pf_act_agent|ToutWAF nutzt diesen Port für die Data Planes und Agenten, die sich damit verbinden. Geben Sie ihn frei und starten Sie den Installer erneut.
+it|pf_act_agent|ToutWAF usa questa porta per i data plane e gli agenti che vi si collegano. Liberala, poi rilancia l'installer.
+pt|pf_act_agent|O ToutWAF usa esta porta para os planos de dados e os agentes que se ligam a ele. Liberte-a e volte a executar o instalador.
+nl|pf_act_agent|ToutWAF gebruikt deze poort voor de data planes en agents die er verbinding mee maken. Maak de poort vrij en start het installatieprogramma opnieuw.
+ru|pf_act_agent|ToutWAF использует этот порт для подключающихся к нему узлов обработки данных и агентов. Освободите его и запустите установщик снова.
+zh|pf_act_agent|ToutWAF 使用此端口接收连接它的数据平面和代理。请释放该端口，然后重新运行安装程序。
+ar|pf_act_agent|يستخدم ToutWAF هذا المنفذ لمستويات البيانات والوكلاء المتصلين به. حرّره ثم أعد تشغيل المثبت.
+en|pf_act_admin|The data plane uses this port on this machine only, for its own health check. Free it, then run the installer again.
+fr|pf_act_admin|Le plan de données utilise ce port sur cette machine seulement, pour son propre contrôle de santé. Libérez-le, puis relancez l'installateur.
+es|pf_act_admin|El plano de datos usa este puerto solo en esta máquina, para su propia comprobación de estado. Libérelo y vuelva a ejecutar el instalador.
+de|pf_act_admin|Die Data Plane nutzt diesen Port nur auf diesem Rechner, für ihre eigene Zustandsprüfung. Geben Sie ihn frei und starten Sie den Installer erneut.
+it|pf_act_admin|Il data plane usa questa porta solo su questa macchina, per il proprio controllo di stato. Liberala, poi rilancia l'installer.
+pt|pf_act_admin|O plano de dados usa esta porta apenas nesta máquina, para a sua própria verificação de estado. Liberte-a e volte a executar o instalador.
+nl|pf_act_admin|De data plane gebruikt deze poort alleen op deze machine, voor zijn eigen gezondheidscontrole. Maak de poort vrij en start het installatieprogramma opnieuw.
+ru|pf_act_admin|Узел обработки данных использует этот порт только на этой машине, для собственной проверки состояния. Освободите его и запустите установщик снова.
+zh|pf_act_admin|数据平面仅在这台机器上使用此端口，用于自身的健康检查。请释放该端口，然后重新运行安装程序。
+ar|pf_act_admin|يستخدم مستوى البيانات هذا المنفذ على هذا الجهاز فقط لفحص حالته. حرّره ثم أعد تشغيل المثبت.
+en|pf_nostart|(nothing is started now, so this is only reported)
+fr|pf_nostart|(rien n'est démarré maintenant, ce n'est donc que signalé)
+es|pf_nostart|(ahora no se inicia nada, así que solo se informa)
+de|pf_nostart|(es wird jetzt nichts gestartet, daher nur ein Hinweis)
+it|pf_nostart|(ora non viene avviato nulla, quindi è solo una segnalazione)
+pt|pf_nostart|(nada é iniciado agora, por isso é apenas assinalado)
+nl|pf_nostart|(er wordt nu niets gestart, dus dit wordt alleen gemeld)
+ru|pf_nostart|(сейчас ничего не запускается, поэтому это лишь сообщение)
+zh|pf_nostart|（现在不会启动任何服务，因此仅作提示）
+ar|pf_nostart|(لن يُشغَّل شيء الآن، لذلك يُكتفى بالتنبيه)
+en|pf_boot|%s is installed and starts with the machine, although it is stopped now. After the next restart it would take ports %s and %s before ToutWAF.
+fr|pf_boot|%s est installé et démarre avec la machine, bien qu'il soit arrêté en ce moment. Au prochain redémarrage il prendrait les ports %s et %s avant ToutWAF.
+es|pf_boot|%s está instalado y arranca con la máquina, aunque ahora esté detenido. En el próximo reinicio ocuparía los puertos %s y %s antes que ToutWAF.
+de|pf_boot|%s ist installiert und startet mit dem Rechner, obwohl es gerade gestoppt ist. Beim nächsten Neustart würde es die Ports %s und %s vor ToutWAF belegen.
+it|pf_boot|%s è installato e parte con la macchina, anche se ora è fermo. Al prossimo riavvio occuperebbe le porte %s e %s prima di ToutWAF.
+pt|pf_boot|%s está instalado e arranca com a máquina, embora esteja parado neste momento. No próximo reinício ocuparia as portas %s e %s antes do ToutWAF.
+nl|pf_boot|%s is geïnstalleerd en start met de machine, hoewel het nu gestopt is. Bij de volgende herstart zou het poort %s en %s bezetten vóór ToutWAF.
+ru|pf_boot|%s установлен и запускается вместе с машиной, хотя сейчас остановлен. После следующей перезагрузки он займёт порты %s и %s раньше ToutWAF.
+zh|pf_boot|%s 已安装并会随机器启动，尽管它现在已停止。下次重启后，它会抢在 ToutWAF 之前占用 %s 和 %s 端口。
+ar|pf_boot|%s مثبّت ويبدأ مع الجهاز رغم أنه متوقف الآن. عند إعادة التشغيل التالية سيحجز المنفذين %s و%s قبل ToutWAF.
+en|pf_act_boot|Disable it so that it does not start with the machine, or move it to other ports, before the machine restarts.
+fr|pf_act_boot|Désactivez-le pour qu'il ne démarre plus avec la machine, ou déplacez-le sur d'autres ports, avant le redémarrage de la machine.
+es|pf_act_boot|Desactívelo para que no arranque con la máquina, o muévalo a otros puertos, antes de reiniciar la máquina.
+de|pf_act_boot|Deaktivieren Sie den Autostart oder verlegen Sie es auf andere Ports, bevor der Rechner neu startet.
+it|pf_act_boot|Disattivalo perché non parta con la macchina, oppure spostalo su altre porte, prima del riavvio della macchina.
+pt|pf_act_boot|Desative-o para que não arranque com a máquina, ou mova-o para outras portas, antes de reiniciar a máquina.
+nl|pf_act_boot|Schakel het uit zodat het niet met de machine start, of verplaats het naar andere poorten, vóór de machine opnieuw start.
+ru|pf_act_boot|Отключите его автозапуск или перенесите на другие порты до перезагрузки машины.
+zh|pf_act_boot|请在机器重启前禁用它的开机启动，或将其移到其他端口。
+ar|pf_act_boot|عطّل تشغيله مع الجهاز أو انقله إلى منافذ أخرى قبل إعادة تشغيل الجهاز.
+en|pf_fw_cause|A firewall (%s) is active and does not let ports %s and %s through, and the installer was told not to change it.
+fr|pf_fw_cause|Un pare-feu (%s) est actif et ne laisse pas passer les ports %s et %s, et l'installateur a reçu l'ordre de ne pas le modifier.
+es|pf_fw_cause|Hay un cortafuegos (%s) activo que no deja pasar los puertos %s y %s, y se ha indicado al instalador que no lo modifique.
+de|pf_fw_cause|Eine Firewall (%s) ist aktiv und lässt die Ports %s und %s nicht durch, und der Installer soll sie nicht ändern.
+it|pf_fw_cause|Un firewall (%s) è attivo e non lascia passare le porte %s e %s, e all'installer è stato detto di non modificarlo.
+pt|pf_fw_cause|Uma firewall (%s) está ativa e não deixa passar as portas %s e %s, e o instalador foi instruído a não a alterar.
+nl|pf_fw_cause|Een firewall (%s) is actief en laat poort %s en %s niet door, en het installatieprogramma mag hem niet wijzigen.
+ru|pf_fw_cause|Активен межсетевой экран (%s), он не пропускает порты %s и %s, а установщику велено его не менять.
+zh|pf_fw_cause|防火墙（%s）处于启用状态且不放行 %s 和 %s 端口，而安装程序被要求不要修改它。
+ar|pf_fw_cause|جدار حماية (%s) نشط ولا يسمح بمرور المنفذين %s و%s، وقد طُلب من المثبت ألا يغيّره.
+en|pf_fw_action|Open these ports in the firewall, or let the installer do it (do not use --no-firewall). Without that, your sites cannot be reached from outside.
+fr|pf_fw_action|Ouvrez ces ports dans le pare-feu, ou laissez l'installateur le faire (sans l'option --no-firewall). Sinon, vos sites ne seront pas joignables de l'extérieur.
+es|pf_fw_action|Abra esos puertos en el cortafuegos o deje que lo haga el instalador (sin la opción --no-firewall). Si no, sus sitios no serán accesibles desde el exterior.
+de|pf_fw_action|Öffnen Sie diese Ports in der Firewall oder lassen Sie den Installer es tun (ohne die Option --no-firewall). Sonst sind Ihre Sites von außen nicht erreichbar.
+it|pf_fw_action|Apri queste porte nel firewall oppure lascia che lo faccia l'installer (senza l'opzione --no-firewall). Altrimenti i tuoi siti non saranno raggiungibili dall'esterno.
+pt|pf_fw_action|Abra essas portas na firewall ou deixe o instalador fazê-lo (sem a opção --no-firewall). Caso contrário, os seus sites não serão acessíveis do exterior.
+nl|pf_fw_action|Open deze poorten in de firewall of laat het installatieprogramma het doen (zonder de optie --no-firewall). Anders zijn uw sites van buitenaf niet bereikbaar.
+ru|pf_fw_action|Откройте эти порты в межсетевом экране или позвольте это сделать установщику (без параметра --no-firewall). Иначе ваши сайты будут недоступны снаружи.
+zh|pf_fw_action|请在防火墙中开放这些端口，或让安装程序来做（不要使用 --no-firewall 选项）。否则外部无法访问您的站点。
+ar|pf_fw_action|افتح هذين المنفذين في جدار الحماية أو دع المثبت يفعل ذلك (بدون الخيار --no-firewall). وإلا فلن تكون مواقعك قابلة للوصول من الخارج.
+en|pf_fwx_cause|The firewall of this machine (%s) refuses incoming connections by default and has no rule for ports %s and %s.
+fr|pf_fwx_cause|Le pare-feu de cette machine (%s) refuse les connexions entrantes par défaut et n'a aucune règle pour les ports %s et %s.
+es|pf_fwx_cause|El cortafuegos de esta máquina (%s) rechaza las conexiones entrantes por defecto y no tiene ninguna regla para los puertos %s y %s.
+de|pf_fwx_cause|Die Firewall dieses Rechners (%s) lehnt eingehende Verbindungen standardmäßig ab und hat keine Regel für die Ports %s und %s.
+it|pf_fwx_cause|Il firewall di questa macchina (%s) rifiuta le connessioni in ingresso per impostazione predefinita e non ha regole per le porte %s e %s.
+pt|pf_fwx_cause|A firewall desta máquina (%s) recusa por defeito as ligações de entrada e não tem nenhuma regra para as portas %s e %s.
+nl|pf_fwx_cause|De firewall van deze machine (%s) weigert inkomende verbindingen standaard en heeft geen regel voor poort %s en %s.
+ru|pf_fwx_cause|Межсетевой экран этой машины (%s) по умолчанию отклоняет входящие соединения и не имеет правил для портов %s и %s.
+zh|pf_fwx_cause|这台机器的防火墙（%s）默认拒绝入站连接，且没有针对 %s 和 %s 端口的规则。
+ar|pf_fwx_cause|جدار حماية هذا الجهاز (%s) يرفض الاتصالات الواردة افتراضيًا وليس فيه قاعدة للمنفذين %s و%s.
+en|pf_fwx_action|ToutWAF never changes the rules of this kind of firewall itself: open these ports in its configuration, then check your sites.
+fr|pf_fwx_action|ToutWAF ne modifie jamais lui-même les règles de ce type de pare-feu : ouvrez ces ports dans sa configuration, puis vérifiez vos sites.
+es|pf_fwx_action|ToutWAF nunca modifica por sí mismo las reglas de este tipo de cortafuegos: abra esos puertos en su configuración y compruebe sus sitios.
+de|pf_fwx_action|ToutWAF ändert die Regeln dieser Art von Firewall nie selbst: Öffnen Sie diese Ports in deren Konfiguration und prüfen Sie dann Ihre Sites.
+it|pf_fwx_action|ToutWAF non modifica mai da solo le regole di questo tipo di firewall: apri queste porte nella sua configurazione, poi controlla i tuoi siti.
+pt|pf_fwx_action|O ToutWAF nunca altera por si as regras deste tipo de firewall: abra essas portas na sua configuração e verifique os seus sites.
+nl|pf_fwx_action|ToutWAF wijzigt de regels van dit soort firewall nooit zelf: open deze poorten in de configuratie ervan en controleer daarna uw sites.
+ru|pf_fwx_action|ToutWAF никогда сам не меняет правила такого межсетевого экрана: откройте эти порты в его настройках, затем проверьте свои сайты.
+zh|pf_fwx_action|ToutWAF 绝不会自行修改这类防火墙的规则：请在其配置中开放这些端口，然后检查您的站点。
+ar|pf_fwx_action|لا يعدّل ToutWAF بنفسه أبدًا قواعد هذا النوع من جدران الحماية: افتح هذين المنفذين في إعداداته ثم تحقق من مواقعك.
+en|pf_cp_cause|The control plane %s cannot be reached from this machine.
+fr|pf_cp_cause|Le plan de contrôle %s est injoignable depuis cette machine.
+es|pf_cp_cause|No se puede alcanzar el plano de control %s desde esta máquina.
+de|pf_cp_cause|Die Control Plane %s ist von diesem Rechner aus nicht erreichbar.
+it|pf_cp_cause|Il control plane %s non è raggiungibile da questa macchina.
+pt|pf_cp_cause|O plano de controlo %s não é acessível a partir desta máquina.
+nl|pf_cp_cause|De control plane %s is vanaf deze machine niet bereikbaar.
+ru|pf_cp_cause|Управляющий узел %s недоступен с этой машины.
+zh|pf_cp_cause|无法从这台机器访问控制平面 %s。
+ar|pf_cp_cause|تعذّر الوصول إلى مستوى التحكم %s من هذا الجهاز.
+en|pf_cp_action|Check the address, that the control plane is running, and that its firewall lets this machine reach it (port 9444 by default), then run the installer again.
+fr|pf_cp_action|Vérifiez l'adresse, que le plan de contrôle fonctionne et que son pare-feu laisse cette machine l'atteindre (port 9444 par défaut), puis relancez l'installateur.
+es|pf_cp_action|Compruebe la dirección, que el plano de control funciona y que su cortafuegos deja que esta máquina lo alcance (puerto 9444 por defecto) y vuelva a ejecutar el instalador.
+de|pf_cp_action|Prüfen Sie die Adresse, ob die Control Plane läuft und ob deren Firewall diesen Rechner durchlässt (standardmäßig Port 9444), und starten Sie den Installer erneut.
+it|pf_cp_action|Verifica l'indirizzo, che il control plane sia in funzione e che il suo firewall lasci raggiungerlo da questa macchina (porta 9444 per impostazione predefinita), poi rilancia l'installer.
+pt|pf_cp_action|Verifique o endereço, se o plano de controlo está a funcionar e se a sua firewall deixa esta máquina chegar a ele (porta 9444 por defeito) e volte a executar o instalador.
+nl|pf_cp_action|Controleer het adres, of de control plane draait en of zijn firewall deze machine toelaat (standaard poort 9444) en start het installatieprogramma opnieuw.
+ru|pf_cp_action|Проверьте адрес, работает ли управляющий узел и пропускает ли его межсетевой экран эту машину (по умолчанию порт 9444), и запустите установщик снова.
+zh|pf_cp_action|请检查地址、控制平面是否在运行，以及其防火墙是否允许这台机器访问它（默认 9444 端口），然后重新运行安装程序。
+ar|pf_cp_action|تحقق من العنوان ومن أن مستوى التحكم يعمل وأن جدار الحماية فيه يسمح لهذا الجهاز بالوصول إليه (المنفذ 9444 افتراضيًا) ثم أعد تشغيل المثبت.
+en|pf_router_cause|This machine has a private address (%s): it is probably behind a router or a box.
+fr|pf_router_cause|Cette machine a une adresse privée (%s) : elle est probablement derrière un routeur ou une box.
+es|pf_router_cause|Esta máquina tiene una dirección privada (%s): probablemente está detrás de un router.
+de|pf_router_cause|Dieser Rechner hat eine private Adresse (%s): Er steht wahrscheinlich hinter einem Router.
+it|pf_router_cause|Questa macchina ha un indirizzo privato (%s): probabilmente è dietro un router.
+pt|pf_router_cause|Esta máquina tem um endereço privado (%s): provavelmente está atrás de um router.
+nl|pf_router_cause|Deze machine heeft een privéadres (%s): ze staat waarschijnlijk achter een router.
+ru|pf_router_cause|У этой машины частный адрес (%s): скорее всего, она находится за маршрутизатором.
+zh|pf_router_cause|这台机器使用专用地址（%s）：它很可能位于路由器之后。
+ar|pf_router_cause|لهذا الجهاز عنوان خاص (%s): من المرجح أنه خلف راوتر.
+en|pf_router_action|Once installed, ToutWAF shows which ports to forward to this machine and gives the files for the usual routers. There is nothing to prepare now.
+fr|pf_router_action|Une fois installé, ToutWAF indique les ports à rediriger vers cette machine et fournit les fichiers pour les routeurs usuels. Il n'y a rien à préparer maintenant.
+es|pf_router_action|Una vez instalado, ToutWAF indica qué puertos redirigir a esta máquina y proporciona los archivos para los routers habituales. No hay nada que preparar ahora.
+de|pf_router_action|Nach der Installation zeigt ToutWAF, welche Ports an diesen Rechner weitergeleitet werden müssen, und liefert die Dateien für gängige Router. Jetzt ist nichts vorzubereiten.
+it|pf_router_action|Una volta installato, ToutWAF indica quali porte inoltrare a questa macchina e fornisce i file per i router più comuni. Non c'è nulla da preparare ora.
+pt|pf_router_action|Depois de instalado, o ToutWAF indica que portas reencaminhar para esta máquina e fornece os ficheiros para os routers habituais. Não há nada a preparar agora.
+nl|pf_router_action|Na de installatie toont ToutWAF welke poorten naar deze machine doorgestuurd moeten worden en geeft het de bestanden voor de gangbare routers. Nu hoeft u niets voor te bereiden.
+ru|pf_router_action|После установки ToutWAF покажет, какие порты нужно пробросить на эту машину, и даст файлы для распространённых маршрутизаторов. Сейчас ничего готовить не нужно.
+zh|pf_router_action|安装后，ToutWAF 会显示需要转发到这台机器的端口，并提供常见路由器的配置文件。现在无需准备任何东西。
+ar|pf_router_action|بعد التثبيت سيعرض ToutWAF المنافذ التي يجب توجيهها إلى هذا الجهاز ويقدّم ملفات للراوترات الشائعة. لا شيء يلزم تحضيره الآن.
+en|pf_skipped|The environment check was skipped as you asked: what is in the way will make the installation or the start fail later.
+fr|pf_skipped|La vérification de l'environnement a été sautée à votre demande : ce qui gêne fera échouer l'installation ou le démarrage plus tard.
+es|pf_skipped|Se omitió la comprobación del entorno como pidió: lo que estorbe hará fallar la instalación o el arranque más adelante.
+de|pf_skipped|Die Umgebungsprüfung wurde auf Ihren Wunsch übersprungen: Was im Weg steht, lässt die Installation oder den Start später scheitern.
+it|pf_skipped|La verifica dell'ambiente è stata saltata come richiesto: ciò che è d'intralcio farà fallire più tardi l'installazione o l'avvio.
+pt|pf_skipped|A verificação do ambiente foi ignorada a seu pedido: o que estiver no caminho fará falhar mais tarde a instalação ou o arranque.
+nl|pf_skipped|De controle van de omgeving is op uw verzoek overgeslagen: wat in de weg staat laat de installatie of de start later mislukken.
+ru|pf_skipped|Проверка окружения пропущена по вашей просьбе: то, что мешает, приведёт к сбою установки или запуска позже.
+zh|pf_skipped|已按您的要求跳过环境检查：存在的阻碍将导致之后的安装或启动失败。
+ar|pf_skipped|تم تخطي فحص البيئة بناءً على طلبك: ما يعيق سيؤدي إلى فشل التثبيت أو التشغيل لاحقًا.
+en|s_sysupdate|Updating the system packages (this can take several minutes)
+fr|s_sysupdate|Mise à jour des paquets système (cela peut prendre plusieurs minutes)
+es|s_sysupdate|Actualizando los paquetes del sistema (puede tardar varios minutos)
+de|s_sysupdate|Systempakete werden aktualisiert (das kann einige Minuten dauern)
+it|s_sysupdate|Aggiornamento dei pacchetti di sistema (può richiedere qualche minuto)
+pt|s_sysupdate|A atualizar os pacotes do sistema (pode demorar alguns minutos)
+nl|s_sysupdate|Systeempakketten worden bijgewerkt (dit kan enkele minuten duren)
+ru|s_sysupdate|Обновление системных пакетов (это может занять несколько минут)
+zh|s_sysupdate|正在更新系统软件包（可能需要几分钟）
+ar|s_sysupdate|جارٍ تحديث حزم النظام (قد يستغرق ذلك عدة دقائق)
+en|su_skipped|The system packages are not updated first (TOUTWAF_SKIP_SYSUPDATE).
+fr|su_skipped|Les paquets système ne sont pas mis à jour au préalable (TOUTWAF_SKIP_SYSUPDATE).
+es|su_skipped|Los paquetes del sistema no se actualizan antes (TOUTWAF_SKIP_SYSUPDATE).
+de|su_skipped|Die Systempakete werden nicht vorher aktualisiert (TOUTWAF_SKIP_SYSUPDATE).
+it|su_skipped|I pacchetti di sistema non vengono aggiornati prima (TOUTWAF_SKIP_SYSUPDATE).
+pt|su_skipped|Os pacotes do sistema não são atualizados antes (TOUTWAF_SKIP_SYSUPDATE).
+nl|su_skipped|De systeempakketten worden niet eerst bijgewerkt (TOUTWAF_SKIP_SYSUPDATE).
+ru|su_skipped|Системные пакеты предварительно не обновляются (TOUTWAF_SKIP_SYSUPDATE).
+zh|su_skipped|不会先更新系统软件包（TOUTWAF_SKIP_SYSUPDATE）。
+ar|su_skipped|لن يتم تحديث حزم النظام أولاً (TOUTWAF_SKIP_SYSUPDATE).
+en|su_recent|The system packages were updated less than 6 hours ago: not repeated.
+fr|su_recent|Les paquets système ont été mis à jour il y a moins de 6 heures : pas de nouvelle mise à jour.
+es|su_recent|Los paquetes del sistema se actualizaron hace menos de 6 horas: no se repite.
+de|su_recent|Die Systempakete wurden vor weniger als 6 Stunden aktualisiert: keine Wiederholung.
+it|su_recent|I pacchetti di sistema sono stati aggiornati meno di 6 ore fa: non si ripete.
+pt|su_recent|Os pacotes do sistema foram atualizados há menos de 6 horas: não se repete.
+nl|su_recent|De systeempakketten zijn minder dan 6 uur geleden bijgewerkt: niet herhaald.
+ru|su_recent|Системные пакеты обновлялись менее 6 часов назад: повторно не обновляются.
+zh|su_recent|系统软件包在 6 小时内已更新过，不再重复。
+ar|su_recent|تم تحديث حزم النظام قبل أقل من 6 ساعات: لن يُكرَّر التحديث.
+en|su_dry|the system packages would be updated first (skip it with TOUTWAF_SKIP_SYSUPDATE=1)
+fr|su_dry|les paquets système seraient d'abord mis à jour (à éviter avec TOUTWAF_SKIP_SYSUPDATE=1)
+es|su_dry|los paquetes del sistema se actualizarían primero (se omite con TOUTWAF_SKIP_SYSUPDATE=1)
+de|su_dry|die Systempakete würden zuerst aktualisiert (überspringen mit TOUTWAF_SKIP_SYSUPDATE=1)
+it|su_dry|i pacchetti di sistema verrebbero aggiornati per primi (si salta con TOUTWAF_SKIP_SYSUPDATE=1)
+pt|su_dry|os pacotes do sistema seriam atualizados primeiro (para saltar: TOUTWAF_SKIP_SYSUPDATE=1)
+nl|su_dry|de systeempakketten zouden eerst worden bijgewerkt (overslaan met TOUTWAF_SKIP_SYSUPDATE=1)
+ru|su_dry|сначала были бы обновлены системные пакеты (пропустить: TOUTWAF_SKIP_SYSUPDATE=1)
+zh|su_dry|将先更新系统软件包（使用 TOUTWAF_SKIP_SYSUPDATE=1 可跳过）
+ar|su_dry|سيتم تحديث حزم النظام أولاً (لتخطي ذلك: TOUTWAF_SKIP_SYSUPDATE=1)
+en|su_nopm|No supported package manager to update the system packages: skipped, the installation goes on.
+fr|su_nopm|Aucun gestionnaire de paquets pris en charge pour mettre le système à jour : étape ignorée, l'installation continue.
+es|su_nopm|No hay un gestor de paquetes compatible para actualizar el sistema: se omite y la instalación continúa.
+de|su_nopm|Kein unterstützter Paketmanager für die Systemaktualisierung: übersprungen, die Installation läuft weiter.
+it|su_nopm|Nessun gestore di pacchetti supportato per aggiornare il sistema: saltato, l'installazione continua.
+pt|su_nopm|Nenhum gestor de pacotes suportado para atualizar o sistema: ignorado, a instalação continua.
+nl|su_nopm|Geen ondersteunde pakketbeheerder om het systeem bij te werken: overgeslagen, de installatie gaat door.
+ru|su_nopm|Нет поддерживаемого менеджера пакетов для обновления системы: шаг пропущен, установка продолжается.
+zh|su_nopm|没有受支持的包管理器可用于更新系统：已跳过，安装继续。
+ar|su_nopm|لا يوجد مدير حزم مدعوم لتحديث النظام: تم التخطي وتستمر عملية التثبيت.
+en|su_failed|The update of the system packages failed (exit %s); the installation goes on without it. Details: %s. Fix: run the update yourself and read its error (broken repository? another package manager running?), or run this command again with TOUTWAF_SKIP_SYSUPDATE=1.
+fr|su_failed|La mise à jour des paquets système a échoué (code %s) ; l'installation continue sans elle. Détails : %s. Correction : lancez la mise à jour vous-même et lisez son erreur (dépôt cassé ? un autre gestionnaire de paquets en cours ?), ou relancez cette commande avec TOUTWAF_SKIP_SYSUPDATE=1.
+es|su_failed|La actualización de los paquetes del sistema ha fallado (código %s); la instalación continúa sin ella. Detalles: %s. Solución: ejecute usted mismo la actualización y lea su error (¿repositorio roto? ¿otro gestor de paquetes en ejecución?), o vuelva a ejecutar este comando con TOUTWAF_SKIP_SYSUPDATE=1.
+de|su_failed|Die Aktualisierung der Systempakete ist fehlgeschlagen (Code %s); die Installation läuft ohne sie weiter. Details: %s. Abhilfe: Führen Sie die Aktualisierung selbst aus und lesen Sie die Fehlermeldung (defektes Repository? läuft ein anderer Paketmanager?), oder starten Sie diesen Befehl erneut mit TOUTWAF_SKIP_SYSUPDATE=1.
+it|su_failed|L'aggiornamento dei pacchetti di sistema non è riuscito (codice %s); l'installazione continua senza. Dettagli: %s. Soluzione: esegui tu l'aggiornamento e leggi l'errore (repository guasto? un altro gestore di pacchetti in esecuzione?), oppure rilancia questo comando con TOUTWAF_SKIP_SYSUPDATE=1.
+pt|su_failed|A atualização dos pacotes do sistema falhou (código %s); a instalação continua sem ela. Detalhes: %s. Solução: execute a atualização e leia o erro (repositório danificado? outro gestor de pacotes em execução?), ou volte a executar este comando com TOUTWAF_SKIP_SYSUPDATE=1.
+nl|su_failed|Het bijwerken van de systeempakketten is mislukt (code %s); de installatie gaat zonder verder. Details: %s. Oplossing: voer de update zelf uit en lees de foutmelding (kapotte repository? draait er een andere pakketbeheerder?), of voer dit commando opnieuw uit met TOUTWAF_SKIP_SYSUPDATE=1.
+ru|su_failed|Не удалось обновить системные пакеты (код %s); установка продолжается без этого. Подробности: %s. Что делать: запустите обновление вручную и прочитайте ошибку (повреждён репозиторий? работает другой менеджер пакетов?) либо повторите эту команду с TOUTWAF_SKIP_SYSUPDATE=1.
+zh|su_failed|系统软件包更新失败（退出码 %s）；安装将在不更新的情况下继续。详情：%s。处理方法：请自行运行更新并查看错误（软件源损坏？另一个包管理器正在运行？），或加上 TOUTWAF_SKIP_SYSUPDATE=1 重新运行此命令。
+ar|su_failed|فشل تحديث حزم النظام (الرمز %s)؛ ستستمر عملية التثبيت بدونه. التفاصيل: %s. الحل: شغّل التحديث بنفسك واقرأ رسالة الخطأ (مستودع معطّل؟ مدير حزم آخر قيد التشغيل؟) أو أعد تشغيل هذا الأمر مع TOUTWAF_SKIP_SYSUPDATE=1.
+en|su_reboot|A restart of this server is needed to finish the system update (new kernel or libraries). ToutWAF never restarts it for you: do it when you can.
+fr|su_reboot|Un redémarrage de ce serveur est nécessaire pour terminer la mise à jour du système (nouveau noyau ou nouvelles bibliothèques). ToutWAF ne le redémarre jamais à votre place : faites-le dès que possible.
+es|su_reboot|Hace falta reiniciar este servidor para terminar la actualización del sistema (nuevo kernel o bibliotecas). ToutWAF nunca lo reinicia por usted: hágalo cuando pueda.
+de|su_reboot|Zum Abschluss der Systemaktualisierung ist ein Neustart dieses Servers nötig (neuer Kernel oder neue Bibliotheken). ToutWAF startet ihn nie für Sie neu: Tun Sie es, wenn es passt.
+it|su_reboot|Serve riavviare questo server per completare l'aggiornamento del sistema (nuovo kernel o librerie). ToutWAF non lo riavvia mai al posto tuo: fallo quando puoi.
+pt|su_reboot|É preciso reiniciar este servidor para concluir a atualização do sistema (novo kernel ou bibliotecas). O ToutWAF nunca o reinicia por si: faça-o quando puder.
+nl|su_reboot|Een herstart van deze server is nodig om de systeemupdate af te ronden (nieuwe kernel of bibliotheken). ToutWAF herstart hem nooit voor u: doe het wanneer het kan.
+ru|su_reboot|Для завершения обновления системы нужно перезагрузить этот сервер (новое ядро или библиотеки). ToutWAF никогда не перезагружает его за вас: сделайте это, когда сможете.
+zh|su_reboot|需要重启此服务器才能完成系统更新（新内核或库）。ToutWAF 绝不会替您重启：请在方便时自行重启。
+ar|su_reboot|يلزم إعادة تشغيل هذا الخادم لإكمال تحديث النظام (نواة أو مكتبات جديدة). لا يعيد ToutWAF تشغيله نيابةً عنك أبداً: افعل ذلك عندما تستطيع.
+en|su_beat|… system update still running after %s (last step: %s)
+fr|su_beat|… mise à jour en cours depuis %s (dernière étape : %s)
+es|su_beat|… actualización en curso desde hace %s (último paso: %s)
+de|su_beat|… Aktualisierung läuft seit %s (letzter Schritt: %s)
+it|su_beat|… aggiornamento in corso da %s (ultimo passaggio: %s)
+pt|su_beat|… atualização em curso há %s (último passo: %s)
+nl|su_beat|… update loopt al %s (laatste stap: %s)
+ru|su_beat|… обновление идёт уже %s (последний шаг: %s)
+zh|su_beat|… 更新仍在进行（已 %s，最后一步：%s）
+ar|su_beat|… التحديث جارٍ منذ %s (آخر خطوة: %s)
+en|su_done|System packages: update finished in %s, %s package(s) installed or updated.
+fr|su_done|Paquets système : mise à jour terminée en %s, %s paquet(s) installé(s) ou mis à jour.
+es|su_done|Paquetes del sistema: actualización terminada en %s, %s paquete(s) instalado(s) o actualizado(s).
+de|su_done|Systempakete: Aktualisierung in %s abgeschlossen, %s Paket(e) installiert oder aktualisiert.
+it|su_done|Pacchetti di sistema: aggiornamento completato in %s, %s pacchetto/i installato/i o aggiornato/i.
+pt|su_done|Pacotes do sistema: atualização concluída em %s, %s pacote(s) instalado(s) ou atualizado(s).
+nl|su_done|Systeempakketten: update voltooid in %s, %s pakket(ten) geïnstalleerd of bijgewerkt.
+ru|su_done|Системные пакеты: обновление завершено за %s, установлено или обновлено пакетов: %s.
+zh|su_done|系统软件包：更新在 %s 内完成，共安装或更新 %s 个软件包。
+ar|su_done|حزم النظام: اكتمل التحديث خلال %s، عدد الحزم المثبتة أو المحدّثة: %s.
+en|diag_head|%s did not become healthy: what the system says (secrets are hidden)
+fr|diag_head|%s n'est pas devenu sain : ce que dit le système (les secrets sont masqués)
+es|diag_head|%s no llegó a estar sano: lo que dice el sistema (los secretos se ocultan)
+de|diag_head|%s wurde nicht gesund: was das System sagt (Geheimnisse sind ausgeblendet)
+it|diag_head|%s non è diventato sano: cosa dice il sistema (i segreti sono nascosti)
+pt|diag_head|%s não ficou saudável: o que o sistema diz (os segredos estão ocultos)
+nl|diag_head|%s werd niet gezond: wat het systeem zegt (geheimen zijn verborgen)
+ru|diag_head|%s не перешёл в рабочее состояние: что сообщает система (секреты скрыты)
+zh|diag_head|%s 未能恢复正常：系统给出的信息（密钥已隐藏）
+ar|diag_head|%s لم يصبح سليماً: ما يقوله النظام (الأسرار مخفية)
+en|diag_hint|Send this part of the log to the support, or the output of: journalctl -xeu %s --no-pager -n 50
+fr|diag_hint|Transmettez cette partie du journal au support, ou la sortie de : journalctl -xeu %s --no-pager -n 50
+es|diag_hint|Envíe esta parte del registro al soporte, o la salida de: journalctl -xeu %s --no-pager -n 50
+de|diag_hint|Senden Sie diesen Teil des Protokolls an den Support, oder die Ausgabe von: journalctl -xeu %s --no-pager -n 50
+it|diag_hint|Invia questa parte del registro al supporto, oppure l'output di: journalctl -xeu %s --no-pager -n 50
+pt|diag_hint|Envie esta parte do registo ao suporte, ou o resultado de: journalctl -xeu %s --no-pager -n 50
+nl|diag_hint|Stuur dit deel van het logboek naar de support, of de uitvoer van: journalctl -xeu %s --no-pager -n 50
+ru|diag_hint|Отправьте эту часть журнала в поддержку или вывод команды: journalctl -xeu %s --no-pager -n 50
+zh|diag_hint|请把这部分日志发给支持人员，或发送此命令的输出：journalctl -xeu %s --no-pager -n 50
+ar|diag_hint|أرسل هذا الجزء من السجل إلى الدعم، أو ناتج الأمر: journalctl -xeu %s --no-pager -n 50
+en|diag_sel|SELinux is enforcing: look for 'avc: denied' below (a wrong label on the program, the configuration or the data folder); restorecon -nvR lists the wrong labels, restorecon -RFv fixes them.
+fr|diag_sel|SELinux est en mode enforcing : cherchez 'avc: denied' ci-dessous (mauvaise étiquette sur le programme, la configuration ou le dossier de données) ; restorecon -nvR liste les mauvaises étiquettes, restorecon -RFv les corrige.
+es|diag_sel|SELinux está en modo enforcing: busque 'avc: denied' más abajo (etiqueta incorrecta en el programa, la configuración o la carpeta de datos); restorecon -nvR lista las etiquetas erróneas y restorecon -RFv las corrige.
+de|diag_sel|SELinux ist im Enforcing-Modus: Suchen Sie unten nach 'avc: denied' (falsches Label am Programm, an der Konfiguration oder am Datenordner); restorecon -nvR listet falsche Labels, restorecon -RFv korrigiert sie.
+it|diag_sel|SELinux è in modalità enforcing: cerca 'avc: denied' qui sotto (etichetta errata su programma, configurazione o cartella dati); restorecon -nvR elenca le etichette errate, restorecon -RFv le corregge.
+pt|diag_sel|O SELinux está em modo enforcing: procure 'avc: denied' abaixo (etiqueta errada no programa, na configuração ou na pasta de dados); restorecon -nvR lista as etiquetas erradas e restorecon -RFv corrige-as.
+nl|diag_sel|SELinux staat op enforcing: zoek hieronder naar 'avc: denied' (verkeerd label op het programma, de configuratie of de gegevensmap); restorecon -nvR toont de foute labels, restorecon -RFv herstelt ze.
+ru|diag_sel|SELinux в режиме enforcing: ищите ниже 'avc: denied' (неверная метка у программы, конфигурации или каталога данных); restorecon -nvR показывает неверные метки, restorecon -RFv исправляет их.
+zh|diag_sel|SELinux 处于 enforcing 模式：请在下方查找 'avc: denied'（程序、配置或数据目录的标签错误）；restorecon -nvR 列出错误标签，restorecon -RFv 修复。
+ar|diag_sel|SELinux في وضع enforcing: ابحث عن 'avc: denied' أدناه (وسم خاطئ على البرنامج أو الإعدادات أو مجلد البيانات)؛ restorecon -nvR يعرض الوسوم الخاطئة وrestorecon -RFv يصلحها.
+en|q_sysupdate|Update the system packages first (recommended)?
+fr|q_sysupdate|Mettre d'abord à jour les paquets système (recommandé) ?
+es|q_sysupdate|¿Actualizar primero los paquetes del sistema (recomendado)?
+de|q_sysupdate|Zuerst die Systempakete aktualisieren (empfohlen)?
+it|q_sysupdate|Aggiornare prima i pacchetti di sistema (consigliato)?
+pt|q_sysupdate|Atualizar primeiro os pacotes do sistema (recomendado)?
+nl|q_sysupdate|Eerst de systeempakketten bijwerken (aanbevolen)?
+ru|q_sysupdate|Сначала обновить системные пакеты (рекомендуется)?
+zh|q_sysupdate|先更新系统软件包（推荐）？
+ar|q_sysupdate|هل تريد تحديث حزم النظام أولاً (موصى به)؟
+en|pr_disk_full|Only %s MB are free on %s (at least %s MB are needed): the installation could not finish.
+fr|pr_disk_full|Seulement %s Mo sont libres sur %s (il en faut au moins %s Mo) : l'installation ne pourrait pas se terminer.
+es|pr_disk_full|Solo quedan %s MB libres en %s (se necesitan al menos %s MB): la instalación no podría terminar.
+de|pr_disk_full|Nur %s MB sind frei auf %s (mindestens %s MB werden benötigt): Die Installation könnte nicht abgeschlossen werden.
+it|pr_disk_full|Solo %s MB liberi su %s (ne servono almeno %s MB): l'installazione non potrebbe concludersi.
+pt|pr_disk_full|Apenas %s MB livres em %s (são precisos pelo menos %s MB): a instalação não poderia terminar.
+nl|pr_disk_full|Slechts %s MB vrij op %s (minstens %s MB nodig): de installatie zou niet kunnen worden voltooid.
+ru|pr_disk_full|Свободно только %s МБ на %s (нужно не менее %s МБ): установка не сможет завершиться.
+zh|pr_disk_full|仅剩 %s MB 可用空间，位于 %s（至少需要 %s MB）：安装无法完成。
+ar|pr_disk_full|المساحة الحرة %s ميغابايت فقط على %s (المطلوب %s ميغابايت على الأقل): لا يمكن إكمال التثبيت.
+en|pr_disk_full_a|Free some space (package cache: apt-get clean or dnf clean all; old logs: journalctl --vacuum-size=100M), then run this command again. To go on anyway: TOUTWAF_SKIP_PREREQ=1.
+fr|pr_disk_full_a|Libérez de la place (cache des paquets : apt-get clean ou dnf clean all ; anciens journaux : journalctl --vacuum-size=100M), puis relancez cette commande. Pour continuer malgré tout : TOUTWAF_SKIP_PREREQ=1.
+es|pr_disk_full_a|Libere espacio (caché de paquetes: apt-get clean o dnf clean all; registros antiguos: journalctl --vacuum-size=100M) y vuelva a ejecutar este comando. Para continuar de todos modos: TOUTWAF_SKIP_PREREQ=1.
+de|pr_disk_full_a|Schaffen Sie Platz (Paket-Cache: apt-get clean oder dnf clean all; alte Logs: journalctl --vacuum-size=100M) und führen Sie diesen Befehl erneut aus. Trotzdem fortfahren: TOUTWAF_SKIP_PREREQ=1.
+it|pr_disk_full_a|Libera spazio (cache dei pacchetti: apt-get clean o dnf clean all; vecchi log: journalctl --vacuum-size=100M), poi rilancia questo comando. Per proseguire comunque: TOUTWAF_SKIP_PREREQ=1.
+pt|pr_disk_full_a|Liberte espaço (cache de pacotes: apt-get clean ou dnf clean all; registos antigos: journalctl --vacuum-size=100M) e volte a executar este comando. Para continuar mesmo assim: TOUTWAF_SKIP_PREREQ=1.
+nl|pr_disk_full_a|Maak ruimte vrij (pakketcache: apt-get clean of dnf clean all; oude logs: journalctl --vacuum-size=100M) en voer dit commando opnieuw uit. Toch doorgaan: TOUTWAF_SKIP_PREREQ=1.
+ru|pr_disk_full_a|Освободите место (кэш пакетов: apt-get clean или dnf clean all; старые журналы: journalctl --vacuum-size=100M) и повторите эту команду. Чтобы всё равно продолжить: TOUTWAF_SKIP_PREREQ=1.
+zh|pr_disk_full_a|请释放一些空间（软件包缓存：apt-get clean 或 dnf clean all；旧日志：journalctl --vacuum-size=100M），然后重新运行此命令。如要强行继续：TOUTWAF_SKIP_PREREQ=1。
+ar|pr_disk_full_a|حرّر بعض المساحة (ذاكرة الحزم المؤقتة: apt-get clean أو dnf clean all؛ السجلات القديمة: journalctl --vacuum-size=100M) ثم أعد تشغيل هذا الأمر. للمتابعة رغم ذلك: TOUTWAF_SKIP_PREREQ=1.
+en|pr_disk_full_w_a|Free some space (Disk Cleanup, empty the recycle bin), then run this command again. To go on anyway: $env:TOUTWAF_SKIP_PREREQ=1
+fr|pr_disk_full_w_a|Libérez de la place (Nettoyage de disque, vidage de la corbeille), puis relancez cette commande. Pour continuer malgré tout : $env:TOUTWAF_SKIP_PREREQ=1
+es|pr_disk_full_w_a|Libere espacio (Liberador de espacio en disco, vaciar la papelera) y vuelva a ejecutar este comando. Para continuar de todos modos: $env:TOUTWAF_SKIP_PREREQ=1
+de|pr_disk_full_w_a|Schaffen Sie Platz (Datenträgerbereinigung, Papierkorb leeren) und führen Sie diesen Befehl erneut aus. Trotzdem fortfahren: $env:TOUTWAF_SKIP_PREREQ=1
+it|pr_disk_full_w_a|Libera spazio (Pulizia disco, svuota il cestino), poi rilancia questo comando. Per proseguire comunque: $env:TOUTWAF_SKIP_PREREQ=1
+pt|pr_disk_full_w_a|Liberte espaço (Limpeza do Disco, esvaziar a reciclagem) e volte a executar este comando. Para continuar mesmo assim: $env:TOUTWAF_SKIP_PREREQ=1
+nl|pr_disk_full_w_a|Maak ruimte vrij (Schijfopruiming, prullenbak legen) en voer dit commando opnieuw uit. Toch doorgaan: $env:TOUTWAF_SKIP_PREREQ=1
+ru|pr_disk_full_w_a|Освободите место (Очистка диска, очистка корзины) и повторите эту команду. Чтобы всё равно продолжить: $env:TOUTWAF_SKIP_PREREQ=1
+zh|pr_disk_full_w_a|请释放一些空间（磁盘清理、清空回收站），然后重新运行此命令。如要强行继续：$env:TOUTWAF_SKIP_PREREQ=1
+ar|pr_disk_full_w_a|حرّر بعض المساحة (تنظيف القرص، إفراغ سلة المحذوفات) ثم أعد تشغيل هذا الأمر. للمتابعة رغم ذلك: $env:TOUTWAF_SKIP_PREREQ=1
+en|pr_disk_low|Only %s MB are free on %s (about %s MB are comfortable).
+fr|pr_disk_low|Seulement %s Mo sont libres sur %s (environ %s Mo sont confortables).
+es|pr_disk_low|Solo quedan %s MB libres en %s (unos %s MB son lo cómodo).
+de|pr_disk_low|Nur %s MB sind frei auf %s (etwa %s MB sind komfortabel).
+it|pr_disk_low|Solo %s MB liberi su %s (circa %s MB sono comodi).
+pt|pr_disk_low|Apenas %s MB livres em %s (cerca de %s MB são confortáveis).
+nl|pr_disk_low|Slechts %s MB vrij op %s (ongeveer %s MB is comfortabel).
+ru|pr_disk_low|Свободно только %s МБ на %s (комфортно — около %s МБ).
+zh|pr_disk_low|仅剩 %s MB 可用空间，位于 %s（约 %s MB 较为宽裕）。
+ar|pr_disk_low|المساحة الحرة %s ميغابايت فقط على %s (يُفضَّل نحو %s ميغابايت).
+en|pr_disk_low_a|Free some space or add disk space; the installation can go on.
+fr|pr_disk_low_a|Libérez de la place ou ajoutez du disque ; l'installation peut continuer.
+es|pr_disk_low_a|Libere espacio o añada disco; la instalación puede continuar.
+de|pr_disk_low_a|Schaffen Sie Platz oder fügen Sie Speicher hinzu; die Installation kann weiterlaufen.
+it|pr_disk_low_a|Libera spazio o aggiungi disco; l'installazione può proseguire.
+pt|pr_disk_low_a|Liberte espaço ou adicione disco; a instalação pode continuar.
+nl|pr_disk_low_a|Maak ruimte vrij of voeg schijfruimte toe; de installatie kan doorgaan.
+ru|pr_disk_low_a|Освободите место или добавьте диск; установка может продолжаться.
+zh|pr_disk_low_a|请释放空间或增加磁盘；安装可以继续。
+ar|pr_disk_low_a|حرّر بعض المساحة أو أضف قرصاً؛ يمكن أن يستمر التثبيت.
+en|pr_dns|This machine cannot resolve the name %s (DNS).
+fr|pr_dns|Cette machine ne parvient pas à résoudre le nom %s (DNS).
+es|pr_dns|Esta máquina no puede resolver el nombre %s (DNS).
+de|pr_dns|Dieser Rechner kann den Namen %s nicht auflösen (DNS).
+it|pr_dns|Questa macchina non riesce a risolvere il nome %s (DNS).
+pt|pr_dns|Esta máquina não consegue resolver o nome %s (DNS).
+nl|pr_dns|Deze machine kan de naam %s niet omzetten (DNS).
+ru|pr_dns|Эта машина не может разрешить имя %s (DNS).
+zh|pr_dns|这台机器无法解析名称 %s（DNS）。
+ar|pr_dns|لا يستطيع هذا الجهاز حلّ الاسم %s (DNS).
+en|pr_dns_a|Check the DNS servers (cat /etc/resolv.conf, resolvectl status), add a working one such as nameserver 9.9.9.9, then run this command again.
+fr|pr_dns_a|Vérifiez les serveurs DNS (cat /etc/resolv.conf, resolvectl status), ajoutez-en un qui fonctionne, par exemple nameserver 9.9.9.9, puis relancez cette commande.
+es|pr_dns_a|Compruebe los servidores DNS (cat /etc/resolv.conf, resolvectl status), añada uno que funcione, por ejemplo nameserver 9.9.9.9, y vuelva a ejecutar este comando.
+de|pr_dns_a|Prüfen Sie die DNS-Server (cat /etc/resolv.conf, resolvectl status), tragen Sie einen funktionierenden ein, z. B. nameserver 9.9.9.9, und führen Sie diesen Befehl erneut aus.
+it|pr_dns_a|Controlla i server DNS (cat /etc/resolv.conf, resolvectl status), aggiungine uno funzionante, ad esempio nameserver 9.9.9.9, poi rilancia questo comando.
+pt|pr_dns_a|Verifique os servidores DNS (cat /etc/resolv.conf, resolvectl status), adicione um que funcione, por exemplo nameserver 9.9.9.9, e volte a executar este comando.
+nl|pr_dns_a|Controleer de DNS-servers (cat /etc/resolv.conf, resolvectl status), voeg een werkende toe, bijvoorbeeld nameserver 9.9.9.9, en voer dit commando opnieuw uit.
+ru|pr_dns_a|Проверьте DNS-серверы (cat /etc/resolv.conf, resolvectl status), добавьте рабочий, например nameserver 9.9.9.9, и повторите эту команду.
+zh|pr_dns_a|请检查 DNS 服务器（cat /etc/resolv.conf、resolvectl status），添加一个可用的服务器，例如 nameserver 9.9.9.9，然后重新运行此命令。
+ar|pr_dns_a|تحقق من خوادم DNS (cat /etc/resolv.conf، resolvectl status) وأضف خادماً يعمل مثل nameserver 9.9.9.9 ثم أعد تشغيل هذا الأمر.
+en|pr_dns_w_a|Check the DNS servers with 'ipconfig /all', set a working one (for example 9.9.9.9) in the network adapter settings, then run this command again.
+fr|pr_dns_w_a|Vérifiez les serveurs DNS avec 'ipconfig /all', indiquez-en un qui fonctionne (par exemple 9.9.9.9) dans les paramètres de la carte réseau, puis relancez cette commande.
+es|pr_dns_w_a|Compruebe los servidores DNS con 'ipconfig /all', indique uno que funcione (por ejemplo 9.9.9.9) en la configuración del adaptador de red y vuelva a ejecutar este comando.
+de|pr_dns_w_a|Prüfen Sie die DNS-Server mit 'ipconfig /all', tragen Sie in den Einstellungen des Netzwerkadapters einen funktionierenden ein (z. B. 9.9.9.9) und führen Sie diesen Befehl erneut aus.
+it|pr_dns_w_a|Controlla i server DNS con 'ipconfig /all', imposta un server funzionante (ad esempio 9.9.9.9) nelle impostazioni della scheda di rete, poi rilancia questo comando.
+pt|pr_dns_w_a|Verifique os servidores DNS com 'ipconfig /all', defina um que funcione (por exemplo 9.9.9.9) nas definições do adaptador de rede e volte a executar este comando.
+nl|pr_dns_w_a|Controleer de DNS-servers met 'ipconfig /all', stel een werkende in (bijvoorbeeld 9.9.9.9) bij de instellingen van de netwerkadapter en voer dit commando opnieuw uit.
+ru|pr_dns_w_a|Проверьте DNS-серверы командой 'ipconfig /all', укажите рабочий (например, 9.9.9.9) в настройках сетевого адаптера и повторите эту команду.
+zh|pr_dns_w_a|请用 'ipconfig /all' 检查 DNS 服务器，在网络适配器设置中填入一个可用的服务器（例如 9.9.9.9），然后重新运行此命令。
+ar|pr_dns_w_a|تحقق من خوادم DNS باستخدام 'ipconfig /all' وحدّد خادماً يعمل (مثل 9.9.9.9) في إعدادات بطاقة الشبكة ثم أعد تشغيل هذا الأمر.
+en|pr_clock|The clock of this machine is %s seconds away from the Internet time: TLS certificates and signatures fail when the clock is wrong.
+fr|pr_clock|L'horloge de cette machine est décalée de %s secondes par rapport à l'heure d'Internet : les certificats TLS et les signatures échouent quand l'horloge est fausse.
+es|pr_clock|El reloj de esta máquina está desfasado %s segundos respecto a la hora de Internet: los certificados TLS y las firmas fallan cuando el reloj es incorrecto.
+de|pr_clock|Die Uhr dieses Rechners weicht um %s Sekunden von der Internetzeit ab: TLS-Zertifikate und Signaturen schlagen fehl, wenn die Uhr falsch geht.
+it|pr_clock|L'orologio di questa macchina è sfasato di %s secondi rispetto all'ora di Internet: certificati TLS e firme falliscono se l'orologio è sbagliato.
+pt|pr_clock|O relógio desta máquina está desfasado %s segundos em relação à hora da Internet: os certificados TLS e as assinaturas falham quando o relógio está errado.
+nl|pr_clock|De klok van deze machine wijkt %s seconden af van de internettijd: TLS-certificaten en handtekeningen mislukken bij een verkeerde klok.
+ru|pr_clock|Часы этой машины расходятся с интернет-временем на %s с: сертификаты TLS и подписи не проходят проверку при неверных часах.
+zh|pr_clock|这台机器的时钟与互联网时间相差 %s 秒：时钟不准时，TLS 证书和签名校验会失败。
+ar|pr_clock|ساعة هذا الجهاز تختلف عن توقيت الإنترنت بمقدار %s ثانية: تفشل شهادات TLS والتوقيعات عندما تكون الساعة خاطئة.
+en|pr_clock_a|Synchronise it: timedatectl set-ntp true (or chronyc makestep), check with timedatectl, then run this command again.
+fr|pr_clock_a|Synchronisez-la : timedatectl set-ntp true (ou chronyc makestep), vérifiez avec timedatectl, puis relancez cette commande.
+es|pr_clock_a|Sincronícelo: timedatectl set-ntp true (o chronyc makestep), compruebe con timedatectl y vuelva a ejecutar este comando.
+de|pr_clock_a|Synchronisieren Sie sie: timedatectl set-ntp true (oder chronyc makestep), prüfen Sie mit timedatectl und führen Sie diesen Befehl erneut aus.
+it|pr_clock_a|Sincronizzalo: timedatectl set-ntp true (o chronyc makestep), verifica con timedatectl, poi rilancia questo comando.
+pt|pr_clock_a|Sincronize-o: timedatectl set-ntp true (ou chronyc makestep), verifique com timedatectl e volte a executar este comando.
+nl|pr_clock_a|Synchroniseer de klok: timedatectl set-ntp true (of chronyc makestep), controleer met timedatectl en voer dit commando opnieuw uit.
+ru|pr_clock_a|Синхронизируйте часы: timedatectl set-ntp true (или chronyc makestep), проверьте через timedatectl и повторите эту команду.
+zh|pr_clock_a|请同步时钟：timedatectl set-ntp true（或 chronyc makestep），用 timedatectl 检查，然后重新运行此命令。
+ar|pr_clock_a|قم بمزامنتها: timedatectl set-ntp true (أو chronyc makestep) وتحقق باستخدام timedatectl ثم أعد تشغيل هذا الأمر.
+en|pr_clock_w_a|Synchronise it: w32tm /resync (or Settings > Time and language > Sync now), then run this command again.
+fr|pr_clock_w_a|Synchronisez-la : w32tm /resync (ou Paramètres > Heure et langue > Synchroniser maintenant), puis relancez cette commande.
+es|pr_clock_w_a|Sincronícelo: w32tm /resync (o Configuración > Hora e idioma > Sincronizar ahora) y vuelva a ejecutar este comando.
+de|pr_clock_w_a|Synchronisieren Sie sie: w32tm /resync (oder Einstellungen > Zeit und Sprache > Jetzt synchronisieren) und führen Sie diesen Befehl erneut aus.
+it|pr_clock_w_a|Sincronizzalo: w32tm /resync (oppure Impostazioni > Ora e lingua > Sincronizza ora), poi rilancia questo comando.
+pt|pr_clock_w_a|Sincronize-o: w32tm /resync (ou Definições > Hora e idioma > Sincronizar agora) e volte a executar este comando.
+nl|pr_clock_w_a|Synchroniseer de klok: w32tm /resync (of Instellingen > Tijd en taal > Nu synchroniseren) en voer dit commando opnieuw uit.
+ru|pr_clock_w_a|Синхронизируйте часы: w32tm /resync (или Параметры > Время и язык > Синхронизировать) и повторите эту команду.
+zh|pr_clock_w_a|请同步时钟：w32tm /resync（或 设置 > 时间和语言 > 立即同步），然后重新运行此命令。
+ar|pr_clock_w_a|قم بمزامنتها: w32tm /resync (أو الإعدادات > الوقت واللغة > مزامنة الآن) ثم أعد تشغيل هذا الأمر.
+en|pr_ok|Disk space, DNS and the clock are fine.
+fr|pr_ok|L'espace disque, le DNS et l'horloge sont en ordre.
+es|pr_ok|El espacio en disco, el DNS y el reloj están en orden.
+de|pr_ok|Speicherplatz, DNS und Uhr sind in Ordnung.
+it|pr_ok|Spazio su disco, DNS e orologio sono a posto.
+pt|pr_ok|O espaço em disco, o DNS e o relógio estão em ordem.
+nl|pr_ok|Schijfruimte, DNS en klok zijn in orde.
+ru|pr_ok|Место на диске, DNS и часы в порядке.
+zh|pr_ok|磁盘空间、DNS 和时钟均正常。
+ar|pr_ok|مساحة القرص وDNS والساعة بحالة جيدة.
+en|cloud_https|--cloud-url must be an https:// address (the node never talks to the cloud in clear).
+fr|cloud_https|--cloud-url doit être une adresse https:// (le nœud ne parle jamais au cloud en clair).
+es|cloud_https|--cloud-url debe ser una dirección https:// (el nodo nunca habla con la nube en claro).
+de|cloud_https|--cloud-url muss eine https://-Adresse sein (der Knoten spricht nie unverschlüsselt mit der Cloud).
+it|cloud_https|--cloud-url deve essere un indirizzo https:// (il nodo non parla mai con il cloud in chiaro).
+pt|cloud_https|--cloud-url tem de ser um endereço https:// (o nó nunca fala com a nuvem em claro).
+nl|cloud_https|--cloud-url moet een https://-adres zijn (de node praat nooit onversleuteld met de cloud).
+ru|cloud_https|--cloud-url должен быть адресом https:// (узел никогда не общается с облаком в открытом виде).
+zh|cloud_https|--cloud-url 必须是 https:// 地址（节点绝不以明文与云端通信）。
+ar|cloud_https|يجب أن يكون --cloud-url عنوان https:// (العقدة لا تتحدث إلى السحابة دون تشفير أبدًا).
+en|cloud_dp_only|--cloud-url installs a protection node: use it with --component dp (the default in cloud mode).
+fr|cloud_dp_only|--cloud-url installe un nœud de protection : utilisez-le avec --component dp (le défaut en mode cloud).
+es|cloud_dp_only|--cloud-url instala un nodo de protección: úselo con --component dp (el valor por defecto en modo nube).
+de|cloud_dp_only|--cloud-url installiert einen Schutzknoten: mit --component dp verwenden (Standard im Cloud-Modus).
+it|cloud_dp_only|--cloud-url installa un nodo di protezione: usarlo con --component dp (predefinito in modalità cloud).
+pt|cloud_dp_only|--cloud-url instala um nó de proteção: use-o com --component dp (o predefinido no modo nuvem).
+nl|cloud_dp_only|--cloud-url installeert een beschermingsnode: gebruik het met --component dp (de standaard in cloudmodus).
+ru|cloud_dp_only|--cloud-url устанавливает узел защиты: используйте его с --component dp (по умолчанию в облачном режиме).
+zh|cloud_dp_only|--cloud-url 安装防护节点：请与 --component dp 一起使用（云模式下的默认值）。
+ar|cloud_dp_only|--cloud-url يثبّت عقدة حماية: استخدمه مع --component dp (الافتراضي في وضع السحابة).
+en|cloud_need_token|An enrolment token is required to connect this node to your account (--enroll-token; console: Nodes > Add my first node).
+fr|cloud_need_token|Un jeton d'enrôlement est nécessaire pour relier ce nœud à votre compte (--enroll-token ; console : Nœuds > Ajouter mon premier nœud).
+es|cloud_need_token|Se necesita un token de alta para conectar este nodo a su cuenta (--enroll-token; consola: Nodos > Agregar mi primer nodo).
+de|cloud_need_token|Zum Verbinden dieses Knotens mit Ihrem Konto ist ein Registrierungstoken nötig (--enroll-token; Konsole: Knoten > Meinen ersten Knoten hinzufügen).
+it|cloud_need_token|Serve un token di iscrizione per collegare questo nodo al tuo account (--enroll-token; console: Nodi > Aggiungi il mio primo nodo).
+pt|cloud_need_token|É necessário um token de registo para ligar este nó à sua conta (--enroll-token; consola: Nós > Adicionar o meu primeiro nó).
+nl|cloud_need_token|Een registratietoken is nodig om deze node met uw account te verbinden (--enroll-token; console: Nodes > Mijn eerste node toevoegen).
+ru|cloud_need_token|Для подключения этого узла к вашей учётной записи нужен токен регистрации (--enroll-token; консоль: Узлы > Добавить первый узел).
+zh|cloud_need_token|将此节点连接到您的账户需要注册令牌（--enroll-token；控制台：节点 > 添加我的第一个节点）。
+ar|cloud_need_token|يلزم رمز تسجيل لربط هذه العقدة بحسابك (--enroll-token؛ لوحة التحكم: العقد > إضافة أول عقدة).
+en|cloud_ca_local|--cloud-ca must be a local file.
+fr|cloud_ca_local|--cloud-ca doit être un fichier local.
+es|cloud_ca_local|--cloud-ca debe ser un archivo local.
+de|cloud_ca_local|--cloud-ca muss eine lokale Datei sein.
+it|cloud_ca_local|--cloud-ca deve essere un file locale.
+pt|cloud_ca_local|--cloud-ca tem de ser um ficheiro local.
+nl|cloud_ca_local|--cloud-ca moet een lokaal bestand zijn.
+ru|cloud_ca_local|--cloud-ca должен быть локальным файлом.
+zh|cloud_ca_local|--cloud-ca 必须是本地文件。
+ar|cloud_ca_local|يجب أن يكون --cloud-ca ملفًا محليًا.
+en|cloud_nolink|This release does not contain the ToutWAF Cloud link (toutwaf-cloudlink): update the installer or use a newer release.
+fr|cloud_nolink|Cette version ne contient pas le lien ToutWAF Cloud (toutwaf-cloudlink) : mettez l'installateur à jour ou utilisez une version plus récente.
+es|cloud_nolink|Esta versión no incluye el enlace ToutWAF Cloud (toutwaf-cloudlink): actualice el instalador o use una versión más reciente.
+de|cloud_nolink|Diese Version enthält die ToutWAF-Cloud-Verbindung (toutwaf-cloudlink) nicht: Installer aktualisieren oder neuere Version verwenden.
+it|cloud_nolink|Questa versione non contiene il collegamento ToutWAF Cloud (toutwaf-cloudlink): aggiorna l'installer o usa una versione più recente.
+pt|cloud_nolink|Esta versão não contém a ligação ToutWAF Cloud (toutwaf-cloudlink): atualize o instalador ou use uma versão mais recente.
+nl|cloud_nolink|Deze versie bevat de ToutWAF Cloud-koppeling (toutwaf-cloudlink) niet: werk het installatieprogramma bij of gebruik een nieuwere versie.
+ru|cloud_nolink|В этой версии нет компонента связи ToutWAF Cloud (toutwaf-cloudlink): обновите установщик или используйте более новую версию.
+zh|cloud_nolink|此版本不包含 ToutWAF Cloud 链接组件（toutwaf-cloudlink）：请更新安装程序或使用更新的版本。
+ar|cloud_nolink|لا يتضمن هذا الإصدار رابط ToutWAF Cloud (toutwaf-cloudlink): حدّث المثبّت أو استخدم إصدارًا أحدث.
+en|cloud_enrol_failed|The node could not be enrolled with your account (see the lines above). The token may be used or expired: create a new one in the console.
+fr|cloud_enrol_failed|Le nœud n'a pas pu être enrôlé auprès de votre compte (voir les lignes ci-dessus). Le jeton est peut-être utilisé ou périmé : créez-en un nouveau dans la console.
+es|cloud_enrol_failed|No se pudo dar de alta el nodo en su cuenta (vea las líneas anteriores). El token puede estar usado o caducado: cree uno nuevo en la consola.
+de|cloud_enrol_failed|Der Knoten konnte nicht in Ihrem Konto registriert werden (siehe Zeilen oben). Das Token ist vielleicht verbraucht oder abgelaufen: Erstellen Sie in der Konsole ein neues.
+it|cloud_enrol_failed|Non è stato possibile iscrivere il nodo al tuo account (vedi le righe sopra). Il token potrebbe essere usato o scaduto: creane uno nuovo nella console.
+pt|cloud_enrol_failed|Não foi possível registar o nó na sua conta (veja as linhas acima). O token pode estar usado ou expirado: crie um novo na consola.
+nl|cloud_enrol_failed|De node kon niet bij uw account worden geregistreerd (zie de regels hierboven). Het token is misschien gebruikt of verlopen: maak een nieuw token in de console.
+ru|cloud_enrol_failed|Не удалось зарегистрировать узел в вашей учётной записи (см. строки выше). Токен мог быть использован или истечь: создайте новый в консоли.
+zh|cloud_enrol_failed|无法将节点注册到您的账户（见上方输出）。令牌可能已使用或已过期：请在控制台中创建新令牌。
+ar|cloud_enrol_failed|تعذّر تسجيل العقدة في حسابك (انظر الأسطر أعلاه). ربما استُخدم الرمز أو انتهت صلاحيته: أنشئ رمزًا جديدًا في لوحة التحكم.
+en|pf_cloud_action|Allow this machine to reach your ToutWAF Cloud address on port 443 (outbound only), or set HTTPS_PROXY if a proxy is required. Nothing needs to be opened for inbound traffic.
+fr|pf_cloud_action|Autorisez cette machine à joindre l'adresse de votre ToutWAF Cloud sur le port 443 (sortant uniquement), ou définissez HTTPS_PROXY si un proxy est nécessaire. Rien n'est à ouvrir en entrée.
+es|pf_cloud_action|Permita que esta máquina llegue a la dirección de su ToutWAF Cloud por el puerto 443 (solo saliente), o defina HTTPS_PROXY si se necesita un proxy. No hay que abrir nada de entrada.
+de|pf_cloud_action|Erlauben Sie diesem Rechner, die Adresse Ihrer ToutWAF Cloud über Port 443 zu erreichen (nur ausgehend), oder setzen Sie HTTPS_PROXY, falls ein Proxy nötig ist. Eingehend muss nichts geöffnet werden.
+it|pf_cloud_action|Consenti a questa macchina di raggiungere l'indirizzo del tuo ToutWAF Cloud sulla porta 443 (solo in uscita), oppure imposta HTTPS_PROXY se serve un proxy. Non va aperto nulla in ingresso.
+pt|pf_cloud_action|Permita que esta máquina alcance o endereço do seu ToutWAF Cloud na porta 443 (apenas saída), ou defina HTTPS_PROXY se for necessário um proxy. Nada precisa de ser aberto à entrada.
+nl|pf_cloud_action|Sta deze machine toe het adres van uw ToutWAF Cloud op poort 443 te bereiken (alleen uitgaand), of stel HTTPS_PROXY in als een proxy nodig is. Inkomend hoeft niets open.
+ru|pf_cloud_action|Разрешите этой машине обращаться к адресу вашего ToutWAF Cloud по порту 443 (только исходящие) или задайте HTTPS_PROXY, если нужен прокси. Для входящего трафика ничего открывать не нужно.
+zh|pf_cloud_action|允许本机通过 443 端口访问您的 ToutWAF Cloud 地址（仅出站），如需代理请设置 HTTPS_PROXY。入站方向无需开放任何端口。
+ar|pf_cloud_action|اسمح لهذا الجهاز بالوصول إلى عنوان ToutWAF Cloud الخاص بك عبر المنفذ 443 (صادر فقط)، أو عيّن HTTPS_PROXY إذا لزم وكيل. لا حاجة لفتح أي شيء للوارد.
+en|s_db|Preparing the database
+fr|s_db|Préparation de la base de données
+es|s_db|Preparando la base de datos
+de|s_db|Datenbank wird vorbereitet
+it|s_db|Preparazione del database
+pt|s_db|A preparar a base de dados
+nl|s_db|Database voorbereiden
+ru|s_db|Подготовка базы данных
+zh|s_db|正在准备数据库
+ar|s_db|تجهيز قاعدة البيانات
+en|db_choose|Which database should ToutWAF use?
+fr|db_choose|Quelle base de données ToutWAF doit-il utiliser ?
+es|db_choose|¿Qué base de datos debe usar ToutWAF?
+de|db_choose|Welche Datenbank soll ToutWAF verwenden?
+it|db_choose|Quale database deve usare ToutWAF?
+pt|db_choose|Que base de dados o ToutWAF deve usar?
+nl|db_choose|Welke database moet ToutWAF gebruiken?
+ru|db_choose|Какую базу данных использовать ToutWAF?
+zh|db_choose|ToutWAF 应使用哪种数据库？
+ar|db_choose|ما قاعدة البيانات التي سيستخدمها ToutWAF؟
+en|db_opt_pg|PostgreSQL (recommended)
+fr|db_opt_pg|PostgreSQL (recommandé)
+es|db_opt_pg|PostgreSQL (recomendado)
+de|db_opt_pg|PostgreSQL (empfohlen)
+it|db_opt_pg|PostgreSQL (consigliato)
+pt|db_opt_pg|PostgreSQL (recomendado)
+nl|db_opt_pg|PostgreSQL (aanbevolen)
+ru|db_opt_pg|PostgreSQL (рекомендуется)
+zh|db_opt_pg|PostgreSQL（推荐）
+ar|db_opt_pg|PostgreSQL (موصى به)
+en|db_opt_pg_local|Install PostgreSQL on this machine (created and configured for you)
+fr|db_opt_pg_local|Installer PostgreSQL sur cette machine (créé et configuré pour vous)
+es|db_opt_pg_local|Instalar PostgreSQL en esta máquina (creado y configurado por usted)
+de|db_opt_pg_local|PostgreSQL auf diesem Rechner installieren (wird für Sie eingerichtet)
+it|db_opt_pg_local|Installare PostgreSQL su questa macchina (creato e configurato per te)
+pt|db_opt_pg_local|Instalar o PostgreSQL nesta máquina (criado e configurado por si)
+nl|db_opt_pg_local|PostgreSQL op deze machine installeren (voor u aangemaakt en ingesteld)
+ru|db_opt_pg_local|Установить PostgreSQL на этой машине (создаётся и настраивается автоматически)
+zh|db_opt_pg_local|在本机安装 PostgreSQL（自动创建并配置）
+ar|db_opt_pg_local|تثبيت PostgreSQL على هذا الجهاز (يُنشأ ويُهيّأ تلقائيًا)
+en|db_opt_pg_remote|Use an existing PostgreSQL server (tested, then prepared if you allow it)
+fr|db_opt_pg_remote|Utiliser un serveur PostgreSQL existant (testé, puis préparé si vous l'autorisez)
+es|db_opt_pg_remote|Usar un servidor PostgreSQL existente (se prueba y se prepara si lo permite)
+de|db_opt_pg_remote|Vorhandenen PostgreSQL-Server verwenden (wird getestet und bei Erlaubnis vorbereitet)
+it|db_opt_pg_remote|Usare un server PostgreSQL esistente (testato, poi preparato se lo consenti)
+pt|db_opt_pg_remote|Usar um servidor PostgreSQL existente (testado e preparado, se permitir)
+nl|db_opt_pg_remote|Bestaande PostgreSQL-server gebruiken (getest en, indien toegestaan, voorbereid)
+ru|db_opt_pg_remote|Использовать существующий сервер PostgreSQL (проверка и подготовка, если разрешите)
+zh|db_opt_pg_remote|使用现有 PostgreSQL 服务器（先测试，经允许后自动准备）
+ar|db_opt_pg_remote|استخدام خادم PostgreSQL موجود (يُختبر ثم يُجهَّز إذا سمحت)
+en|db_opt_sqlite|SQLite (small installation, one server only)
+fr|db_opt_sqlite|SQLite (petite installation, un seul serveur)
+es|db_opt_sqlite|SQLite (instalación pequeña, un solo servidor)
+de|db_opt_sqlite|SQLite (kleine Installation, nur ein Server)
+it|db_opt_sqlite|SQLite (piccola installazione, un solo server)
+pt|db_opt_sqlite|SQLite (instalação pequena, um só servidor)
+nl|db_opt_sqlite|SQLite (kleine installatie, slechts één server)
+ru|db_opt_sqlite|SQLite (небольшая установка, один сервер)
+zh|db_opt_sqlite|SQLite（小型安装，仅单台服务器）
+ar|db_opt_sqlite|SQLite (تثبيت صغير، خادم واحد فقط)
+en|db_sqlite_note|SQLite is one file on this machine: fine for a small installation on one server. It cannot be shared by several control planes and has no replication. You can move to PostgreSQL later with: toutwaf-cp db migrate.
+fr|db_sqlite_note|SQLite est un fichier sur cette machine : adapté à une petite installation sur un seul serveur. Il ne peut pas être partagé entre plusieurs plans de contrôle et n'a pas de réplication. Vous pourrez passer à PostgreSQL plus tard avec : toutwaf-cp db migrate.
+es|db_sqlite_note|SQLite es un archivo en esta máquina: válido para una instalación pequeña en un servidor. No se puede compartir entre varios planos de control y no tiene replicación. Podrá pasar a PostgreSQL más tarde con: toutwaf-cp db migrate.
+de|db_sqlite_note|SQLite ist eine Datei auf diesem Rechner: gut für eine kleine Installation auf einem Server. Sie kann nicht von mehreren Control Planes geteilt werden und hat keine Replikation. Später können Sie zu PostgreSQL wechseln: toutwaf-cp db migrate.
+it|db_sqlite_note|SQLite è un file su questa macchina: va bene per una piccola installazione su un solo server. Non può essere condiviso tra più piani di controllo e non ha replica. Potrai passare a PostgreSQL più tardi con: toutwaf-cp db migrate.
+pt|db_sqlite_note|O SQLite é um ficheiro nesta máquina: adequado a uma instalação pequena num só servidor. Não pode ser partilhado por vários planos de controlo e não tem replicação. Poderá passar para PostgreSQL mais tarde com: toutwaf-cp db migrate.
+nl|db_sqlite_note|SQLite is één bestand op deze machine: prima voor een kleine installatie op één server. Het kan niet door meerdere control planes worden gedeeld en heeft geen replicatie. U kunt later overstappen naar PostgreSQL met: toutwaf-cp db migrate.
+ru|db_sqlite_note|SQLite — это один файл на этой машине: подходит для небольшой установки на одном сервере. Его нельзя разделять между несколькими control plane, репликации нет. Позже можно перейти на PostgreSQL: toutwaf-cp db migrate.
+zh|db_sqlite_note|SQLite 是本机上的一个文件：适合单台服务器的小型安装。它不能被多个控制平面共享，也没有复制功能。以后可用 toutwaf-cp db migrate 迁移到 PostgreSQL。
+ar|db_sqlite_note|SQLite ملف واحد على هذا الجهاز: مناسب لتثبيت صغير على خادم واحد. لا يمكن مشاركته بين عدة وحدات تحكم ولا يدعم النسخ المتماثل. يمكنك الانتقال إلى PostgreSQL لاحقًا عبر: toutwaf-cp db migrate.
+en|db_q_host|PostgreSQL host
+fr|db_q_host|Hôte PostgreSQL
+es|db_q_host|Host de PostgreSQL
+de|db_q_host|PostgreSQL-Host
+it|db_q_host|Host PostgreSQL
+pt|db_q_host|Anfitrião PostgreSQL
+nl|db_q_host|PostgreSQL-host
+ru|db_q_host|Хост PostgreSQL
+zh|db_q_host|PostgreSQL 主机
+ar|db_q_host|مضيف PostgreSQL
+en|db_q_port|Port
+fr|db_q_port|Port
+es|db_q_port|Puerto
+de|db_q_port|Port
+it|db_q_port|Porta
+pt|db_q_port|Porta
+nl|db_q_port|Poort
+ru|db_q_port|Порт
+zh|db_q_port|端口
+ar|db_q_port|المنفذ
+en|db_q_name|Database name
+fr|db_q_name|Nom de la base
+es|db_q_name|Nombre de la base de datos
+de|db_q_name|Datenbankname
+it|db_q_name|Nome del database
+pt|db_q_name|Nome da base de dados
+nl|db_q_name|Naam van de database
+ru|db_q_name|Имя базы данных
+zh|db_q_name|数据库名称
+ar|db_q_name|اسم قاعدة البيانات
+en|db_q_user|Database user
+fr|db_q_user|Utilisateur de la base
+es|db_q_user|Usuario de la base de datos
+de|db_q_user|Datenbankbenutzer
+it|db_q_user|Utente del database
+pt|db_q_user|Utilizador da base de dados
+nl|db_q_user|Databasegebruiker
+ru|db_q_user|Пользователь базы данных
+zh|db_q_user|数据库用户
+ar|db_q_user|مستخدم قاعدة البيانات
+en|db_q_pw|Password of that user (empty if an administrator account creates it)
+fr|db_q_pw|Mot de passe de cet utilisateur (vide si un compte administrateur le crée)
+es|db_q_pw|Contraseña de ese usuario (vacía si lo crea una cuenta de administrador)
+de|db_q_pw|Passwort dieses Benutzers (leer, wenn ein Administratorkonto ihn anlegt)
+it|db_q_pw|Password di quell'utente (vuota se lo crea un account amministratore)
+pt|db_q_pw|Palavra-passe desse utilizador (vazia se uma conta de administrador o criar)
+nl|db_q_pw|Wachtwoord van die gebruiker (leeg als een beheerdersaccount hem aanmaakt)
+ru|db_q_pw|Пароль этого пользователя (пусто, если его создаёт учётная запись администратора)
+zh|db_q_pw|该用户的密码（若由管理员账户创建则留空）
+ar|db_q_pw|كلمة مرور هذا المستخدم (اتركها فارغة إذا أنشأه حساب مسؤول)
+en|db_q_tls|TLS mode (disable, prefer, require, verify-ca, verify-full)
+fr|db_q_tls|Mode TLS (disable, prefer, require, verify-ca, verify-full)
+es|db_q_tls|Modo TLS (disable, prefer, require, verify-ca, verify-full)
+de|db_q_tls|TLS-Modus (disable, prefer, require, verify-ca, verify-full)
+it|db_q_tls|Modalità TLS (disable, prefer, require, verify-ca, verify-full)
+pt|db_q_tls|Modo TLS (disable, prefer, require, verify-ca, verify-full)
+nl|db_q_tls|TLS-modus (disable, prefer, require, verify-ca, verify-full)
+ru|db_q_tls|Режим TLS (disable, prefer, require, verify-ca, verify-full)
+zh|db_q_tls|TLS 模式（disable、prefer、require、verify-ca、verify-full）
+ar|db_q_tls|وضع TLS (disable، prefer، require، verify-ca، verify-full)
+en|db_q_ca|CA certificate file of the server (for verify-ca / verify-full)
+fr|db_q_ca|Fichier du certificat de l'autorité du serveur (pour verify-ca / verify-full)
+es|db_q_ca|Archivo del certificado de la CA del servidor (para verify-ca / verify-full)
+de|db_q_ca|CA-Zertifikatsdatei des Servers (für verify-ca / verify-full)
+it|db_q_ca|File del certificato CA del server (per verify-ca / verify-full)
+pt|db_q_ca|Ficheiro do certificado da CA do servidor (para verify-ca / verify-full)
+nl|db_q_ca|CA-certificaatbestand van de server (voor verify-ca / verify-full)
+ru|db_q_ca|Файл сертификата ЦС сервера (для verify-ca / verify-full)
+zh|db_q_ca|服务器 CA 证书文件（用于 verify-ca / verify-full）
+ar|db_q_ca|ملف شهادة CA للخادم (لوضعي verify-ca / verify-full)
+en|db_q_admin|Administrator account that creates the user and the database (empty = they already exist)
+fr|db_q_admin|Compte administrateur qui crée l'utilisateur et la base (vide = ils existent déjà)
+es|db_q_admin|Cuenta de administrador que crea el usuario y la base (vacío = ya existen)
+de|db_q_admin|Administratorkonto, das Benutzer und Datenbank anlegt (leer = existieren bereits)
+it|db_q_admin|Account amministratore che crea utente e database (vuoto = esistono già)
+pt|db_q_admin|Conta de administrador que cria o utilizador e a base (vazio = já existem)
+nl|db_q_admin|Beheerdersaccount dat gebruiker en database aanmaakt (leeg = bestaan al)
+ru|db_q_admin|Учётная запись администратора, создающая пользователя и базу (пусто = уже существуют)
+zh|db_q_admin|用于创建用户和数据库的管理员账户（留空 = 已存在）
+ar|db_q_admin|حساب المسؤول الذي ينشئ المستخدم وقاعدة البيانات (فارغ = موجودان مسبقًا)
+en|db_q_adminpw|Password of the administrator account (used once, never stored)
+fr|db_q_adminpw|Mot de passe du compte administrateur (utilisé une fois, jamais stocké)
+es|db_q_adminpw|Contraseña de la cuenta de administrador (se usa una vez, nunca se guarda)
+de|db_q_adminpw|Passwort des Administratorkontos (einmal verwendet, nie gespeichert)
+it|db_q_adminpw|Password dell'account amministratore (usata una volta, mai salvata)
+pt|db_q_adminpw|Palavra-passe da conta de administrador (usada uma vez, nunca guardada)
+nl|db_q_adminpw|Wachtwoord van het beheerdersaccount (eenmalig gebruikt, nooit opgeslagen)
+ru|db_q_adminpw|Пароль администратора (используется один раз, не сохраняется)
+zh|db_q_adminpw|管理员账户密码（仅使用一次，不会保存）
+ar|db_q_adminpw|كلمة مرور حساب المسؤول (تُستخدم مرة واحدة ولا تُحفظ)
+en|db_hint|Database: SQLite (default). For a server install or several control planes use --db postgres (--db-install-local installs it for you).
+fr|db_hint|Base de données : SQLite (par défaut). Pour une installation serveur ou plusieurs plans de contrôle, utilisez --db postgres (--db-install-local l'installe pour vous).
+es|db_hint|Base de datos: SQLite (por defecto). Para un servidor o varios planos de control use --db postgres (--db-install-local lo instala por usted).
+de|db_hint|Datenbank: SQLite (Standard). Für eine Server-Installation oder mehrere Control Planes verwenden Sie --db postgres (--db-install-local installiert es für Sie).
+it|db_hint|Database: SQLite (predefinito). Per un'installazione server o più piani di controllo usa --db postgres (--db-install-local lo installa per te).
+pt|db_hint|Base de dados: SQLite (predefinição). Para um servidor ou vários planos de controlo use --db postgres (--db-install-local instala-o por si).
+nl|db_hint|Database: SQLite (standaard). Voor een serverinstallatie of meerdere control planes gebruikt u --db postgres (--db-install-local installeert het voor u).
+ru|db_hint|База данных: SQLite (по умолчанию). Для серверной установки или нескольких control plane используйте --db postgres (--db-install-local установит её).
+zh|db_hint|数据库：SQLite（默认）。服务器安装或多个控制平面请使用 --db postgres（--db-install-local 会自动安装）。
+ar|db_hint|قاعدة البيانات: SQLite (افتراضي). للتثبيت على خادم أو لعدة وحدات تحكم استخدم --db postgres (و--db-install-local يثبّتها لك).
+en|db_no_pkg|PostgreSQL cannot be installed automatically on this system: install the server package yourself, then run the installer again with --db postgres.
+fr|db_no_pkg|PostgreSQL ne peut pas être installé automatiquement sur ce système : installez vous-même le paquet serveur, puis relancez l'installateur avec --db postgres.
+es|db_no_pkg|PostgreSQL no se puede instalar automáticamente en este sistema: instale usted el paquete del servidor y vuelva a ejecutar el instalador con --db postgres.
+de|db_no_pkg|PostgreSQL lässt sich auf diesem System nicht automatisch installieren: installieren Sie das Serverpaket selbst und starten Sie den Installer erneut mit --db postgres.
+it|db_no_pkg|PostgreSQL non può essere installato automaticamente su questo sistema: installa tu il pacchetto server, poi riesegui l'installer con --db postgres.
+pt|db_no_pkg|O PostgreSQL não pode ser instalado automaticamente neste sistema: instale o pacote do servidor e volte a executar o instalador com --db postgres.
+nl|db_no_pkg|PostgreSQL kan op dit systeem niet automatisch worden geïnstalleerd: installeer zelf het serverpakket en start het installatieprogramma opnieuw met --db postgres.
+ru|db_no_pkg|PostgreSQL нельзя установить автоматически в этой системе: установите серверный пакет сами и снова запустите установщик с --db postgres.
+zh|db_no_pkg|无法在此系统上自动安装 PostgreSQL：请自行安装服务器软件包，然后使用 --db postgres 重新运行安装程序。
+ar|db_no_pkg|تعذّر تثبيت PostgreSQL تلقائيًا على هذا النظام: ثبّت حزمة الخادم بنفسك ثم أعد تشغيل المثبّت مع --db postgres.
+en|db_install_failed|Installing the PostgreSQL package failed. The log says why (/var/log/toutwaf-install.log).
+fr|db_install_failed|L'installation du paquet PostgreSQL a échoué. Le journal dit pourquoi (/var/log/toutwaf-install.log).
+es|db_install_failed|Falló la instalación del paquete PostgreSQL. El registro dice por qué (/var/log/toutwaf-install.log).
+de|db_install_failed|Die Installation des PostgreSQL-Pakets ist fehlgeschlagen. Das Protokoll nennt den Grund (/var/log/toutwaf-install.log).
+it|db_install_failed|L'installazione del pacchetto PostgreSQL è fallita. Il registro ne indica il motivo (/var/log/toutwaf-install.log).
+pt|db_install_failed|A instalação do pacote PostgreSQL falhou. O registo diz porquê (/var/log/toutwaf-install.log).
+nl|db_install_failed|Het installeren van het PostgreSQL-pakket is mislukt. Het logboek zegt waarom (/var/log/toutwaf-install.log).
+ru|db_install_failed|Не удалось установить пакет PostgreSQL. Причина — в журнале (/var/log/toutwaf-install.log).
+zh|db_install_failed|安装 PostgreSQL 软件包失败。原因见日志（/var/log/toutwaf-install.log）。
+ar|db_install_failed|فشل تثبيت حزمة PostgreSQL. السبب في السجل (/var/log/toutwaf-install.log).
+en|db_init_failed|The PostgreSQL cluster could not be initialised. The log says why.
+fr|db_init_failed|Le cluster PostgreSQL n'a pas pu être initialisé. Le journal dit pourquoi.
+es|db_init_failed|No se pudo inicializar el clúster de PostgreSQL. El registro dice por qué.
+de|db_init_failed|Der PostgreSQL-Cluster konnte nicht initialisiert werden. Das Protokoll nennt den Grund.
+it|db_init_failed|Impossibile inizializzare il cluster PostgreSQL. Il registro ne indica il motivo.
+pt|db_init_failed|Não foi possível inicializar o cluster PostgreSQL. O registo diz porquê.
+nl|db_init_failed|Het PostgreSQL-cluster kon niet worden geïnitialiseerd. Het logboek zegt waarom.
+ru|db_init_failed|Не удалось инициализировать кластер PostgreSQL. Причина — в журнале.
+zh|db_init_failed|无法初始化 PostgreSQL 集群。原因见日志。
+ar|db_init_failed|تعذّرت تهيئة مجموعة PostgreSQL. السبب في السجل.
+en|db_start_failed|PostgreSQL does not start. Check: systemctl status postgresql, and the log.
+fr|db_start_failed|PostgreSQL ne démarre pas. Vérifiez : systemctl status postgresql, et le journal.
+es|db_start_failed|PostgreSQL no arranca. Compruebe: systemctl status postgresql y el registro.
+de|db_start_failed|PostgreSQL startet nicht. Prüfen Sie: systemctl status postgresql und das Protokoll.
+it|db_start_failed|PostgreSQL non si avvia. Controlla: systemctl status postgresql e il registro.
+pt|db_start_failed|O PostgreSQL não arranca. Verifique: systemctl status postgresql e o registo.
+nl|db_start_failed|PostgreSQL start niet. Controleer: systemctl status postgresql en het logboek.
+ru|db_start_failed|PostgreSQL не запускается. Проверьте: systemctl status postgresql и журнал.
+zh|db_start_failed|PostgreSQL 无法启动。请检查：systemctl status postgresql 和日志。
+ar|db_start_failed|لا يبدأ PostgreSQL. افحص: systemctl status postgresql والسجل.
+en|db_too_old|The PostgreSQL version installed here (%s) is too old: version 13 or newer is required.
+fr|db_too_old|La version de PostgreSQL installée ici (%s) est trop ancienne : la version 13 ou plus récente est requise.
+es|db_too_old|La versión de PostgreSQL instalada aquí (%s) es demasiado antigua: se requiere la versión 13 o posterior.
+de|db_too_old|Die hier installierte PostgreSQL-Version (%s) ist zu alt: Version 13 oder neuer ist erforderlich.
+it|db_too_old|La versione di PostgreSQL installata qui (%s) è troppo vecchia: serve la versione 13 o successiva.
+pt|db_too_old|A versão do PostgreSQL instalada aqui (%s) é demasiado antiga: é necessária a versão 13 ou posterior.
+nl|db_too_old|De hier geïnstalleerde PostgreSQL-versie (%s) is te oud: versie 13 of nieuwer is vereist.
+ru|db_too_old|Установленная версия PostgreSQL (%s) слишком старая: нужна версия 13 или новее.
+zh|db_too_old|此处安装的 PostgreSQL 版本（%s）过旧：需要 13 或更高版本。
+ar|db_too_old|إصدار PostgreSQL المثبّت هنا (%s) قديم جدًا: يلزم الإصدار 13 أو أحدث.
+en|db_exists|A database user "%s" or a database "%s" already exists and was not created by this installer: nothing was changed. Choose other names (--db-name, --db-user) or give the existing connection (--db-dsn-file).
+fr|db_exists|Un utilisateur "%s" ou une base "%s" existe déjà et n'a pas été créé par cet installateur : rien n'a été modifié. Choisissez d'autres noms (--db-name, --db-user) ou donnez la connexion existante (--db-dsn-file).
+es|db_exists|Ya existe un usuario "%s" o una base "%s" que no creó este instalador: no se cambió nada. Elija otros nombres (--db-name, --db-user) o indique la conexión existente (--db-dsn-file).
+de|db_exists|Ein Benutzer "%s" oder eine Datenbank "%s" existiert bereits und wurde nicht von diesem Installer angelegt: nichts wurde geändert. Wählen Sie andere Namen (--db-name, --db-user) oder geben Sie die vorhandene Verbindung an (--db-dsn-file).
+it|db_exists|Esiste già un utente "%s" o un database "%s" non creato da questo installer: nulla è stato modificato. Scegli altri nomi (--db-name, --db-user) o indica la connessione esistente (--db-dsn-file).
+pt|db_exists|Já existe um utilizador "%s" ou uma base "%s" que não foi criado por este instalador: nada foi alterado. Escolha outros nomes (--db-name, --db-user) ou indique a ligação existente (--db-dsn-file).
+nl|db_exists|Er bestaat al een gebruiker "%s" of database "%s" die niet door dit installatieprogramma is aangemaakt: er is niets gewijzigd. Kies andere namen (--db-name, --db-user) of geef de bestaande verbinding op (--db-dsn-file).
+ru|db_exists|Пользователь "%s" или база "%s" уже существует и создана не этим установщиком: ничего не изменено. Выберите другие имена (--db-name, --db-user) или укажите существующее подключение (--db-dsn-file).
+zh|db_exists|已存在用户“%s”或数据库“%s”，且不是由本安装程序创建的：未做任何更改。请选择其他名称（--db-name、--db-user）或提供现有连接（--db-dsn-file）。
+ar|db_exists|يوجد مستخدم "%s" أو قاعدة "%s" لم ينشئها هذا المثبّت: لم يُغيَّر شيء. اختر أسماء أخرى (--db-name و--db-user) أو قدّم الاتصال الموجود (--db-dsn-file).
+en|db_create_failed|The user or the database could not be created. What was created was removed again.
+fr|db_create_failed|L'utilisateur ou la base n'a pas pu être créé. Ce qui avait été créé a été supprimé.
+es|db_create_failed|No se pudo crear el usuario o la base de datos. Lo creado se eliminó de nuevo.
+de|db_create_failed|Benutzer oder Datenbank konnten nicht angelegt werden. Was angelegt wurde, wurde wieder entfernt.
+it|db_create_failed|Impossibile creare l'utente o il database. Quanto creato è stato rimosso.
+pt|db_create_failed|Não foi possível criar o utilizador ou a base de dados. O que foi criado foi removido.
+nl|db_create_failed|De gebruiker of database kon niet worden aangemaakt. Wat was aangemaakt is weer verwijderd.
+ru|db_create_failed|Не удалось создать пользователя или базу. Созданное удалено.
+zh|db_create_failed|无法创建用户或数据库。已创建的内容已被删除。
+ar|db_create_failed|تعذّر إنشاء المستخدم أو قاعدة البيانات. أُزيل ما أُنشئ.
+en|db_rights|The account is not allowed to do this. The statements above are the minimum an administrator of the server has to run; then run the installer again.
+fr|db_rights|Le compte n'a pas les droits nécessaires. Les instructions ci-dessus sont le minimum qu'un administrateur du serveur doit exécuter ; relancez ensuite l'installateur.
+es|db_rights|La cuenta no tiene permiso para hacerlo. Las instrucciones anteriores son lo mínimo que un administrador del servidor debe ejecutar; luego vuelva a ejecutar el instalador.
+de|db_rights|Das Konto darf das nicht. Die obigen Anweisungen sind das Minimum, das ein Serveradministrator ausführen muss; starten Sie danach den Installer erneut.
+it|db_rights|L'account non ha i permessi necessari. Le istruzioni qui sopra sono il minimo che un amministratore del server deve eseguire; poi riesegui l'installer.
+pt|db_rights|A conta não tem permissão para isto. As instruções acima são o mínimo que um administrador do servidor tem de executar; depois volte a executar o instalador.
+nl|db_rights|Het account heeft hiervoor geen rechten. De bovenstaande opdrachten zijn het minimum dat een serverbeheerder moet uitvoeren; start daarna het installatieprogramma opnieuw.
+ru|db_rights|У учётной записи нет прав. Команды выше — минимум, который должен выполнить администратор сервера; затем снова запустите установщик.
+zh|db_rights|该账户无权执行此操作。上面的语句是服务器管理员至少需要执行的内容；执行后请重新运行安装程序。
+ar|db_rights|ليس لهذا الحساب صلاحية. التعليمات أعلاه هي الحد الأدنى الذي يجب أن ينفذه مسؤول الخادم؛ ثم أعد تشغيل المثبّت.
+en|db_need_conn|No connection to the PostgreSQL server was given: use --db-dsn-file, or --db-host with --db-password-file, or --db-install-local.
+fr|db_need_conn|Aucune connexion au serveur PostgreSQL n'a été donnée : utilisez --db-dsn-file, ou --db-host avec --db-password-file, ou --db-install-local.
+es|db_need_conn|No se indicó ninguna conexión al servidor PostgreSQL: use --db-dsn-file, o --db-host con --db-password-file, o --db-install-local.
+de|db_need_conn|Es wurde keine Verbindung zum PostgreSQL-Server angegeben: verwenden Sie --db-dsn-file, oder --db-host mit --db-password-file, oder --db-install-local.
+it|db_need_conn|Nessuna connessione al server PostgreSQL indicata: usa --db-dsn-file, oppure --db-host con --db-password-file, oppure --db-install-local.
+pt|db_need_conn|Não foi indicada nenhuma ligação ao servidor PostgreSQL: use --db-dsn-file, ou --db-host com --db-password-file, ou --db-install-local.
+nl|db_need_conn|Er is geen verbinding met de PostgreSQL-server opgegeven: gebruik --db-dsn-file, of --db-host met --db-password-file, of --db-install-local.
+ru|db_need_conn|Подключение к серверу PostgreSQL не задано: используйте --db-dsn-file, либо --db-host с --db-password-file, либо --db-install-local.
+zh|db_need_conn|未提供到 PostgreSQL 服务器的连接：请使用 --db-dsn-file，或 --db-host 加 --db-password-file，或 --db-install-local。
+ar|db_need_conn|لم تُحدَّد أي معلومات اتصال بخادم PostgreSQL: استخدم --db-dsn-file أو --db-host مع --db-password-file أو --db-install-local.
+en|db_schema_failed|The tables could not be created in the database. The log says why.
+fr|db_schema_failed|Les tables n'ont pas pu être créées dans la base. Le journal dit pourquoi.
+es|db_schema_failed|No se pudieron crear las tablas en la base de datos. El registro dice por qué.
+de|db_schema_failed|Die Tabellen konnten in der Datenbank nicht angelegt werden. Das Protokoll nennt den Grund.
+it|db_schema_failed|Impossibile creare le tabelle nel database. Il registro ne indica il motivo.
+pt|db_schema_failed|Não foi possível criar as tabelas na base de dados. O registo diz porquê.
+nl|db_schema_failed|De tabellen konden niet in de database worden aangemaakt. Het logboek zegt waarom.
+ru|db_schema_failed|Не удалось создать таблицы в базе. Причина — в журнале.
+zh|db_schema_failed|无法在数据库中创建表。原因见日志。
+ar|db_schema_failed|تعذّر إنشاء الجداول في قاعدة البيانات. السبب في السجل.
+en|db_no_pgdump|pg_dump is missing: the daily database backup will report an error until the PostgreSQL client package is installed.
+fr|db_no_pgdump|pg_dump est absent : la sauvegarde quotidienne de la base signalera une erreur tant que le paquet client PostgreSQL n'est pas installé.
+es|db_no_pgdump|Falta pg_dump: la copia diaria de la base dará error hasta que se instale el paquete cliente de PostgreSQL.
+de|db_no_pgdump|pg_dump fehlt: die tägliche Datenbanksicherung meldet einen Fehler, bis das PostgreSQL-Client-Paket installiert ist.
+it|db_no_pgdump|pg_dump manca: il backup giornaliero del database segnalerà un errore finché non sarà installato il pacchetto client PostgreSQL.
+pt|db_no_pgdump|Falta o pg_dump: a cópia diária da base de dados dará erro até o pacote cliente PostgreSQL ser instalado.
+nl|db_no_pgdump|pg_dump ontbreekt: de dagelijkse databaseback-up meldt een fout totdat het PostgreSQL-clientpakket is geïnstalleerd.
+ru|db_no_pgdump|pg_dump отсутствует: ежедневная копия базы будет выдавать ошибку, пока не установлен клиентский пакет PostgreSQL.
+zh|db_no_pgdump|缺少 pg_dump：在安装 PostgreSQL 客户端软件包之前，每日数据库备份会报错。
+ar|db_no_pgdump|pg_dump غير موجود: ستُبلغ النسخة اليومية لقاعدة البيانات عن خطأ حتى تُثبَّت حزمة عميل PostgreSQL.
+en|db_sum_engine|Database: %s
+fr|db_sum_engine|Base de données : %s
+es|db_sum_engine|Base de datos: %s
+de|db_sum_engine|Datenbank: %s
+it|db_sum_engine|Database: %s
+pt|db_sum_engine|Base de dados: %s
+nl|db_sum_engine|Database: %s
+ru|db_sum_engine|База данных: %s
+zh|db_sum_engine|数据库：%s
+ar|db_sum_engine|قاعدة البيانات: %s
+en|db_sum_local|PostgreSQL runs on this machine (loopback only); database %s, user %s (no administrator rights)
+fr|db_sum_local|PostgreSQL tourne sur cette machine (boucle locale uniquement) ; base %s, utilisateur %s (sans droits d'administration)
+es|db_sum_local|PostgreSQL funciona en esta máquina (solo bucle local); base %s, usuario %s (sin derechos de administración)
+de|db_sum_local|PostgreSQL läuft auf diesem Rechner (nur Loopback); Datenbank %s, Benutzer %s (ohne Administratorrechte)
+it|db_sum_local|PostgreSQL gira su questa macchina (solo loopback); database %s, utente %s (senza diritti di amministrazione)
+pt|db_sum_local|O PostgreSQL corre nesta máquina (apenas loopback); base %s, utilizador %s (sem direitos de administração)
+nl|db_sum_local|PostgreSQL draait op deze machine (alleen loopback); database %s, gebruiker %s (zonder beheerdersrechten)
+ru|db_sum_local|PostgreSQL работает на этой машине (только loopback); база %s, пользователь %s (без прав администратора)
+zh|db_sum_local|PostgreSQL 运行在本机（仅回环地址）；数据库 %s，用户 %s（无管理员权限）
+ar|db_sum_local|يعمل PostgreSQL على هذا الجهاز (الواجهة المحلية فقط)؛ القاعدة %s والمستخدم %s (بلا صلاحيات إدارية)
+en|db_sum_remote|Existing PostgreSQL server; database %s, user %s
+fr|db_sum_remote|Serveur PostgreSQL existant ; base %s, utilisateur %s
+es|db_sum_remote|Servidor PostgreSQL existente; base %s, usuario %s
+de|db_sum_remote|Vorhandener PostgreSQL-Server; Datenbank %s, Benutzer %s
+it|db_sum_remote|Server PostgreSQL esistente; database %s, utente %s
+pt|db_sum_remote|Servidor PostgreSQL existente; base %s, utilizador %s
+nl|db_sum_remote|Bestaande PostgreSQL-server; database %s, gebruiker %s
+ru|db_sum_remote|Существующий сервер PostgreSQL; база %s, пользователь %s
+zh|db_sum_remote|现有 PostgreSQL 服务器；数据库 %s，用户 %s
+ar|db_sum_remote|خادم PostgreSQL موجود؛ القاعدة %s والمستخدم %s
+en|db_sum_schema|Schema: %s
+fr|db_sum_schema|Schéma : %s
+es|db_sum_schema|Esquema: %s
+de|db_sum_schema|Schema: %s
+it|db_sum_schema|Schema: %s
+pt|db_sum_schema|Esquema: %s
+nl|db_sum_schema|Schema: %s
+ru|db_sum_schema|Схема: %s
+zh|db_sum_schema|架构：%s
+ar|db_sum_schema|المخطط: %s
+en|db_sum_secret|The connection (with its password) is in %s, readable by the ToutWAF service only
+fr|db_sum_secret|La connexion (avec son mot de passe) est dans %s, lisible par le seul service ToutWAF
+es|db_sum_secret|La conexión (con su contraseña) está en %s, legible solo por el servicio ToutWAF
+de|db_sum_secret|Die Verbindung (mit Passwort) liegt in %s und ist nur für den ToutWAF-Dienst lesbar
+it|db_sum_secret|La connessione (con la password) è in %s, leggibile solo dal servizio ToutWAF
+pt|db_sum_secret|A ligação (com a palavra-passe) está em %s, legível apenas pelo serviço ToutWAF
+nl|db_sum_secret|De verbinding (met wachtwoord) staat in %s, alleen leesbaar voor de ToutWAF-dienst
+ru|db_sum_secret|Подключение (с паролем) хранится в %s и читается только службой ToutWAF
+zh|db_sum_secret|连接信息（含密码）保存在 %s，仅 ToutWAF 服务可读
+ar|db_sum_secret|الاتصال (مع كلمة المرور) في %s ولا يقرؤه إلا خدمة ToutWAF
+en|db_sum_backup|A verified pg_dump runs every night (7 kept); status in the console, Santé
+fr|db_sum_backup|Un pg_dump vérifié s'exécute chaque nuit (7 conservés) ; état dans la console, Santé
+es|db_sum_backup|Cada noche se ejecuta un pg_dump verificado (se conservan 7); estado en la consola, Salud
+de|db_sum_backup|Jede Nacht läuft ein geprüftes pg_dump (7 bleiben erhalten); Status in der Konsole, Santé
+it|db_sum_backup|Ogni notte gira un pg_dump verificato (se ne conservano 7); stato nella console, Santé
+pt|db_sum_backup|Todas as noites corre um pg_dump verificado (guardam-se 7); estado na consola, Santé
+nl|db_sum_backup|Elke nacht draait een gecontroleerde pg_dump (7 bewaard); status in de console, Santé
+ru|db_sum_backup|Каждую ночь выполняется проверенный pg_dump (хранится 7); состояние в консоли, Santé
+zh|db_sum_backup|每晚运行经验证的 pg_dump（保留 7 份）；状态见控制台 Santé
+ar|db_sum_backup|يعمل pg_dump موثَّق كل ليلة (يُحتفظ بـ 7)؛ الحالة في وحدة التحكم، Santé
+en|db_sum_nobackup|No automatic database backup: schedule pg_dump or use the backup of your database provider
+fr|db_sum_nobackup|Pas de sauvegarde automatique de la base : planifiez pg_dump ou utilisez la sauvegarde de votre hébergeur de base
+es|db_sum_nobackup|Sin copia automática de la base: programe pg_dump o use la copia de su proveedor de base de datos
+de|db_sum_nobackup|Keine automatische Datenbanksicherung: planen Sie pg_dump oder nutzen Sie die Sicherung Ihres Datenbankanbieters
+it|db_sum_nobackup|Nessun backup automatico del database: pianifica pg_dump o usa il backup del tuo fornitore di database
+pt|db_sum_nobackup|Sem cópia automática da base: agende o pg_dump ou use a cópia do seu fornecedor de base de dados
+nl|db_sum_nobackup|Geen automatische databaseback-up: plan pg_dump in of gebruik de back-up van uw databaseaanbieder
+ru|db_sum_nobackup|Автоматической копии базы нет: запланируйте pg_dump или используйте копирование вашего поставщика БД
+zh|db_sum_nobackup|没有自动数据库备份：请安排 pg_dump 或使用数据库提供商的备份
+ar|db_sum_nobackup|لا توجد نسخة احتياطية تلقائية لقاعدة البيانات: جدول pg_dump أو استخدم نسخ مزوّد قاعدة البيانات
+en|db_sum_sqlite|Database: SQLite, one file on this machine (small installation). Move to PostgreSQL later: toutwaf-cp db migrate
+fr|db_sum_sqlite|Base de données : SQLite, un fichier sur cette machine (petite installation). Passer à PostgreSQL plus tard : toutwaf-cp db migrate
+es|db_sum_sqlite|Base de datos: SQLite, un archivo en esta máquina (instalación pequeña). Pasar a PostgreSQL más tarde: toutwaf-cp db migrate
+de|db_sum_sqlite|Datenbank: SQLite, eine Datei auf diesem Rechner (kleine Installation). Später zu PostgreSQL wechseln: toutwaf-cp db migrate
+it|db_sum_sqlite|Database: SQLite, un file su questa macchina (piccola installazione). Passare a PostgreSQL più tardi: toutwaf-cp db migrate
+pt|db_sum_sqlite|Base de dados: SQLite, um ficheiro nesta máquina (instalação pequena). Passar para PostgreSQL mais tarde: toutwaf-cp db migrate
+nl|db_sum_sqlite|Database: SQLite, één bestand op deze machine (kleine installatie). Later overstappen naar PostgreSQL: toutwaf-cp db migrate
+ru|db_sum_sqlite|База данных: SQLite, один файл на этой машине (небольшая установка). Позже перейти на PostgreSQL: toutwaf-cp db migrate
+zh|db_sum_sqlite|数据库：SQLite，本机上的一个文件（小型安装）。以后可迁移到 PostgreSQL：toutwaf-cp db migrate
+ar|db_sum_sqlite|قاعدة البيانات: SQLite، ملف واحد على هذا الجهاز (تثبيت صغير). الانتقال إلى PostgreSQL لاحقًا: toutwaf-cp db migrate
+en|s_extras|Extras: Windows agent and antivirus programs
+fr|s_extras|Extras : agent Windows et programmes de l'antivirus
+es|s_extras|Extras: agente de Windows y programas del antivirus
+de|s_extras|Extras: Windows-Agent und Antivirus-Programme
+it|s_extras|Extra: agente Windows e programmi dell'antivirus
+pt|s_extras|Extras: agente Windows e programas do antivírus
+nl|s_extras|Extra's: Windows-agent en antivirusprogramma's
+ru|s_extras|Дополнения: агент для Windows и программы антивируса
+zh|s_extras|附加包：Windows 代理和杀毒程序
+ar|s_extras|الإضافات: وكيل Windows وبرامج مكافحة الفيروسات
+en|s_extras_ok|Extras installed: %s programs in %s
+fr|s_extras_ok|Extras installés : %s programmes dans %s
+es|s_extras_ok|Extras instalados: %s programas en %s
+de|s_extras_ok|Extras installiert: %s Programme in %s
+it|s_extras_ok|Extra installati: %s programmi in %s
+pt|s_extras_ok|Extras instalados: %s programas em %s
+nl|s_extras_ok|Extra's geïnstalleerd: %s programma's in %s
+ru|s_extras_ok|Дополнения установлены: %s программ в %s
+zh|s_extras_ok|附加包已安装：%s 个程序，位于 %s
+ar|s_extras_ok|تم تثبيت الإضافات: %s برنامج في %s
+en|s_extras_sha|Extras verified: %s file(s), %s MiB (SHA-256 and signature)
+fr|s_extras_sha|Extras vérifiés : %s fichier(s), %s Mio (SHA-256 et signature)
+es|s_extras_sha|Extras verificados: %s archivo(s), %s MiB (SHA-256 y firma)
+de|s_extras_sha|Extras geprüft: %s Datei(en), %s MiB (SHA-256 und Signatur)
+it|s_extras_sha|Extra verificati: %s file, %s MiB (SHA-256 e firma)
+pt|s_extras_sha|Extras verificados: %s ficheiro(s), %s MiB (SHA-256 e assinatura)
+nl|s_extras_sha|Extra's gecontroleerd: %s bestand(en), %s MiB (SHA-256 en handtekening)
+ru|s_extras_sha|Дополнения проверены: файлов %s, %s МиБ (SHA-256 и подпись)
+zh|s_extras_sha|附加包已校验：%s 个文件，%s MiB（SHA-256 与签名）
+ar|s_extras_sha|تم التحقق من الإضافات: %s ملف، %s ميبيبايت (SHA-256 والتوقيع)
+en|s_extras_unchecked|Extras taken as given, without a SHA256SUMS to check them: %s
+fr|s_extras_unchecked|Extras pris tels quels, sans SHA256SUMS pour les vérifier : %s
+es|s_extras_unchecked|Extras tomados tal cual, sin SHA256SUMS para verificarlos: %s
+de|s_extras_unchecked|Extras unverändert übernommen, ohne SHA256SUMS zur Prüfung: %s
+it|s_extras_unchecked|Extra usati così come sono, senza SHA256SUMS per verificarli: %s
+pt|s_extras_unchecked|Extras usados tal como estão, sem SHA256SUMS para os verificar: %s
+nl|s_extras_unchecked|Extra's zoals ze zijn overgenomen, zonder SHA256SUMS om ze te controleren: %s
+ru|s_extras_unchecked|Дополнения взяты как есть, без SHA256SUMS для проверки: %s
+zh|s_extras_unchecked|附加包按原样使用，没有 SHA256SUMS 可供校验：%s
+ar|s_extras_unchecked|تم أخذ الإضافات كما هي دون SHA256SUMS للتحقق منها: %s
+en|w_extras_dl|The extras could not be downloaded (%s). ToutWAF works without them, but this console will not offer Windows nor the antivirus until they are installed.
+fr|w_extras_dl|Les extras n'ont pas pu être téléchargés (%s). ToutWAF fonctionne sans eux, mais cette console ne proposera ni Windows ni l'antivirus tant qu'ils ne sont pas installés.
+es|w_extras_dl|No se pudieron descargar los extras (%s). ToutWAF funciona sin ellos, pero esta consola no ofrecerá Windows ni el antivirus hasta que se instalen.
+de|w_extras_dl|Die Extras konnten nicht heruntergeladen werden (%s). ToutWAF läuft auch ohne sie, doch diese Konsole bietet weder Windows noch den Virenschutz an, bis sie installiert sind.
+it|w_extras_dl|Impossibile scaricare gli extra (%s). ToutWAF funziona senza, ma questa console non proporrà Windows né l'antivirus finché non saranno installati.
+pt|w_extras_dl|Não foi possível transferir os extras (%s). O ToutWAF funciona sem eles, mas esta consola não oferecerá o Windows nem o antivírus enquanto não estiverem instalados.
+nl|w_extras_dl|De extra's konden niet worden gedownload (%s). ToutWAF werkt zonder, maar deze console biedt geen Windows of antivirus aan zolang ze niet geïnstalleerd zijn.
+ru|w_extras_dl|Не удалось загрузить дополнения (%s). ToutWAF работает без них, но эта консоль не предложит Windows и антивирус, пока они не установлены.
+zh|w_extras_dl|无法下载附加包（%s）。ToutWAF 没有它们也能运行，但在安装之前，此控制台不会提供 Windows 和杀毒功能。
+ar|w_extras_dl|تعذر تنزيل الإضافات (%s). يعمل ToutWAF بدونها، لكن هذه اللوحة لن تعرض Windows ولا مكافحة الفيروسات حتى يتم تثبيتها.
+en|w_extras_sum|The extras %s do not match their SHA-256 in the signed SHA256SUMS: they were NOT installed.
+fr|w_extras_sum|Les extras %s ne correspondent pas à leur SHA-256 du SHA256SUMS signé : ils n'ont PAS été installés.
+es|w_extras_sum|Los extras %s no coinciden con su SHA-256 del SHA256SUMS firmado: NO se instalaron.
+de|w_extras_sum|Die Extras %s stimmen nicht mit ihrem SHA-256 im signierten SHA256SUMS überein: sie wurden NICHT installiert.
+it|w_extras_sum|Gli extra %s non corrispondono al loro SHA-256 nel SHA256SUMS firmato: NON sono stati installati.
+pt|w_extras_sum|Os extras %s não correspondem ao seu SHA-256 no SHA256SUMS assinado: NÃO foram instalados.
+nl|w_extras_sum|De extra's %s komen niet overeen met hun SHA-256 in de ondertekende SHA256SUMS: ze zijn NIET geïnstalleerd.
+ru|w_extras_sum|Дополнения %s не совпадают со своей суммой SHA-256 в подписанном SHA256SUMS: они НЕ установлены.
+zh|w_extras_sum|附加包 %s 与已签名 SHA256SUMS 中的 SHA-256 不一致：未安装。
+ar|w_extras_sum|الإضافات %s لا تطابق قيمة SHA-256 في SHA256SUMS الموقّع: لم يتم تثبيتها.
+en|w_extras_bad|The extras file %s is not a valid extras archive: it was NOT installed.
+fr|w_extras_bad|Le fichier d'extras %s n'est pas une archive d'extras valide : il n'a PAS été installé.
+es|w_extras_bad|El archivo de extras %s no es un archivo de extras válido: NO se instaló.
+de|w_extras_bad|Die Extras-Datei %s ist kein gültiges Extras-Archiv: sie wurde NICHT installiert.
+it|w_extras_bad|Il file di extra %s non è un archivio di extra valido: NON è stato installato.
+pt|w_extras_bad|O ficheiro de extras %s não é um arquivo de extras válido: NÃO foi instalado.
+nl|w_extras_bad|Het extra-bestand %s is geen geldig extra-archief: het is NIET geïnstalleerd.
+ru|w_extras_bad|Файл дополнений %s не является допустимым архивом дополнений: он НЕ установлен.
+zh|w_extras_bad|附加包文件 %s 不是有效的附加包归档：未安装。
+ar|w_extras_bad|ملف الإضافات %s ليس أرشيف إضافات صالحا: لم يتم تثبيته.
+en|w_extras_ver|The extras are for version %s, this installation is %s: they were NOT installed.
+fr|w_extras_ver|Les extras sont de la version %s, cette installation est en %s : ils n'ont PAS été installés.
+es|w_extras_ver|Los extras son de la versión %s, esta instalación es %s: NO se instalaron.
+de|w_extras_ver|Die Extras gehören zu Version %s, diese Installation ist %s: sie wurden NICHT installiert.
+it|w_extras_ver|Gli extra sono della versione %s, questa installazione è %s: NON sono stati installati.
+pt|w_extras_ver|Os extras são da versão %s, esta instalação é %s: NÃO foram instalados.
+nl|w_extras_ver|De extra's zijn van versie %s, deze installatie is %s: ze zijn NIET geïnstalleerd.
+ru|w_extras_ver|Дополнения от версии %s, а эта установка — %s: они НЕ установлены.
+zh|w_extras_ver|附加包适用于版本 %s，而此安装为 %s：未安装。
+ar|w_extras_ver|الإضافات خاصة بالإصدار %s وهذا التثبيت هو %s: لم يتم تثبيتها.
+en|w_extras_inc|The release lists %s part(s) of the extras but says it has %s: the publication is damaged, the extras were NOT installed.
+fr|w_extras_inc|La version liste %s partie(s) des extras mais annonce %s : la publication est abîmée, les extras n'ont PAS été installés.
+es|w_extras_inc|La versión lista %s parte(s) de los extras pero indica %s: la publicación está dañada, los extras NO se instalaron.
+de|w_extras_inc|Die Version listet %s Teil(e) der Extras, nennt aber %s: die Veröffentlichung ist beschädigt, die Extras wurden NICHT installiert.
+it|w_extras_inc|La versione elenca %s parte/i degli extra ma ne dichiara %s: la pubblicazione è danneggiata, gli extra NON sono stati installati.
+pt|w_extras_inc|A versão lista %s parte(s) dos extras mas indica %s: a publicação está danificada, os extras NÃO foram instalados.
+nl|w_extras_inc|De versie vermeldt %s deel/delen van de extra's maar zegt er %s te hebben: de publicatie is beschadigd, de extra's zijn NIET geïnstalleerd.
+ru|w_extras_inc|Релиз перечисляет %s частей дополнений, но заявляет %s: публикация повреждена, дополнения НЕ установлены.
+zh|w_extras_inc|该版本列出了附加包的 %s 个部分，但声明共有 %s 个：发布已损坏，未安装附加包。
+ar|w_extras_inc|يسرد الإصدار %s جزءا من الإضافات لكنه يذكر %s: النشر تالف ولم يتم تثبيت الإضافات.
+en|w_extras_nofile|The extras file %s does not exist.
+fr|w_extras_nofile|Le fichier d'extras %s n'existe pas.
+es|w_extras_nofile|El archivo de extras %s no existe.
+de|w_extras_nofile|Die Extras-Datei %s existiert nicht.
+it|w_extras_nofile|Il file di extra %s non esiste.
+pt|w_extras_nofile|O ficheiro de extras %s não existe.
+nl|w_extras_nofile|Het extra-bestand %s bestaat niet.
+ru|w_extras_nofile|Файл дополнений %s не существует.
+zh|w_extras_nofile|附加包文件 %s 不存在。
+ar|w_extras_nofile|ملف الإضافات %s غير موجود.
+en|w_extras_none|This release carries no extras: this console will not offer Windows nor the antivirus.
+fr|w_extras_none|Cette version ne contient pas d'extras : cette console ne proposera ni Windows ni l'antivirus.
+es|w_extras_none|Esta versión no incluye extras: esta consola no ofrecerá Windows ni el antivirus.
+de|w_extras_none|Diese Version enthält keine Extras: diese Konsole bietet weder Windows noch den Virenschutz an.
+it|w_extras_none|Questa versione non contiene extra: questa console non proporrà Windows né l'antivirus.
+pt|w_extras_none|Esta versão não inclui extras: esta consola não oferecerá o Windows nem o antivírus.
+nl|w_extras_none|Deze versie bevat geen extra's: deze console biedt geen Windows of antivirus aan.
+ru|w_extras_none|В этом релизе нет дополнений: эта консоль не предложит Windows и антивирус.
+zh|w_extras_none|此版本不含附加包：此控制台不会提供 Windows 和杀毒功能。
+ar|w_extras_none|لا يحتوي هذا الإصدار على إضافات: لن تعرض هذه اللوحة Windows ولا مكافحة الفيروسات.
+en|w_extras_todo|Extras not installed. When the network allows it, run as root: %s
+fr|w_extras_todo|Extras non installés. Quand le réseau le permet, lancez en root : %s
+es|w_extras_todo|Extras no instalados. Cuando la red lo permita, ejecute como root: %s
+de|w_extras_todo|Extras nicht installiert. Sobald das Netz es erlaubt, als root ausführen: %s
+it|w_extras_todo|Extra non installati. Quando la rete lo consente, eseguire come root: %s
+pt|w_extras_todo|Extras não instalados. Quando a rede o permitir, execute como root: %s
+nl|w_extras_todo|Extra's niet geïnstalleerd. Zodra het netwerk het toelaat, voer uit als root: %s
+ru|w_extras_todo|Дополнения не установлены. Когда сеть позволит, выполните от root: %s
+zh|w_extras_todo|附加包未安装。网络可用时请以 root 运行：%s
+ar|w_extras_todo|لم يتم تثبيت الإضافات. عندما تسمح الشبكة، شغّل بصلاحيات root: %s
+en|extras_needs_cp|The extras belong to the control plane: it is not installed on this machine.
+fr|extras_needs_cp|Les extras appartiennent au plan de contrôle : il n'est pas installé sur cette machine.
+es|extras_needs_cp|Los extras pertenecen al plano de control: no está instalado en esta máquina.
+de|extras_needs_cp|Die Extras gehören zur Control Plane: sie ist auf diesem Rechner nicht installiert.
+it|extras_needs_cp|Gli extra appartengono al control plane: non è installato su questa macchina.
+pt|extras_needs_cp|Os extras pertencem ao plano de controlo: não está instalado nesta máquina.
+nl|extras_needs_cp|De extra's horen bij de control plane: die is niet geïnstalleerd op deze machine.
+ru|extras_needs_cp|Дополнения относятся к control plane: он не установлен на этой машине.
+zh|extras_needs_cp|附加包属于控制平面：本机未安装控制平面。
+ar|extras_needs_cp|الإضافات تخص مستوى التحكم: وهو غير مثبت على هذا الجهاز.
+en|extras_other_release|The published release (%s) is not the installed one (%s): the extras come with it. Run --update.
+fr|extras_other_release|La version publiée (%s) n'est pas celle qui est installée (%s) : les extras viennent avec elle. Lancez --update.
+es|extras_other_release|La versión publicada (%s) no es la instalada (%s): los extras vienen con ella. Ejecute --update.
+de|extras_other_release|Die veröffentlichte Version (%s) ist nicht die installierte (%s): die Extras kommen mit ihr. --update ausführen.
+it|extras_other_release|La versione pubblicata (%s) non è quella installata (%s): gli extra arrivano con essa. Eseguire --update.
+pt|extras_other_release|A versão publicada (%s) não é a instalada (%s): os extras vêm com ela. Execute --update.
+nl|extras_other_release|De gepubliceerde versie (%s) is niet de geïnstalleerde (%s): de extra's komen daarmee mee. Voer --update uit.
+ru|extras_other_release|Опубликованный релиз (%s) не совпадает с установленным (%s): дополнения идут вместе с ним. Выполните --update.
+zh|extras_other_release|已发布的版本（%s）不是已安装的版本（%s）：附加包随它一起提供。请运行 --update。
+ar|extras_other_release|الإصدار المنشور (%s) ليس المثبت (%s): الإضافات تأتي معه. شغّل --update.
+en|st_extras_ok|Extras: installed (Windows agent, antivirus programs)
+fr|st_extras_ok|Extras : installés (agent Windows, programmes de l'antivirus)
+es|st_extras_ok|Extras: instalados (agente de Windows, programas del antivirus)
+de|st_extras_ok|Extras: installiert (Windows-Agent, Antivirus-Programme)
+it|st_extras_ok|Extra: installati (agente Windows, programmi dell'antivirus)
+pt|st_extras_ok|Extras: instalados (agente Windows, programas do antivírus)
+nl|st_extras_ok|Extra's: geïnstalleerd (Windows-agent, antivirusprogramma's)
+ru|st_extras_ok|Дополнения: установлены (агент для Windows, программы антивируса)
+zh|st_extras_ok|附加包：已安装（Windows 代理、杀毒程序）
+ar|st_extras_ok|الإضافات: مثبتة (وكيل Windows وبرامج مكافحة الفيروسات)
+en|st_extras_none|Extras missing: Windows and the antivirus are not offered. Run as root: %s
+fr|st_extras_none|Extras absents : Windows et l'antivirus ne sont pas proposés. Lancez en root : %s
+es|st_extras_none|Extras ausentes: Windows y el antivirus no se ofrecen. Ejecute como root: %s
+de|st_extras_none|Extras fehlen: Windows und der Virenschutz werden nicht angeboten. Als root ausführen: %s
+it|st_extras_none|Extra mancanti: Windows e l'antivirus non sono proposti. Eseguire come root: %s
+pt|st_extras_none|Extras em falta: o Windows e o antivírus não são oferecidos. Execute como root: %s
+nl|st_extras_none|Extra's ontbreken: Windows en antivirus worden niet aangeboden. Voer uit als root: %s
+ru|st_extras_none|Дополнения отсутствуют: Windows и антивирус не предлагаются. Выполните от root: %s
+zh|st_extras_none|缺少附加包：不提供 Windows 和杀毒功能。请以 root 运行：%s
+ar|st_extras_none|الإضافات مفقودة: لا يتم عرض Windows ولا مكافحة الفيروسات. شغّل بصلاحيات root: %s
+en|s_extras_noav|Extras: Windows agent
+fr|s_extras_noav|Extras : agent Windows
+es|s_extras_noav|Extras: agente de Windows
+de|s_extras_noav|Extras: Windows-Agent
+it|s_extras_noav|Extra: agente Windows
+pt|s_extras_noav|Extras: agente Windows
+nl|s_extras_noav|Extra's: Windows-agent
+ru|s_extras_noav|Дополнения: агент для Windows
+zh|s_extras_noav|附加包：Windows 代理
+ar|s_extras_noav|الإضافات: وكيل Windows
+en|w_extras_dl_noav|The extras could not be downloaded (%s). ToutWAF works without them, but this console will not offer Windows until they are installed.
+fr|w_extras_dl_noav|Les extras n'ont pas pu être téléchargés (%s). ToutWAF fonctionne sans eux, mais cette console ne proposera pas Windows tant qu'ils ne sont pas installés.
+es|w_extras_dl_noav|No se pudieron descargar los extras (%s). ToutWAF funciona sin ellos, pero esta consola no ofrecerá Windows hasta que se instalen.
+de|w_extras_dl_noav|Die Extras konnten nicht heruntergeladen werden (%s). ToutWAF läuft auch ohne sie, doch diese Konsole bietet Windows nicht an, bis sie installiert sind.
+it|w_extras_dl_noav|Impossibile scaricare gli extra (%s). ToutWAF funziona senza, ma questa console non proporrà Windows finché non saranno installati.
+pt|w_extras_dl_noav|Não foi possível transferir os extras (%s). O ToutWAF funciona sem eles, mas esta consola não oferecerá o Windows enquanto não estiverem instalados.
+nl|w_extras_dl_noav|De extra's konden niet worden gedownload (%s). ToutWAF werkt zonder, maar deze console biedt Windows niet aan zolang ze niet geïnstalleerd zijn.
+ru|w_extras_dl_noav|Не удалось загрузить дополнения (%s). ToutWAF работает без них, но эта консоль не предложит Windows, пока они не установлены.
+zh|w_extras_dl_noav|无法下载附加包（%s）。ToutWAF 没有它们也能运行，但在安装之前，此控制台不会提供 Windows。
+ar|w_extras_dl_noav|تعذر تنزيل الإضافات (%s). يعمل ToutWAF بدونها، لكن هذه اللوحة لن تعرض Windows حتى يتم تثبيتها.
+en|w_extras_none_noav|This release carries no extras: this console will not offer Windows.
+fr|w_extras_none_noav|Cette version ne contient pas d'extras : cette console ne proposera pas Windows.
+es|w_extras_none_noav|Esta versión no incluye extras: esta consola no ofrecerá Windows.
+de|w_extras_none_noav|Diese Version enthält keine Extras: diese Konsole bietet Windows nicht an.
+it|w_extras_none_noav|Questa versione non contiene extra: questa console non proporrà Windows.
+pt|w_extras_none_noav|Esta versão não inclui extras: esta consola não oferecerá o Windows.
+nl|w_extras_none_noav|Deze versie bevat geen extra's: deze console biedt Windows niet aan.
+ru|w_extras_none_noav|В этом релизе нет дополнений: эта консоль не предложит Windows.
+zh|w_extras_none_noav|此版本不含附加包：此控制台不会提供 Windows。
+ar|w_extras_none_noav|لا يحتوي هذا الإصدار على إضافات: لن تعرض هذه اللوحة Windows.
+en|st_extras_ok_noav|Extras: installed (Windows agent)
+fr|st_extras_ok_noav|Extras : installés (agent Windows)
+es|st_extras_ok_noav|Extras: instalados (agente de Windows)
+de|st_extras_ok_noav|Extras: installiert (Windows-Agent)
+it|st_extras_ok_noav|Extra: installati (agente Windows)
+pt|st_extras_ok_noav|Extras: instalados (agente Windows)
+nl|st_extras_ok_noav|Extra's: geïnstalleerd (Windows-agent)
+ru|st_extras_ok_noav|Дополнения: установлены (агент для Windows)
+zh|st_extras_ok_noav|附加包：已安装（Windows 代理）
+ar|st_extras_ok_noav|الإضافات: مثبتة (وكيل Windows)
+en|st_extras_none_noav|Extras missing: Windows is not offered. Run as root: %s
+fr|st_extras_none_noav|Extras absents : Windows n'est pas proposé. Lancez en root : %s
+es|st_extras_none_noav|Extras ausentes: Windows no se ofrece. Ejecute como root: %s
+de|st_extras_none_noav|Extras fehlen: Windows wird nicht angeboten. Als root ausführen: %s
+it|st_extras_none_noav|Extra mancanti: Windows non è proposto. Eseguire come root: %s
+pt|st_extras_none_noav|Extras em falta: o Windows não é oferecido. Execute como root: %s
+nl|st_extras_none_noav|Extra's ontbreken: Windows wordt niet aangeboden. Voer uit als root: %s
+ru|st_extras_none_noav|Дополнения отсутствуют: Windows не предлагается. Выполните от root: %s
+zh|st_extras_none_noav|缺少附加包：不提供 Windows。请以 root 运行：%s
+ar|st_extras_none_noav|الإضافات مفقودة: لا يتم عرض Windows. شغّل بصلاحيات root: %s
+en|af_line|Problem detected: %s; correction applied: %s; new attempt: %s
+fr|af_line|Problème détecté : %s ; correction appliquée : %s ; nouvel essai : %s
+es|af_line|Problema detectado: %s; corrección aplicada: %s; nuevo intento: %s
+de|af_line|Problem erkannt: %s; Korrektur angewendet: %s; neuer Versuch: %s
+it|af_line|Problema rilevato: %s; correzione applicata: %s; nuovo tentativo: %s
+pt|af_line|Problema detetado: %s; correção aplicada: %s; nova tentativa: %s
+nl|af_line|Probleem gevonden: %s; correctie toegepast: %s; nieuwe poging: %s
+ru|af_line|Обнаружена проблема: %s; исправление применено: %s; новая попытка: %s
+zh|af_line|检测到问题：%s；已应用修正：%s；重试结果：%s
+ar|af_line|تم اكتشاف مشكلة: %s؛ التصحيح المطبق: %s؛ المحاولة الجديدة: %s
+en|af_plan_line|Problem detected: %s; correction planned: %s (--autofix-dry-run: nothing is changed)
+fr|af_plan_line|Problème détecté : %s ; correction prévue : %s (--autofix-dry-run : rien n'est modifié)
+es|af_plan_line|Problema detectado: %s; corrección prevista: %s (--autofix-dry-run: no se cambia nada)
+de|af_plan_line|Problem erkannt: %s; geplante Korrektur: %s (--autofix-dry-run: nichts wird geändert)
+it|af_plan_line|Problema rilevato: %s; correzione prevista: %s (--autofix-dry-run: nulla viene modificato)
+pt|af_plan_line|Problema detetado: %s; correção prevista: %s (--autofix-dry-run: nada é alterado)
+nl|af_plan_line|Probleem gevonden: %s; geplande correctie: %s (--autofix-dry-run: er wordt niets gewijzigd)
+ru|af_plan_line|Обнаружена проблема: %s; запланированное исправление: %s (--autofix-dry-run: ничего не меняется)
+zh|af_plan_line|检测到问题：%s；计划的修正：%s（--autofix-dry-run：不做任何更改）
+ar|af_plan_line|تم اكتشاف مشكلة: %s؛ التصحيح المخطط: %s (--autofix-dry-run: لا يتم تغيير أي شيء)
+en|af_failed_line|Problem detected: %s; correction failed: %s; no new attempt
+fr|af_failed_line|Problème détecté : %s ; la correction a échoué : %s ; pas de nouvel essai
+es|af_failed_line|Problema detectado: %s; la corrección falló: %s; sin nuevo intento
+de|af_failed_line|Problem erkannt: %s; Korrektur fehlgeschlagen: %s; kein neuer Versuch
+it|af_failed_line|Problema rilevato: %s; correzione non riuscita: %s; nessun nuovo tentativo
+pt|af_failed_line|Problema detetado: %s; a correção falhou: %s; sem nova tentativa
+nl|af_failed_line|Probleem gevonden: %s; correctie mislukt: %s; geen nieuwe poging
+ru|af_failed_line|Обнаружена проблема: %s; исправление не удалось: %s; новой попытки нет
+zh|af_failed_line|检测到问题：%s；修正失败：%s；不再重试
+ar|af_failed_line|تم اكتشاف مشكلة: %s؛ فشل التصحيح: %s؛ لا محاولة جديدة
+en|af_manual_line|Problem detected: %s; to be done by hand: %s
+fr|af_manual_line|Problème détecté : %s ; à faire à la main : %s
+es|af_manual_line|Problema detectado: %s; a hacer a mano: %s
+de|af_manual_line|Problem erkannt: %s; von Hand zu tun: %s
+it|af_manual_line|Problema rilevato: %s; da fare a mano: %s
+pt|af_manual_line|Problema detetado: %s; a fazer manualmente: %s
+nl|af_manual_line|Probleem gevonden: %s; handmatig te doen: %s
+ru|af_manual_line|Обнаружена проблема: %s; нужно сделать вручную: %s
+zh|af_manual_line|检测到问题：%s；需要手动处理：%s
+ar|af_manual_line|تم اكتشاف مشكلة: %s؛ يجب القيام بما يلي يدويا: %s
+en|af_try_ok|succeeded
+fr|af_try_ok|réussi
+es|af_try_ok|logrado
+de|af_try_ok|erfolgreich
+it|af_try_ok|riuscito
+pt|af_try_ok|bem-sucedida
+nl|af_try_ok|geslaagd
+ru|af_try_ok|успешно
+zh|af_try_ok|成功
+ar|af_try_ok|نجحت
+en|af_try_ko|failed
+fr|af_try_ko|échoué
+es|af_try_ko|fallido
+de|af_try_ko|fehlgeschlagen
+it|af_try_ko|non riuscito
+pt|af_try_ko|falhou
+nl|af_try_ko|mislukt
+ru|af_try_ko|не удалось
+zh|af_try_ko|失败
+ar|af_try_ko|فشلت
+en|af_try_run|in progress
+fr|af_try_run|en cours
+es|af_try_run|en curso
+de|af_try_run|läuft
+it|af_try_run|in corso
+pt|af_try_run|em curso
+nl|af_try_run|bezig
+ru|af_try_run|выполняется
+zh|af_try_run|进行中
+ar|af_try_run|قيد التنفيذ
+en|af_try_manual|to be run again by you
+fr|af_try_manual|à relancer par vous
+es|af_try_manual|para que lo ejecute de nuevo
+de|af_try_manual|von Ihnen erneut zu starten
+it|af_try_manual|da rilanciare manualmente
+pt|af_try_manual|para voltar a executar
+nl|af_try_manual|door u opnieuw te starten
+ru|af_try_manual|запустите снова вручную
+zh|af_try_manual|请您重新运行
+ar|af_try_manual|يجب إعادة التشغيل يدويا
+en|af_undo|to undo: %s
+fr|af_undo|pour annuler : %s
+es|af_undo|para deshacer: %s
+de|af_undo|zum Rückgängigmachen: %s
+it|af_undo|per annullare: %s
+pt|af_undo|para desfazer: %s
+nl|af_undo|ongedaan maken: %s
+ru|af_undo|чтобы отменить: %s
+zh|af_undo|撤销方法：%s
+ar|af_undo|للتراجع: %s
+en|af_noself|The corrections were made but this installer was read from a pipe and cannot start itself again: run the same command once more.
+fr|af_noself|Les corrections ont été faites, mais cet installateur a été lu depuis un tube et ne peut pas se relancer : relancez la même commande.
+es|af_noself|Se hicieron las correcciones, pero este instalador se leyó desde una tubería y no puede reiniciarse: ejecute de nuevo el mismo comando.
+de|af_noself|Die Korrekturen wurden vorgenommen, aber dieser Installer wurde aus einer Pipe gelesen und kann sich nicht neu starten: Führen Sie denselben Befehl erneut aus.
+it|af_noself|Le correzioni sono state fatte, ma questo installer è stato letto da una pipe e non può riavviarsi: eseguire di nuovo lo stesso comando.
+pt|af_noself|As correções foram feitas, mas este instalador foi lido de um pipe e não pode reiniciar-se: execute de novo o mesmo comando.
+nl|af_noself|De correcties zijn uitgevoerd, maar dit installatieprogramma is via een pipe gelezen en kan zichzelf niet herstarten: voer dezelfde opdracht opnieuw uit.
+ru|af_noself|Исправления выполнены, но установщик был прочитан из канала и не может перезапустить себя: запустите ту же команду ещё раз.
+zh|af_noself|修正已完成，但此安装程序是通过管道读取的，无法自行重新启动：请再次运行同一条命令。
+ar|af_noself|تم إجراء التصحيحات لكن المثبت قُرئ عبر أنبوب ولا يمكنه إعادة تشغيل نفسه: أعد تشغيل الأمر نفسه.
+en|af_giveup|No more automatic attempts (limit: %s).
+fr|af_giveup|Plus d'essai automatique (limite : %s).
+es|af_giveup|No hay más intentos automáticos (límite: %s).
+de|af_giveup|Keine weiteren automatischen Versuche (Grenze: %s).
+it|af_giveup|Nessun altro tentativo automatico (limite: %s).
+pt|af_giveup|Sem mais tentativas automáticas (limite: %s).
+nl|af_giveup|Geen automatische pogingen meer (limiet: %s).
+ru|af_giveup|Больше автоматических попыток нет (предел: %s).
+zh|af_giveup|不再自动重试（上限：%s）。
+ar|af_giveup|لا مزيد من المحاولات التلقائية (الحد: %s).
+en|af_failed_at|Stopped at "%s": %s
+fr|af_failed_at|Arrêté à l'étape « %s » : %s
+es|af_failed_at|Detenido en «%s»: %s
+de|af_failed_at|Angehalten bei „%s“: %s
+it|af_failed_at|Interrotto a «%s»: %s
+pt|af_failed_at|Interrompido em «%s»: %s
+nl|af_failed_at|Gestopt bij „%s”: %s
+ru|af_failed_at|Остановлено на шаге «%s»: %s
+zh|af_failed_at|在“%s”处停止：%s
+ar|af_failed_at|توقف عند «%s»: %s
+en|af_diag_ready|A diagnostic ready to send was written to %s (secrets are hidden).
+fr|af_diag_ready|Un diagnostic prêt à envoyer a été écrit dans %s (les secrets sont masqués).
+es|af_diag_ready|Se escribió un diagnóstico listo para enviar en %s (los secretos están ocultos).
+de|af_diag_ready|Eine versandfertige Diagnose wurde nach %s geschrieben (Geheimnisse sind ausgeblendet).
+it|af_diag_ready|Una diagnostica pronta da inviare è stata scritta in %s (i segreti sono nascosti).
+pt|af_diag_ready|Foi escrito um diagnóstico pronto a enviar em %s (os segredos estão ocultos).
+nl|af_diag_ready|Een verzendklare diagnose is geschreven naar %s (geheimen zijn verborgen).
+ru|af_diag_ready|Готовая к отправке диагностика записана в %s (секреты скрыты).
+zh|af_diag_ready|可直接发送的诊断信息已写入 %s（密钥已隐藏）。
+ar|af_diag_ready|تمت كتابة تشخيص جاهز للإرسال في %s (الأسرار مخفية).
+en|af_none|Nothing to correct on this machine at the moment.
+fr|af_none|Rien à corriger sur cette machine pour le moment.
+es|af_none|Nada que corregir en esta máquina por ahora.
+de|af_none|Derzeit ist auf diesem Rechner nichts zu korrigieren.
+it|af_none|Nulla da correggere su questa macchina al momento.
+pt|af_none|Nada a corrigir nesta máquina de momento.
+nl|af_none|Op dit moment is er niets te corrigeren op deze machine.
+ru|af_none|Сейчас на этой машине нечего исправлять.
+zh|af_none|此机器目前没有需要修正的问题。
+ar|af_none|لا شيء يحتاج إلى تصحيح على هذا الجهاز حاليا.
+en|af_w_full|full (%s MB free)
+fr|af_w_full|plein (%s Mo libres)
+es|af_w_full|lleno (%s MB libres)
+de|af_w_full|voll (%s MB frei)
+it|af_w_full|pieno (%s MB liberi)
+pt|af_w_full|cheio (%s MB livres)
+nl|af_w_full|vol (%s MB vrij)
+ru|af_w_full|заполнен (свободно %s МБ)
+zh|af_w_full|已满（剩余 %s MB）
+ar|af_w_full|ممتلئ (المتاح %s ميغابايت)
+en|af_w_noexec|mounted noexec
+fr|af_w_noexec|monté en noexec
+es|af_w_noexec|montado como noexec
+de|af_w_noexec|als noexec eingehängt
+it|af_w_noexec|montato come noexec
+pt|af_w_noexec|montado como noexec
+nl|af_w_noexec|als noexec gekoppeld
+ru|af_w_noexec|смонтирован с noexec
+zh|af_w_noexec|以 noexec 挂载
+ar|af_w_noexec|مثبت بخيار noexec
+en|af_w_nowrite|not writable
+fr|af_w_nowrite|non inscriptible
+es|af_w_nowrite|no se puede escribir
+de|af_w_nowrite|nicht beschreibbar
+it|af_w_nowrite|non scrivibile
+pt|af_w_nowrite|não gravável
+nl|af_w_nowrite|niet beschrijfbaar
+ru|af_w_nowrite|запись невозможна
+zh|af_w_nowrite|无法写入
+ar|af_w_nowrite|غير قابل للكتابة
+en|af_p_tmp|the work directory %s is unusable (%s)
+fr|af_p_tmp|le répertoire de travail %s est inutilisable (%s)
+es|af_p_tmp|el directorio de trabajo %s no se puede usar (%s)
+de|af_p_tmp|das Arbeitsverzeichnis %s ist unbrauchbar (%s)
+it|af_p_tmp|la directory di lavoro %s è inutilizzabile (%s)
+pt|af_p_tmp|o diretório de trabalho %s é inutilizável (%s)
+nl|af_p_tmp|de werkmap %s is onbruikbaar (%s)
+ru|af_p_tmp|рабочий каталог %s непригоден (%s)
+zh|af_p_tmp|工作目录 %s 不可用（%s）
+ar|af_p_tmp|مجلد العمل %s غير صالح للاستخدام (%s)
+en|af_a_tmp|work directory moved to %s
+fr|af_a_tmp|répertoire de travail déplacé vers %s
+es|af_a_tmp|directorio de trabajo movido a %s
+de|af_a_tmp|Arbeitsverzeichnis nach %s verlegt
+it|af_a_tmp|directory di lavoro spostata in %s
+pt|af_a_tmp|diretório de trabalho movido para %s
+nl|af_a_tmp|werkmap verplaatst naar %s
+ru|af_a_tmp|рабочий каталог перенесён в %s
+zh|af_a_tmp|工作目录已改为 %s
+ar|af_a_tmp|تم نقل مجلد العمل إلى %s
+en|af_p_disk|disk almost full on %s (%s%% used, %s MB free)
+fr|af_p_disk|disque presque plein sur %s (%s %% utilisé, %s Mo libres)
+es|af_p_disk|disco casi lleno en %s (%s%% usado, %s MB libres)
+de|af_p_disk|Datenträger fast voll auf %s (%s%% belegt, %s MB frei)
+it|af_p_disk|disco quasi pieno su %s (%s%% usato, %s MB liberi)
+pt|af_p_disk|disco quase cheio em %s (%s%% usado, %s MB livres)
+nl|af_p_disk|schijf bijna vol op %s (%s%% gebruikt, %s MB vrij)
+ru|af_p_disk|диск почти заполнен на %s (занято %s%%, свободно %s МБ)
+zh|af_p_disk|%s 上磁盘几乎已满（已用 %s%%，剩余 %s MB）
+ar|af_p_disk|القرص شبه ممتلئ على %s (مستخدم %s%%، المتاح %s ميغابايت)
+en|af_a_disk|package caches and old logs cleaned (data untouched)
+fr|af_a_disk|caches de paquets et anciens journaux nettoyés (données intactes)
+es|af_a_disk|cachés de paquetes y registros antiguos limpiados (datos intactos)
+de|af_a_disk|Paket-Caches und alte Protokolle bereinigt (Daten unberührt)
+it|af_a_disk|cache dei pacchetti e vecchi log puliti (dati intatti)
+pt|af_a_disk|caches de pacotes e registos antigos limpos (dados intactos)
+nl|af_a_disk|pakketcaches en oude logboeken opgeschoond (gegevens ongemoeid)
+ru|af_a_disk|кэши пакетов и старые журналы очищены (данные не тронуты)
+zh|af_a_disk|已清理软件包缓存和旧日志（数据未动）
+ar|af_a_disk|تم تنظيف ذاكرة الحزم المؤقتة والسجلات القديمة (البيانات سليمة)
+en|af_h_disk|free some space (the installer never deletes data), then run it again
+fr|af_h_disk|libérez de la place (l'installateur ne supprime jamais de données), puis relancez-le
+es|af_h_disk|libere espacio (el instalador nunca borra datos) y vuelva a ejecutarlo
+de|af_h_disk|Schaffen Sie Platz (der Installer löscht nie Daten) und starten Sie ihn erneut
+it|af_h_disk|liberare spazio (l'installer non cancella mai dati) e rilanciarlo
+pt|af_h_disk|liberte espaço (o instalador nunca apaga dados) e volte a executá-lo
+nl|af_h_disk|maak ruimte vrij (het installatieprogramma wist nooit gegevens) en start het opnieuw
+ru|af_h_disk|освободите место (установщик никогда не удаляет данные) и запустите его снова
+zh|af_h_disk|请腾出空间（安装程序绝不删除数据），然后重新运行
+ar|af_h_disk|حرّر مساحة (المثبت لا يحذف البيانات أبدا) ثم أعد تشغيله
+en|af_p_lock|the package manager is in use or locked (%s)
+fr|af_p_lock|le gestionnaire de paquets est occupé ou verrouillé (%s)
+es|af_p_lock|el gestor de paquetes está en uso o bloqueado (%s)
+de|af_p_lock|der Paketmanager ist belegt oder gesperrt (%s)
+it|af_p_lock|il gestore di pacchetti è occupato o bloccato (%s)
+pt|af_p_lock|o gestor de pacotes está ocupado ou bloqueado (%s)
+nl|af_p_lock|de pakketbeheerder is bezig of vergrendeld (%s)
+ru|af_p_lock|менеджер пакетов занят или заблокирован (%s)
+zh|af_p_lock|软件包管理器正忙或被锁定（%s）
+ar|af_p_lock|مدير الحزم مشغول أو مقفل (%s)
+en|af_a_lock_wait|waited for it to finish (at most %s s)
+fr|af_a_lock_wait|attendu qu'il termine (au plus %s s)
+es|af_a_lock_wait|esperado a que termine (como máximo %s s)
+de|af_a_lock_wait|gewartet, bis er fertig ist (höchstens %s s)
+it|af_a_lock_wait|atteso che finisca (al massimo %s s)
+pt|af_a_lock_wait|aguardado que termine (no máximo %s s)
+nl|af_a_lock_wait|gewacht tot hij klaar is (maximaal %s s)
+ru|af_a_lock_wait|ожидание его завершения (не более %s с)
+zh|af_a_lock_wait|已等待其结束（最多 %s 秒）
+ar|af_a_lock_wait|تم الانتظار حتى ينتهي (%s ثانية كحد أقصى)
+en|af_a_lock_stale|stale lock set aside: %s
+fr|af_a_lock_stale|verrou obsolète mis de côté : %s
+es|af_a_lock_stale|bloqueo obsoleto apartado: %s
+de|af_a_lock_stale|veraltete Sperre beiseitegelegt: %s
+it|af_a_lock_stale|blocco obsoleto messo da parte: %s
+pt|af_a_lock_stale|bloqueio obsoleto posto de lado: %s
+nl|af_a_lock_stale|verouderde vergrendeling opzijgezet: %s
+ru|af_a_lock_stale|устаревшая блокировка убрана: %s
+zh|af_a_lock_stale|已移开过期的锁：%s
+ar|af_a_lock_stale|تم تنحية قفل قديم: %s
+en|af_a_lock_none|nothing holds the lock any more
+fr|af_a_lock_none|plus rien ne tient le verrou
+es|af_a_lock_none|ya nada mantiene el bloqueo
+de|af_a_lock_none|nichts hält die Sperre mehr
+it|af_a_lock_none|nulla trattiene più il blocco
+pt|af_a_lock_none|nada mantém o bloqueio
+nl|af_a_lock_none|niets houdt de vergrendeling meer vast
+ru|af_a_lock_none|блокировку больше ничто не удерживает
+zh|af_a_lock_none|已没有进程持有该锁
+ar|af_a_lock_none|لم يعد شيء يحتفظ بالقفل
+en|af_h_lock|%s is still running: wait for it to finish, then run the installer again
+fr|af_h_lock|%s tourne encore : attendez sa fin, puis relancez l'installateur
+es|af_h_lock|%s sigue en ejecución: espere a que termine y vuelva a ejecutar el instalador
+de|af_h_lock|%s läuft noch: warten Sie das Ende ab und starten Sie den Installer erneut
+it|af_h_lock|%s è ancora in esecuzione: attendere la fine e rilanciare l'installer
+pt|af_h_lock|%s ainda está em execução: aguarde o fim e volte a executar o instalador
+nl|af_h_lock|%s draait nog: wacht tot het klaar is en start het installatieprogramma opnieuw
+ru|af_h_lock|%s ещё работает: дождитесь завершения и запустите установщик снова
+zh|af_h_lock|%s 仍在运行：请等待其结束，然后重新运行安装程序
+ar|af_h_lock|%s ما زال يعمل: انتظر انتهاءه ثم أعد تشغيل المثبت
+en|af_p_clock|the clock is %s s away from the real time
+fr|af_p_clock|l'horloge est décalée de %s s par rapport à l'heure réelle
+es|af_p_clock|el reloj está desfasado %s s respecto a la hora real
+de|af_p_clock|die Uhr weicht um %s s von der echten Zeit ab
+it|af_p_clock|l'orologio è sfasato di %s s rispetto all'ora reale
+pt|af_p_clock|o relógio está desfasado %s s da hora real
+nl|af_p_clock|de klok loopt %s s af van de echte tijd
+ru|af_p_clock|часы отличаются от точного времени на %s с
+zh|af_p_clock|系统时钟与实际时间相差 %s 秒
+ar|af_p_clock|الساعة تختلف عن الوقت الحقيقي بمقدار %s ثانية
+en|af_a_clock|time synchronisation started (%s)
+fr|af_a_clock|synchronisation de l'heure lancée (%s)
+es|af_a_clock|sincronización de hora iniciada (%s)
+de|af_a_clock|Zeitsynchronisation gestartet (%s)
+it|af_a_clock|sincronizzazione dell'ora avviata (%s)
+pt|af_a_clock|sincronização da hora iniciada (%s)
+nl|af_a_clock|tijdsynchronisatie gestart (%s)
+ru|af_a_clock|запущена синхронизация времени (%s)
+zh|af_a_clock|已启动时间同步（%s）
+ar|af_a_clock|بدأت مزامنة الوقت (%s)
+en|af_h_clock|set the time (chronyd, or timedatectl set-ntp true), then run the installer again
+fr|af_h_clock|mettez l'heure à jour (chronyd, ou timedatectl set-ntp true), puis relancez l'installateur
+es|af_h_clock|ajuste la hora (chronyd, o timedatectl set-ntp true) y vuelva a ejecutar el instalador
+de|af_h_clock|Stellen Sie die Uhrzeit ein (chronyd oder timedatectl set-ntp true) und starten Sie den Installer erneut
+it|af_h_clock|impostare l'ora (chronyd, o timedatectl set-ntp true) e rilanciare l'installer
+pt|af_h_clock|acerte a hora (chronyd, ou timedatectl set-ntp true) e volte a executar o instalador
+nl|af_h_clock|stel de tijd in (chronyd of timedatectl set-ntp true) en start het installatieprogramma opnieuw
+ru|af_h_clock|установите время (chronyd или timedatectl set-ntp true) и запустите установщик снова
+zh|af_h_clock|请校准时间（chronyd 或 timedatectl set-ntp true），然后重新运行安装程序
+ar|af_h_clock|اضبط الوقت (chronyd أو timedatectl set-ntp true) ثم أعد تشغيل المثبت
+en|af_p_src|the download source does not answer (%s)
+fr|af_p_src|la source de téléchargement ne répond pas (%s)
+es|af_p_src|la fuente de descarga no responde (%s)
+de|af_p_src|die Download-Quelle antwortet nicht (%s)
+it|af_p_src|la sorgente di download non risponde (%s)
+pt|af_p_src|a fonte de transferência não responde (%s)
+nl|af_p_src|de downloadbron antwoordt niet (%s)
+ru|af_p_src|источник загрузки не отвечает (%s)
+zh|af_p_src|下载源无响应（%s）
+ar|af_p_src|مصدر التنزيل لا يستجيب (%s)
+en|af_a_src|switched to %s
+fr|af_a_src|bascule sur %s
+es|af_a_src|cambiado a %s
+de|af_a_src|umgeschaltet auf %s
+it|af_a_src|passato a %s
+pt|af_a_src|mudado para %s
+nl|af_a_src|overgeschakeld naar %s
+ru|af_a_src|переключено на %s
+zh|af_a_src|已切换到 %s
+ar|af_a_src|تم التحويل إلى %s
+en|af_h_src|no other source answers: check the network, or give a mirror with --base-url
+fr|af_h_src|aucune autre source ne répond : vérifiez le réseau, ou indiquez un miroir avec --base-url
+es|af_h_src|ninguna otra fuente responde: revise la red o indique un espejo con --base-url
+de|af_h_src|keine andere Quelle antwortet: prüfen Sie das Netzwerk oder geben Sie mit --base-url einen Spiegel an
+it|af_h_src|nessun'altra sorgente risponde: controllare la rete o indicare un mirror con --base-url
+pt|af_h_src|nenhuma outra fonte responde: verifique a rede ou indique um espelho com --base-url
+nl|af_h_src|geen andere bron antwoordt: controleer het netwerk of geef een mirror op met --base-url
+ru|af_h_src|другие источники не отвечают: проверьте сеть или укажите зеркало через --base-url
+zh|af_h_src|没有其他源可用：请检查网络，或用 --base-url 指定镜像
+ar|af_h_src|لا يستجيب أي مصدر آخر: تحقق من الشبكة أو حدد نسخة مرآة عبر --base-url
+en|af_p_label|SELinux labels of ToutWAF files are wrong (%s)
+fr|af_p_label|les étiquettes SELinux des fichiers de ToutWAF sont fausses (%s)
+es|af_p_label|las etiquetas SELinux de los archivos de ToutWAF son incorrectas (%s)
+de|af_p_label|die SELinux-Labels der ToutWAF-Dateien sind falsch (%s)
+it|af_p_label|le etichette SELinux dei file di ToutWAF sono errate (%s)
+pt|af_p_label|as etiquetas SELinux dos ficheiros do ToutWAF estão erradas (%s)
+nl|af_p_label|de SELinux-labels van de ToutWAF-bestanden zijn onjuist (%s)
+ru|af_p_label|метки SELinux файлов ToutWAF неверны (%s)
+zh|af_p_label|ToutWAF 文件的 SELinux 标签不正确（%s）
+ar|af_p_label|تسميات SELinux لملفات ToutWAF غير صحيحة (%s)
+en|af_a_label|labels restored with restorecon (%s paths)
+fr|af_a_label|étiquettes rétablies avec restorecon (%s chemins)
+es|af_a_label|etiquetas restauradas con restorecon (%s rutas)
+de|af_a_label|Labels mit restorecon wiederhergestellt (%s Pfade)
+it|af_a_label|etichette ripristinate con restorecon (%s percorsi)
+pt|af_a_label|etiquetas restauradas com restorecon (%s caminhos)
+nl|af_a_label|labels hersteld met restorecon (%s paden)
+ru|af_a_label|метки восстановлены с помощью restorecon (путей: %s)
+zh|af_a_label|已用 restorecon 恢复标签（%s 个路径）
+ar|af_a_label|تمت استعادة التسميات بواسطة restorecon (%s مسارا)
+en|af_h_label|run restorecon -Rv on the ToutWAF directories and read: ausearch -m avc -ts recent
+fr|af_h_label|lancez restorecon -Rv sur les répertoires de ToutWAF et lisez : ausearch -m avc -ts recent
+es|af_h_label|ejecute restorecon -Rv en los directorios de ToutWAF y lea: ausearch -m avc -ts recent
+de|af_h_label|führen Sie restorecon -Rv auf den ToutWAF-Verzeichnissen aus und lesen Sie: ausearch -m avc -ts recent
+it|af_h_label|eseguire restorecon -Rv sulle directory di ToutWAF e leggere: ausearch -m avc -ts recent
+pt|af_h_label|execute restorecon -Rv nos diretórios do ToutWAF e leia: ausearch -m avc -ts recent
+nl|af_h_label|voer restorecon -Rv uit op de ToutWAF-mappen en lees: ausearch -m avc -ts recent
+ru|af_h_label|выполните restorecon -Rv для каталогов ToutWAF и прочитайте: ausearch -m avc -ts recent
+zh|af_h_label|对 ToutWAF 目录运行 restorecon -Rv，并查看：ausearch -m avc -ts recent
+ar|af_h_label|شغّل restorecon -Rv على مجلدات ToutWAF واقرأ: ausearch -m avc -ts recent
+en|af_p_bool|SELinux refuses what a boolean allows (%s)
+fr|af_p_bool|SELinux refuse ce qu'un booléen autorise (%s)
+es|af_p_bool|SELinux rechaza lo que un booleano permite (%s)
+de|af_p_bool|SELinux verweigert, was ein Boolean erlaubt (%s)
+it|af_p_bool|SELinux rifiuta ciò che un booleano consente (%s)
+pt|af_p_bool|o SELinux recusa o que um booleano permite (%s)
+nl|af_p_bool|SELinux weigert wat een boolean toestaat (%s)
+ru|af_p_bool|SELinux запрещает то, что разрешает переключатель (%s)
+zh|af_p_bool|SELinux 拒绝了某个布尔值本可允许的操作（%s）
+ar|af_p_bool|يرفض SELinux ما يسمح به متغير منطقي (%s)
+en|af_a_bool|SELinux boolean turned on: %s
+fr|af_a_bool|booléen SELinux activé : %s
+es|af_a_bool|booleano SELinux activado: %s
+de|af_a_bool|SELinux-Boolean eingeschaltet: %s
+it|af_a_bool|booleano SELinux attivato: %s
+pt|af_a_bool|booleano SELinux ativado: %s
+nl|af_a_bool|SELinux-boolean ingeschakeld: %s
+ru|af_a_bool|включён переключатель SELinux: %s
+zh|af_a_bool|已开启 SELinux 布尔值：%s
+ar|af_a_bool|تم تفعيل متغير SELinux المنطقي: %s
+en|af_p_perm|owner or permissions are wrong (%s)
+fr|af_p_perm|propriétaire ou permissions erronés (%s)
+es|af_p_perm|propietario o permisos incorrectos (%s)
+de|af_p_perm|Eigentümer oder Berechtigungen falsch (%s)
+it|af_p_perm|proprietario o permessi errati (%s)
+pt|af_p_perm|proprietário ou permissões errados (%s)
+nl|af_p_perm|eigenaar of rechten onjuist (%s)
+ru|af_p_perm|неверный владелец или права (%s)
+zh|af_p_perm|所有者或权限不正确（%s）
+ar|af_p_perm|المالك أو الأذونات غير صحيحة (%s)
+en|af_a_perm|owner and permissions restored (%s)
+fr|af_a_perm|propriétaire et permissions rétablis (%s)
+es|af_a_perm|propietario y permisos restaurados (%s)
+de|af_a_perm|Eigentümer und Berechtigungen wiederhergestellt (%s)
+it|af_a_perm|proprietario e permessi ripristinati (%s)
+pt|af_a_perm|proprietário e permissões restaurados (%s)
+nl|af_a_perm|eigenaar en rechten hersteld (%s)
+ru|af_a_perm|владелец и права восстановлены (%s)
+zh|af_a_perm|已恢复所有者和权限（%s）
+ar|af_a_perm|تمت استعادة المالك والأذونات (%s)
+en|af_h_perm|check the owner of the data and configuration directories
+fr|af_h_perm|vérifiez le propriétaire des répertoires de données et de configuration
+es|af_h_perm|compruebe el propietario de los directorios de datos y configuración
+de|af_h_perm|prüfen Sie den Eigentümer der Daten- und Konfigurationsverzeichnisse
+it|af_h_perm|controllare il proprietario delle directory dei dati e della configurazione
+pt|af_h_perm|verifique o proprietário dos diretórios de dados e de configuração
+nl|af_h_perm|controleer de eigenaar van de gegevens- en configuratiemappen
+ru|af_h_perm|проверьте владельца каталогов данных и конфигурации
+zh|af_h_perm|请检查数据目录和配置目录的所有者
+ar|af_h_perm|تحقق من مالك مجلدات البيانات والإعداد
+en|af_p_exec|a program cannot be executed (%s)
+fr|af_p_exec|un programme n'est pas exécutable (%s)
+es|af_p_exec|un programa no es ejecutable (%s)
+de|af_p_exec|ein Programm ist nicht ausführbar (%s)
+it|af_p_exec|un programma non è eseguibile (%s)
+pt|af_p_exec|um programa não é executável (%s)
+nl|af_p_exec|een programma is niet uitvoerbaar (%s)
+ru|af_p_exec|программа не исполняемая (%s)
+zh|af_p_exec|程序不可执行（%s）
+ar|af_p_exec|برنامج غير قابل للتنفيذ (%s)
+en|af_a_exec|execute permission restored on %s
+fr|af_a_exec|droit d'exécution rétabli sur %s
+es|af_a_exec|permiso de ejecución restaurado en %s
+de|af_a_exec|Ausführungsrecht wiederhergestellt für %s
+it|af_a_exec|permesso di esecuzione ripristinato su %s
+pt|af_a_exec|permissão de execução restaurada em %s
+nl|af_a_exec|uitvoerrecht hersteld op %s
+ru|af_a_exec|право на исполнение восстановлено: %s
+zh|af_a_exec|已恢复 %s 的执行权限
+ar|af_a_exec|تمت استعادة إذن التنفيذ على %s
+en|af_p_v6|IPv6 is not available but the configuration listens on [::]
+fr|af_p_v6|IPv6 est absent mais la configuration écoute sur [::]
+es|af_p_v6|IPv6 no está disponible pero la configuración escucha en [::]
+de|af_p_v6|IPv6 ist nicht verfügbar, aber die Konfiguration lauscht auf [::]
+it|af_p_v6|IPv6 non è disponibile ma la configurazione ascolta su [::]
+pt|af_p_v6|o IPv6 não está disponível mas a configuração escuta em [::]
+nl|af_p_v6|IPv6 is niet beschikbaar maar de configuratie luistert op [::]
+ru|af_p_v6|IPv6 недоступен, но конфигурация слушает [::]
+zh|af_p_v6|IPv6 不可用，但配置在 [::] 上监听
+ar|af_p_v6|IPv6 غير متاح لكن الإعداد يستمع على [::]
+en|af_a_v6|[::] replaced by 0.0.0.0 in %s file(s) (copies: *.autofix-bak)
+fr|af_a_v6|[::] remplacé par 0.0.0.0 dans %s fichier(s) (copies : *.autofix-bak)
+es|af_a_v6|[::] sustituido por 0.0.0.0 en %s archivo(s) (copias: *.autofix-bak)
+de|af_a_v6|[::] durch 0.0.0.0 ersetzt in %s Datei(en) (Kopien: *.autofix-bak)
+it|af_a_v6|[::] sostituito con 0.0.0.0 in %s file (copie: *.autofix-bak)
+pt|af_a_v6|[::] substituído por 0.0.0.0 em %s ficheiro(s) (cópias: *.autofix-bak)
+nl|af_a_v6|[::] vervangen door 0.0.0.0 in %s bestand(en) (kopieën: *.autofix-bak)
+ru|af_a_v6|[::] заменён на 0.0.0.0 в файлах: %s (копии: *.autofix-bak)
+zh|af_a_v6|已在 %s 个文件中将 [::] 替换为 0.0.0.0（备份：*.autofix-bak）
+ar|af_a_v6|تم استبدال [::] بـ 0.0.0.0 في %s ملف (النسخ: *.autofix-bak)
+en|af_p_port|port %s is taken by %s (%s)
+fr|af_p_port|le port %s est occupé par %s (%s)
+es|af_p_port|el puerto %s está ocupado por %s (%s)
+de|af_p_port|Port %s ist belegt durch %s (%s)
+it|af_p_port|la porta %s è occupata da %s (%s)
+pt|af_p_port|a porta %s está ocupada por %s (%s)
+nl|af_p_port|poort %s is bezet door %s (%s)
+ru|af_p_port|порт %s занят процессом %s (%s)
+zh|af_p_port|端口 %s 被 %s 占用（%s）
+ar|af_p_port|المنفذ %s مشغول بواسطة %s (%s)
+en|af_a_port|service stopped: %s
+fr|af_a_port|service arrêté : %s
+es|af_a_port|servicio detenido: %s
+de|af_a_port|Dienst gestoppt: %s
+it|af_a_port|servizio fermato: %s
+pt|af_a_port|serviço parado: %s
+nl|af_a_port|service gestopt: %s
+ru|af_a_port|служба остановлена: %s
+zh|af_a_port|已停止服务：%s
+ar|af_a_port|تم إيقاف الخدمة: %s
+en|af_h_port|use --autofix-stop-conflicts to let the installer stop %s, or free the port yourself
+fr|af_h_port|utilisez --autofix-stop-conflicts pour que l'installateur arrête %s, ou libérez le port vous-même
+es|af_h_port|use --autofix-stop-conflicts para que el instalador detenga %s, o libere el puerto usted mismo
+de|af_h_port|verwenden Sie --autofix-stop-conflicts, damit der Installer %s stoppt, oder geben Sie den Port selbst frei
+it|af_h_port|usare --autofix-stop-conflicts perché l'installer fermi %s, o liberare la porta manualmente
+pt|af_h_port|use --autofix-stop-conflicts para o instalador parar %s, ou libere a porta manualmente
+nl|af_h_port|gebruik --autofix-stop-conflicts zodat het installatieprogramma %s stopt, of maak de poort zelf vrij
+ru|af_h_port|используйте --autofix-stop-conflicts, чтобы установщик остановил %s, или освободите порт самостоятельно
+zh|af_h_port|使用 --autofix-stop-conflicts 让安装程序停止 %s，或自行释放该端口
+ar|af_h_port|استخدم --autofix-stop-conflicts ليوقف المثبت %s أو حرّر المنفذ بنفسك
+en|af_p_fw|the firewall (%s) blocks port(s) %s
+fr|af_p_fw|le pare-feu (%s) bloque le ou les ports %s
+es|af_p_fw|el cortafuegos (%s) bloquea el puerto o puertos %s
+de|af_p_fw|die Firewall (%s) blockiert Port(s) %s
+it|af_p_fw|il firewall (%s) blocca la porta o le porte %s
+pt|af_p_fw|a firewall (%s) bloqueia a porta ou portas %s
+nl|af_p_fw|de firewall (%s) blokkeert poort(en) %s
+ru|af_p_fw|брандмауэр (%s) блокирует порт(ы) %s
+zh|af_p_fw|防火墙（%s）阻止了端口 %s
+ar|af_p_fw|جدار الحماية (%s) يحظر المنفذ أو المنافذ %s
+en|af_a_fw|port(s) %s opened (%s)
+fr|af_a_fw|port(s) %s ouvert(s) (%s)
+es|af_a_fw|puerto(s) %s abierto(s) (%s)
+de|af_a_fw|Port(s) %s geöffnet (%s)
+it|af_a_fw|porta/e %s aperta/e (%s)
+pt|af_a_fw|porta(s) %s aberta(s) (%s)
+nl|af_a_fw|poort(en) %s geopend (%s)
+ru|af_a_fw|порт(ы) %s открыт(ы) (%s)
+zh|af_a_fw|已开放端口 %s（%s）
+ar|af_a_fw|تم فتح المنفذ أو المنافذ %s (%s)
+en|af_h_fw|open port(s) %s in your firewall
+fr|af_h_fw|ouvrez le ou les ports %s dans votre pare-feu
+es|af_h_fw|abra el puerto o puertos %s en su cortafuegos
+de|af_h_fw|öffnen Sie Port(s) %s in Ihrer Firewall
+it|af_h_fw|aprire la porta o le porte %s nel firewall
+pt|af_h_fw|abra a porta ou portas %s na sua firewall
+nl|af_h_fw|open poort(en) %s in uw firewall
+ru|af_h_fw|откройте порт(ы) %s в брандмауэре
+zh|af_h_fw|请在防火墙中开放端口 %s
+ar|af_h_fw|افتح المنفذ أو المنافذ %s في جدار الحماية
+en|af_h_fw9444|port 9444 (console <-> node link) is never opened to everyone and no source address is known: give --autofix-agent-from ADDRESS, or open it for your nodes only (%s)
+fr|af_h_fw9444|le port 9444 (lien console <-> nœud) n'est jamais ouvert à tout le monde et aucune adresse source n'est connue : donnez --autofix-agent-from ADRESSE, ou ouvrez-le pour vos nœuds seulement (%s)
+es|af_h_fw9444|el puerto 9444 (enlace consola <-> nodo) nunca se abre a todos y no se conoce ninguna dirección de origen: indique --autofix-agent-from DIRECCIÓN o ábralo solo para sus nodos (%s)
+de|af_h_fw9444|Port 9444 (Verbindung Konsole <-> Knoten) wird nie für alle geöffnet und keine Quelladresse ist bekannt: geben Sie --autofix-agent-from ADRESSE an oder öffnen Sie ihn nur für Ihre Knoten (%s)
+it|af_h_fw9444|la porta 9444 (collegamento console <-> nodo) non viene mai aperta a tutti e non è nota alcuna sorgente: indicare --autofix-agent-from INDIRIZZO, o aprirla solo per i propri nodi (%s)
+pt|af_h_fw9444|a porta 9444 (ligação consola <-> nó) nunca é aberta a todos e nenhum endereço de origem é conhecido: indique --autofix-agent-from ENDEREÇO, ou abra-a só para os seus nós (%s)
+nl|af_h_fw9444|poort 9444 (verbinding console <-> node) wordt nooit voor iedereen geopend en er is geen bronadres bekend: geef --autofix-agent-from ADRES op, of open hem alleen voor uw nodes (%s)
+ru|af_h_fw9444|порт 9444 (связь консоль <-> узел) никогда не открывается для всех, адрес источника неизвестен: укажите --autofix-agent-from АДРЕС или откройте его только для ваших узлов (%s)
+zh|af_h_fw9444|端口 9444（控制台与节点之间的连接）绝不对所有人开放，且来源地址未知：请提供 --autofix-agent-from 地址，或仅对您的节点开放（%s）
+ar|af_h_fw9444|المنفذ 9444 (رابط وحدة التحكم <-> العقدة) لا يُفتح للجميع أبدا ولا يوجد عنوان مصدر معروف: حدد --autofix-agent-from العنوان أو افتحه لعقدك فقط (%s)
+en|af_h_nftkeep|the nft rule for port %s lasts until the next reboot: add it to your nftables configuration to keep it
+fr|af_h_nftkeep|la règle nft du port %s dure jusqu'au prochain redémarrage : ajoutez-la à votre configuration nftables pour la garder
+es|af_h_nftkeep|la regla nft del puerto %s dura hasta el próximo reinicio: añádala a su configuración nftables para conservarla
+de|af_h_nftkeep|die nft-Regel für Port %s gilt bis zum nächsten Neustart: nehmen Sie sie in Ihre nftables-Konfiguration auf, um sie zu behalten
+it|af_h_nftkeep|la regola nft per la porta %s dura fino al prossimo riavvio: aggiungerla alla configurazione nftables per conservarla
+pt|af_h_nftkeep|a regra nft da porta %s dura até ao próximo reinício: adicione-a à sua configuração nftables para a manter
+nl|af_h_nftkeep|de nft-regel voor poort %s geldt tot de volgende herstart: voeg hem toe aan uw nftables-configuratie om hem te behouden
+ru|af_h_nftkeep|правило nft для порта %s действует до перезагрузки: добавьте его в конфигурацию nftables, чтобы сохранить
+zh|af_h_nftkeep|端口 %s 的 nft 规则在下次重启前有效：请将其加入 nftables 配置以保留
+ar|af_h_nftkeep|قاعدة nft للمنفذ %s تبقى حتى إعادة التشغيل التالية: أضفها إلى إعداد nftables للاحتفاظ بها
+en|af_p_key|a package key or repository is expired or unreadable (%s)
+fr|af_p_key|une clé ou un dépôt de paquets est expiré ou illisible (%s)
+es|af_p_key|una clave o repositorio de paquetes ha caducado o no se puede leer (%s)
+de|af_p_key|ein Paketschlüssel oder Repository ist abgelaufen oder unlesbar (%s)
+it|af_p_key|una chiave o un repository di pacchetti è scaduto o illeggibile (%s)
+pt|af_p_key|uma chave ou repositório de pacotes expirou ou está ilegível (%s)
+nl|af_p_key|een pakketsleutel of repository is verlopen of onleesbaar (%s)
+ru|af_p_key|ключ или репозиторий пакетов просрочен или нечитаем (%s)
+zh|af_p_key|软件包密钥或仓库已过期或无法读取（%s）
+ar|af_p_key|مفتاح أو مستودع الحزم منتهي الصلاحية أو غير مقروء (%s)
+en|af_a_key_cache|package metadata cache cleaned and downloaded again
+fr|af_a_key_cache|cache des métadonnées de paquets vidé et retéléchargé
+es|af_a_key_cache|caché de metadatos de paquetes limpiado y descargado de nuevo
+de|af_a_key_cache|Paket-Metadaten-Cache geleert und neu geladen
+it|af_a_key_cache|cache dei metadati dei pacchetti svuotata e riscaricata
+pt|af_a_key_cache|cache de metadados de pacotes limpa e transferida de novo
+nl|af_a_key_cache|pakketmetadata-cache geleegd en opnieuw opgehaald
+ru|af_a_key_cache|кэш метаданных пакетов очищен и загружен заново
+zh|af_a_key_cache|已清除并重新下载软件包元数据缓存
+ar|af_a_key_cache|تم مسح ذاكرة بيانات الحزم المؤقتة وتنزيلها من جديد
+en|af_a_key_off|ToutWAF mirror repository disabled (the distribution's own repositories stay): %s
+fr|af_a_key_off|dépôt du miroir ToutWAF désactivé (les dépôts de la distribution restent) : %s
+es|af_a_key_off|repositorio del espejo ToutWAF desactivado (los de la distribución se mantienen): %s
+de|af_a_key_off|Repository des ToutWAF-Spiegels deaktiviert (die der Distribution bleiben): %s
+it|af_a_key_off|repository del mirror ToutWAF disattivato (quelli della distribuzione restano): %s
+pt|af_a_key_off|repositório do espelho ToutWAF desativado (os da distribuição mantêm-se): %s
+nl|af_a_key_off|repository van de ToutWAF-mirror uitgeschakeld (die van de distributie blijven): %s
+ru|af_a_key_off|репозиторий зеркала ToutWAF отключён (репозитории дистрибутива остаются): %s
+zh|af_a_key_off|已停用 ToutWAF 镜像仓库（发行版自带仓库保留）：%s
+ar|af_a_key_off|تم تعطيل مستودع مرآة ToutWAF (تبقى مستودعات التوزيعة): %s
+en|af_h_key|update the distribution's release package (it carries the signing keys), then run the installer again
+fr|af_h_key|mettez à jour le paquet release de la distribution (il porte les clés de signature), puis relancez l'installateur
+es|af_h_key|actualice el paquete release de la distribución (contiene las claves de firma) y vuelva a ejecutar el instalador
+de|af_h_key|aktualisieren Sie das Release-Paket der Distribution (es enthält die Signaturschlüssel) und starten Sie den Installer erneut
+it|af_h_key|aggiornare il pacchetto release della distribuzione (contiene le chiavi di firma) e rilanciare l'installer
+pt|af_h_key|atualize o pacote release da distribuição (contém as chaves de assinatura) e volte a executar o instalador
+nl|af_h_key|werk het release-pakket van de distributie bij (het bevat de ondertekeningssleutels) en start het installatieprogramma opnieuw
+ru|af_h_key|обновите пакет release дистрибутива (в нём ключи подписи) и запустите установщик снова
+zh|af_h_key|请更新发行版的 release 软件包（含签名密钥），然后重新运行安装程序
+ar|af_h_key|حدّث حزمة release الخاصة بالتوزيعة (تحمل مفاتيح التوقيع) ثم أعد تشغيل المثبت
+en|af_p_unitload|systemd has not reloaded the unit files
+fr|af_p_unitload|systemd n'a pas rechargé les fichiers d'unités
+es|af_p_unitload|systemd no ha recargado los archivos de unidad
+de|af_p_unitload|systemd hat die Unit-Dateien nicht neu geladen
+it|af_p_unitload|systemd non ha ricaricato i file di unità
+pt|af_p_unitload|o systemd não recarregou os ficheiros de unidade
+nl|af_p_unitload|systemd heeft de unitbestanden niet herladen
+ru|af_p_unitload|systemd не перечитал файлы юнитов
+zh|af_p_unitload|systemd 尚未重新加载单元文件
+ar|af_p_unitload|لم يعد systemd تحميل ملفات الوحدات
+en|af_a_unitload|systemd configuration reloaded (daemon-reload)
+fr|af_a_unitload|configuration de systemd rechargée (daemon-reload)
+es|af_a_unitload|configuración de systemd recargada (daemon-reload)
+de|af_a_unitload|systemd-Konfiguration neu geladen (daemon-reload)
+it|af_a_unitload|configurazione di systemd ricaricata (daemon-reload)
+pt|af_a_unitload|configuração do systemd recarregada (daemon-reload)
+nl|af_a_unitload|systemd-configuratie herladen (daemon-reload)
+ru|af_a_unitload|конфигурация systemd перечитана (daemon-reload)
+zh|af_a_unitload|已重新加载 systemd 配置（daemon-reload）
+ar|af_a_unitload|تمت إعادة تحميل إعداد systemd (daemon-reload)
+en|af_p_startlimit|%s hit the systemd start limit
+fr|af_p_startlimit|%s a atteint la limite de démarrages de systemd
+es|af_p_startlimit|%s alcanzó el límite de arranques de systemd
+de|af_p_startlimit|%s hat das Startlimit von systemd erreicht
+it|af_p_startlimit|%s ha raggiunto il limite di avvii di systemd
+pt|af_p_startlimit|%s atingiu o limite de arranques do systemd
+nl|af_p_startlimit|%s heeft de startlimiet van systemd bereikt
+ru|af_p_startlimit|%s достиг лимита запусков systemd
+zh|af_p_startlimit|%s 达到了 systemd 的启动次数限制
+ar|af_p_startlimit|%s بلغ حد بدء التشغيل في systemd
+en|af_a_startlimit|start counter of %s reset
+fr|af_a_startlimit|compteur de démarrages de %s remis à zéro
+es|af_a_startlimit|contador de arranques de %s reiniciado
+de|af_a_startlimit|Startzähler von %s zurückgesetzt
+it|af_a_startlimit|contatore di avvii di %s azzerato
+pt|af_a_startlimit|contador de arranques de %s reposto
+nl|af_a_startlimit|startteller van %s teruggezet
+ru|af_a_startlimit|счётчик запусков %s сброшен
+zh|af_a_startlimit|已重置 %s 的启动计数
+ar|af_a_startlimit|تمت إعادة ضبط عداد بدء %s
+en|af_p_nofile|%s runs out of open files
+fr|af_p_nofile|%s manque de fichiers ouverts
+es|af_p_nofile|%s se queda sin archivos abiertos
+de|af_p_nofile|%s hat zu wenige offene Dateien zur Verfügung
+it|af_p_nofile|%s esaurisce i file aperti
+pt|af_p_nofile|%s fica sem ficheiros abertos
+nl|af_p_nofile|%s komt open bestanden tekort
+ru|af_p_nofile|%s исчерпал лимит открытых файлов
+zh|af_p_nofile|%s 的打开文件数已用尽
+ar|af_p_nofile|%s استنفد عدد الملفات المفتوحة
+en|af_a_nofile|open files limit raised for %s
+fr|af_a_nofile|limite de fichiers ouverts relevée pour %s
+es|af_a_nofile|límite de archivos abiertos aumentado para %s
+de|af_a_nofile|Limit offener Dateien für %s erhöht
+it|af_a_nofile|limite di file aperti aumentato per %s
+pt|af_a_nofile|limite de ficheiros abertos aumentado para %s
+nl|af_a_nofile|limiet voor open bestanden verhoogd voor %s
+ru|af_a_nofile|лимит открытых файлов для %s повышен
+zh|af_a_nofile|已提高 %s 的打开文件数限制
+ar|af_a_nofile|تم رفع حد الملفات المفتوحة لـ %s
+en|af_p_slow|%s is slow to become ready but keeps working
+fr|af_p_slow|%s met du temps à être prêt mais continue de travailler
+es|af_p_slow|%s tarda en estar listo pero sigue trabajando
+de|af_p_slow|%s braucht lange bis zur Bereitschaft, arbeitet aber weiter
+it|af_p_slow|%s impiega a diventare pronto ma continua a lavorare
+pt|af_p_slow|%s demora a ficar pronto mas continua a trabalhar
+nl|af_p_slow|%s is traag gereed maar blijft werken
+ru|af_p_slow|%s долго готовится, но продолжает работать
+zh|af_p_slow|%s 就绪较慢，但仍在工作
+ar|af_p_slow|%s بطيء في الجاهزية لكنه يواصل العمل
+en|af_a_slow|waited %s s more
+fr|af_a_slow|attendu %s s de plus
+es|af_a_slow|esperados %s s más
+de|af_a_slow|%s s länger gewartet
+it|af_a_slow|atteso %s s in più
+pt|af_a_slow|aguardados mais %s s
+nl|af_a_slow|%s s langer gewacht
+ru|af_a_slow|ожидание продлено на %s с
+zh|af_a_slow|多等待了 %s 秒
+ar|af_a_slow|تم الانتظار %s ثانية إضافية
+# END CATALOG
+TW_CATALOG
+}
+CATALOG="$(read_catalog)"
+
+# t KEY [args...]: localized text with printf-style %s placeholders (falls back to English, then to the key)
+t() {
+  local key="$1" line fmt; shift
+  line="$(printf '%s\n' "$CATALOG" | grep -m1 "^${LANG_CODE:-en}|$key|" || true)"
+  [ -n "$line" ] || line="$(printf '%s\n' "$CATALOG" | grep -m1 "^en|$key|" || true)"
+  fmt="${line#*|*|}"; [ -n "$line" ] || fmt="$key"
+  # shellcheck disable=SC2059
+  printf -- "$fmt" "$@"
+}
+
+# ------------------------------------------------------------------------------------------------ platform data
+# Distributions, versions and their status come from deploy/platforms.json (single source of truth, also rendered to
+# docs/install/platforms.md). Generated: edit deploy/platforms.json and run deploy/tools/gen-platforms.py, not these lines.
+# BEGIN PLATFORMS (generated by tools/gen-platforms.py)
+read_platforms() { cat <<'TW_PLATFORMS'
+req|glibc|2.28
+req|systemd|239
+req|kernel|4.18
+arch|amd64|supported|-|x86_64 amd64
+arch|arm64|supported|-|aarch64 arm64
+arch|arm32|unsupported|arch|armv7l armv6l armhf arm
+family|rhel|Red Hat family|dnf|firewalld|selinux
+like|rhel|rhel
+like|rhel|fedora
+like|rhel|centos
+pkg|rhel|curl|curl
+pkg|rhel|tar|tar
+pkg|rhel|gzip|gzip
+pkg|rhel|coreutils|coreutils
+pkg|rhel|awk|gawk
+pkg|rhel|openssl|openssl
+pkg|rhel|ca|ca-certificates
+pkg|rhel|libcap|libcap
+pkg|rhel|selinux|policycoreutils-python-utils
+pkg|rhel|logrotate|logrotate
+family|amazon|Amazon Linux|dnf|firewalld|selinux
+pkg|amazon|curl|curl
+pkg|amazon|tar|tar
+pkg|amazon|gzip|gzip
+pkg|amazon|coreutils|coreutils
+pkg|amazon|awk|gawk
+pkg|amazon|openssl|openssl
+pkg|amazon|ca|ca-certificates
+pkg|amazon|libcap|libcap
+pkg|amazon|selinux|policycoreutils-python-utils
+pkg|amazon|logrotate|logrotate
+family|debian|Debian family|apt|ufw|apparmor
+like|debian|debian
+like|debian|ubuntu
+pkg|debian|curl|curl
+pkg|debian|tar|tar
+pkg|debian|gzip|gzip
+pkg|debian|coreutils|coreutils
+pkg|debian|awk|mawk
+pkg|debian|openssl|openssl
+pkg|debian|ca|ca-certificates
+pkg|debian|libcap|libcap2-bin
+pkg|debian|selinux|policycoreutils-python-utils
+pkg|debian|logrotate|logrotate
+family|suse|SUSE family|zypper|firewalld|apparmor
+like|suse|suse
+like|suse|opensuse
+pkg|suse|curl|curl
+pkg|suse|tar|tar
+pkg|suse|gzip|gzip
+pkg|suse|coreutils|coreutils
+pkg|suse|awk|gawk
+pkg|suse|openssl|openssl
+pkg|suse|ca|ca-certificates-mozilla
+pkg|suse|libcap|libcap-progs
+pkg|suse|selinux|policycoreutils-python-utils
+pkg|suse|logrotate|logrotate
+family|arch|Arch family|pacman|none|none
+like|arch|arch
+pkg|arch|curl|curl
+pkg|arch|tar|tar
+pkg|arch|gzip|gzip
+pkg|arch|coreutils|coreutils
+pkg|arch|awk|gawk
+pkg|arch|openssl|openssl
+pkg|arch|ca|ca-certificates
+pkg|arch|libcap|libcap
+pkg|arch|selinux|-
+pkg|arch|logrotate|logrotate
+distro|almalinux|rhel|AlmaLinux|8|major|-
+ver|almalinux|10|tested|-|-|-
+ver|almalinux|9|tested|-|-|-
+ver|almalinux|8|tested|-|-|-
+distro|rocky|rhel|Rocky Linux|8|major|-
+ver|rocky|10|tested|-|-|-
+ver|rocky|9|tested|-|-|-
+ver|rocky|8|tested|-|-|-
+distro|rhel|rhel|Red Hat Enterprise Linux|8|major|-
+ver|rhel|10|tested|-|-|-
+ver|rhel|9|tested|-|-|-
+ver|rhel|8|tested|-|-|-
+ver|rhel|7|unsupported|eol|-|-
+distro|centos|rhel|CentOS Stream|9|major|-
+ver|centos|10|tested|-|-|-
+ver|centos|9|tested|-|-|-
+ver|centos|8|unsupported|eol|-|-
+ver|centos|7|unsupported|eol|-|-
+distro|ol|rhel|Oracle Linux|8|major|-
+ver|ol|10|tested|-|-|-
+ver|ol|9|tested|-|-|-
+ver|ol|8|tested|-|-|-
+ver|ol|7|unsupported|eol|-|-
+distro|fedora|rhel|Fedora|41|major|-
+ver|fedora|44|tested|-|-|-
+ver|fedora|43|tested|-|-|-
+ver|fedora|42|tested|-|-|-
+ver|fedora|41|tested|-|-|-
+distro|amzn|amazon|Amazon Linux|2023|major|-
+ver|amzn|2023|tested|-|-|-
+ver|amzn|2|unsupported|eol|-|-
+distro|debian|debian|Debian|11|major|-
+ver|debian|13|tested|-|-|-
+ver|debian|12|tested|-|-|-
+ver|debian|11|tested|-|-|-
+ver|debian|10|unsupported|eol|-|-
+distro|ubuntu|debian|Ubuntu|20.04|minor|-
+ver|ubuntu|26.04|tested|-|-|-
+ver|ubuntu|25.10|tested|-|-|-
+ver|ubuntu|24.04|tested|-|-|-
+ver|ubuntu|22.04|tested|-|-|-
+ver|ubuntu|20.04|tested|-|-|-
+ver|ubuntu|18.04|unsupported|glibc|-|-
+distro|linuxmint|debian|Linux Mint / LMDE|-|major|derived
+ver|linuxmint|7|tested|-|7|LMDE 7 (gigi)
+ver|linuxmint|22|tested|-|22.3|Linux Mint 22.3
+distro|pop|debian|Pop!_OS|-|major|derived
+ver|pop|24|tested|-|24.04|Pop!_OS 24.04 LTS
+distro|zorin|debian|Zorin OS|-|major|derived
+ver|zorin|18|tested|-|18|Zorin OS 18.1
+distro|elementary|debian|elementary OS|-|major|derived
+ver|elementary|8|tested|-|8|elementary OS 8
+distro|kali|debian|Kali Linux|-|major|rolling
+ver|kali|*|tested|-|-|-
+distro|raspbian|debian|Raspberry Pi OS (32-bit, Raspbian)|-|major|-
+ver|raspbian|*|unsupported|arm32|-|-
+distro|devuan|debian|Devuan|-|major|-
+ver|devuan|*|unsupported|init|-|-
+distro|opensuse-leap|suse|openSUSE Leap|15.6|minor|-
+ver|opensuse-leap|16.0|tested|-|-|-
+ver|opensuse-leap|15.6|tested|-|-|-
+distro|opensuse-tumbleweed|suse|openSUSE Tumbleweed|-|major|rolling
+ver|opensuse-tumbleweed|*|tested|-|-|-
+distro|opensuse-slowroll|suse|openSUSE Slowroll|-|major|rolling
+ver|opensuse-slowroll|*|tested|-|-|-
+distro|sles|suse|SUSE Linux Enterprise Server|15.6|minor|-
+ver|sles|16.0|tested|-|-|-
+ver|sles|15.7|tested|-|-|-
+ver|sles|15.6|tested|-|-|-
+distro|sle-micro|suse|SUSE Linux Micro / MicroOS / Aeon|-|major|-
+ver|sle-micro|*|unsupported|immutable|-|-
+distro|opensuse-microos|suse|openSUSE MicroOS / Aeon / Kalpa|-|major|-
+alias|opensuse-aeon|opensuse-microos
+alias|opensuse-kalpa|opensuse-microos
+ver|opensuse-microos|*|unsupported|immutable|-|-
+distro|arch|arch|Arch Linux|-|major|rolling
+ver|arch|*|tested|-|-|-
+distro|manjaro|arch|Manjaro|-|major|rolling
+ver|manjaro|*|tested|-|-|-
+distro|endeavouros|arch|EndeavourOS|-|major|rolling
+ver|endeavouros|*|tested|-|-|-
+distro|garuda|arch|Garuda Linux|-|major|rolling
+ver|garuda|*|tested|-|-|-
+distro|cachyos|arch|CachyOS|-|major|rolling
+ver|cachyos|*|tested|-|-|-
+distro|artix|arch|Artix Linux|-|major|-
+ver|artix|*|unsupported|init|-|-
+distro|alpine|-|Alpine Linux|-|major|-
+ver|alpine|*|unsupported|musl|-|-
+distro|void|-|Void Linux|-|major|-
+ver|void|*|unsupported|init|-|-
+distro|nixos|-|NixOS|-|major|-
+ver|nixos|*|unsupported|layout|-|-
+TW_PLATFORMS
+}
+# END PLATFORMS
+PLATFORMS="$(read_platforms)"
+
+# ------------------------------------------------------------------------------------------------ UI helpers
+UI_COLOR=0; UI_UTF=0; UI_TRUECOLOR=0; BANNER_DONE=0
+SPIN_PID=""; LOG=""; CUR_STEP=""; WARNINGS=()
+# TMP is the work directory that `cleanup` (EXIT trap, below) removes with rm -rf: it is ours only once mktemp made it. Never take it from the environment
+# (TMP=/tmp, TMP=/home/me/data are common): an early exit (--help, an unknown option, --check-compat, a refusal) would remove that directory as root.
+TMP=""
+R=""; B=""; D=""; RED=""; GRN=""; YLW=""; ACC=""; VIO=""
+exec 3>&2                                       # original stderr (die/warn must stay visible while steps are redirected)
+
+detect_ui() {
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ] && [ "$NO_COLOR_FLAG" = 0 ]; then UI_COLOR=1; fi
+  case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) UI_UTF=1;; esac
+  [ "${TOUTWAF_UTF8:-}" = 1 ] && UI_UTF=1
+  case "${COLORTERM:-}" in truecolor|24bit) UI_TRUECOLOR=1;; esac
+  if [ "$UI_COLOR" = 1 ]; then
+    R=$'\033[0m'; B=$'\033[1m'; D=$'\033[2m'; RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'
+    ACC=$'\033[38;5;75m'; VIO=$'\033[38;5;141m'
+  fi
+  if [ "$UI_UTF" = 1 ]; then
+    OKM="✔"; ERM="✖"; WRM="!"; BUL="•"; H="─"; V="│"; TL="╭"; BL="╰"; ARW="›"
+    SPIN_FRAMES=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  else
+    OKM="[ok]"; ERM="[x]"; WRM="[!]"; BUL="*"; H="-"; V="|"; TL="+"; BL="+"; ARW=">"
+    SPIN_FRAMES=('|' '/' '-' '\')
+  fi
+  # accents and non-Latin scripts need a UTF-8 terminal: otherwise fall back to English
+  if [ "$UI_UTF" = 0 ] && [ "${LANG_CODE:-en}" != en ]; then LANG_CODE=en; fi
+  return 0
+}
+
+detect_lang() {
+  # order: --fr / --lang fr, then TOUTWAF_LANG, then the system language (LANG), then English
+  if [ -z "$LANG_CODE" ]; then
+    local l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"; LANG_CODE="${l%%[_.@-]*}"
+  fi
+  case "$LANG_CODE" in en|fr|es|de|it|pt|nl|ru|zh|ar) ;; *) LANG_CODE=en;; esac
+}
+
+paint() { printf '%s%s%s' "$1" "$2" "$R"; }
+say()  { local IFS=' '; if [ "$QUIET" = 0 ]; then printf '%s\n' "$*"; fi; return 0; }   # ("$*" joins on the first character of IFS: a newline in this script, hence the local IFS)
+rule() { local n="${1:-60}" i s=""; for ((i = 0; i < n; i++)); do s+="$H"; done; printf '%s' "$s"; }
+
+banner() {
+  [ "$QUIET" = 1 ] && return 0
+  [ "$BANNER_DONE" = 1 ] && return 0
+  BANNER_DONE=1
+  local rows=() row i w ch out r g b idx pal lastidx
+  if [ "$UI_UTF" = 1 ]; then
+    rows=(
+"████████╗ ██████╗ ██╗   ██╗████████╗██╗    ██╗ █████╗ ███████╗"
+"╚══██╔══╝██╔═══██╗██║   ██║╚══██╔══╝██║    ██║██╔══██╗██╔════╝"
+"   ██║   ██║   ██║██║   ██║   ██║   ██║ █╗ ██║███████║█████╗"
+"   ██║   ██║   ██║██║   ██║   ██║   ██║███╗██║██╔══██║██╔══╝"
+"   ██║   ╚██████╔╝╚██████╔╝   ██║   ╚███╔███╔╝██║  ██║██║"
+"   ╚═╝    ╚═════╝  ╚═════╝    ╚═╝    ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝")
+  else
+    rows=(
+' _____ ___  _   _ _____ __        ___    _____ '
+'|_   _/ _ \| | | |_   _|\ \      / / \  |  ___|'
+'  | || | | | | | | | |   \ \ /\ / / _ \ | |_   '
+'  | || |_| | |_| | | |    \ V  V / ___ \|  _|  '
+'  |_| \___/ \___/  |_|     \_/\_/_/   \_\_|    ')
+  fi
+  echo
+  pal=(27 33 69 105 141 135)
+  for row in "${rows[@]}"; do
+    # a UTF-8 terminal with a locale bash does not have counts bytes, not characters: no per-character gradient then
+    if [ "$UI_COLOR" = 1 ] && [ "$UI_UTF" = 1 ] && [ "${#row}" -eq "$(printf '%s' "$row" | wc -c)" ]; then printf '  %s%s%s\n' "$VIO" "$row" "$R"
+    elif [ "$UI_COLOR" = 1 ]; then
+      w=${#row}; out="  "; lastidx=""
+      for ((i = 0; i < w; i++)); do
+        ch="${row:i:1}"
+        if [ "$ch" = " " ]; then out+=" "; continue; fi
+        if [ "$UI_TRUECOLOR" = 1 ]; then   # blue (59,130,246) -> violet (139,92,246)
+          r=$((59 + (139 - 59) * i / w)); g=$((130 + (92 - 130) * i / w)); b=246
+          printf -v idx '\033[38;2;%d;%d;%dm' "$r" "$g" "$b"
+        else
+          printf -v idx '\033[38;5;%dm' "${pal[$((i * 6 / w))]}"
+          if [ "$idx" = "$lastidx" ]; then idx=""; else lastidx="$idx"; fi    # emit a colour code only when it changes
+        fi
+        out+="$idx$ch"
+      done
+      printf '%s%s\n' "$out" "$R"
+    else printf '  %s\n' "$row"; fi
+  done
+  printf '  %s%s%s  %s·%s  %sinstaller v%s%s\n\n' "$B" "$(t tagline)" "$R" "$D" "$R" "$D" "$INSTALLER_VERSION" "$R"
+}
+
+FRAME_W=78
+frame_fill() { local n=$((FRAME_W - 4 - ${#1})); [ "$n" -ge 3 ] || n=3; rule "$n"; }
+box_top()    { [ "$QUIET" = 1 ] || printf '%s%s%s %s%s%s %s%s\n' "$ACC" "$TL" "$H" "$B" "$1" "$R$ACC" "$(frame_fill "$1")" "$R"; }
+box_line()   { [ "$QUIET" = 1 ] || printf '%s%s%s %s\n' "$ACC" "$V" "$R" "$1"; }
+box_bottom() { [ "$QUIET" = 1 ] || printf '%s%s%s%s\n' "$ACC" "$BL" "$(rule $((FRAME_W - 1)))" "$R"; }
+
+log()  { local IFS=' '; printf '%s\n' "$*" >>"${LOG:-/dev/null}" 2>/dev/null || true; return 0; }
+# progress: when the control plane's update helper runs us (TOUTWAF_PROGRESS_FILE), every step is appended there for the console
+progress() { local IFS=' '; if [ -n "${TOUTWAF_PROGRESS_FILE:-}" ]; then printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$TOUTWAF_PROGRESS_FILE" 2>/dev/null || true; fi; return 0; }
+# info: detail line; shown on plain (non-TTY / --no-color) output, kept in the log only while a spinner runs
+info() {
+  local IFS=' '
+  log "$*"
+  if [ "$SPIN_PID" = "" ] && [ "$UI_COLOR" = 0 ] && [ "$QUIET" = 0 ]; then printf '    %s %s\n' "$BUL" "$*" >&3; fi
+  return 0
+}
+warn() {
+  local IFS=' '
+  WARNINGS+=("$*"); log "[warn] $*"; progress "[warn] $*"
+  if [ "$SPIN_PID" = "" ] && [ "$UI_COLOR" = 0 ] && [ "$QUIET" = 0 ]; then printf '[warn] %s\n' "$*" >&3; fi
+  return 0
+}
+spin_kill() { if [ -n "$SPIN_PID" ]; then kill "$SPIN_PID" 2>/dev/null || true; wait "$SPIN_PID" 2>/dev/null || true; SPIN_PID=""; printf '\r\033[K'; fi; return 0; }
+fail_report() {   # message
+  progress "ERROR $1${2:+ ($2)}"
+  spin_kill
+  [ "$UI_COLOR" = 1 ] && printf '\033[?25h'
+  printf '%s%s %s%s%s\n' "$RED" "$ERM" "$1" "$R" "${2:+ ($2)}" >&3
+  if [ -n "$LOG" ] && [ -s "$LOG" ]; then tail -n 15 "$LOG" | sed 's/^/    /' >&3; printf '    %s\n' "$(t log_hint "$LOG")" >&3; fi
+  if declare -F autofix_report_tail >/dev/null 2>&1; then autofix_report_tail || true; fi   # the corrections tried and the diagnostic to send (autofix block)
+}
+die() { local _m; _m="$(IFS=' '; printf '%s' "$*")"; if declare -F autofix_failure >/dev/null 2>&1; then autofix_failure "$_m" || true; fi; fail_report "$_m"; exit 1; }   # (the report itself keeps the strict IFS)
+# jn ARGS...: the words joined with a blank ("${arr[*]}" would join them with a newline under the IFS of this script)
+jn() { local IFS=' '; printf '%s' "$*"; }
+on_err() { local rc=$?; trap - ERR; if declare -F autofix_failure >/dev/null 2>&1; then autofix_failure "${CUR_STEP:-$(t failed)} rc=$rc" || true; fi; fail_report "${CUR_STEP:-$(t failed)}" "$(t failed) rc=$rc"; exit "$rc"; }
+cleanup() {
+  # the spinner runs in a background subshell that may inherit this EXIT trap: only the main shell may clean up
+  [ "${BASHPID:-$$}" = "$$" ] || return 0
+  spin_kill; [ -n "${TMP:-}" ] && rm -rf "$TMP"; [ "$UI_COLOR" = 1 ] && printf '\033[?25h'; return 0; }
+trap cleanup EXIT
+trap on_err ERR
+
+# step "message" cmd args...: spinner (TTY) or bullet, output of the command goes to the log; a failure aborts (ERR trap)
+step() {
+  CUR_STEP="$1"; shift; progress "$CUR_STEP"
+  if [ "$DRY_RUN" = 1 ]; then printf '  %s %s\n' "$BUL" "$CUR_STEP"; "$@"; return 0; fi
+  if [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ] && [ "${STEP_NOSPIN:-0}" != 1 ]; then
+    printf '\033[?25l'
+    ( trap - EXIT ERR; i=0; while :; do printf '\r  %s%s%s %s\033[K' "$ACC" "${SPIN_FRAMES[$((i % ${#SPIN_FRAMES[@]}))]}" "$R" "$CUR_STEP"; i=$((i + 1)); sleep 0.1; done ) >&3 &
+    SPIN_PID=$!
+  elif [ "$QUIET" = 0 ]; then printf '  %s %s\n' "$BUL" "$CUR_STEP"; fi
+  printf '== %s\n' "$CUR_STEP" >>"$LOG"
+  "$@" >>"$LOG" 2>&1 </dev/null
+  if [ "$SPIN_PID" != "" ]; then spin_kill; printf '\033[?25h'; fi
+  if [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ] && [ "${STEP_NOSPIN:-0}" != 1 ]; then printf '  %s%s%s %s\n' "$GRN" "$OKM" "$R" "$CUR_STEP"; fi
+  CUR_STEP=""
+  return 0
+}
+
+run()  { if [ "$DRY_RUN" = 1 ]; then local IFS=' '; printf '%s[dry-run]%s %s\n' "$D" "$R" "$*"; else "$@" </dev/null; fi; }
+have() { command -v "$1" >/dev/null 2>&1; }
+# firewalld_running: true only when the daemon is really up. "firewall-cmd --state" alone is not a safe probe: with firewalld installed but stopped it
+# triggers D-Bus activation (starts the daemon as a side effect, or blocks ~50 s when it cannot start, e.g. in a container)
+firewalld_running() {
+  have firewall-cmd || return 1
+  if [ -d /run/systemd/system ] && have systemctl; then systemctl is-active --quiet firewalld 2>/dev/null || return 1
+  elif have pgrep; then pgrep -x firewalld >/dev/null 2>&1 || return 1; fi
+  if have timeout; then timeout 20 firewall-cmd --state >/dev/null 2>&1; else firewall-cmd --state >/dev/null 2>&1; fi
+}
+p()    { printf '%s%s' "$DESTDIR" "$1"; }       # path inside DESTDIR
+same_file() { [ -f "$1" ] && [ -f "$2" ] && [ "$(sha256sum <"$1" | cut -d' ' -f1)" = "$(sha256sum <"$2" | cut -d' ' -f1)" ]; }   # cmp(1) (diffutils) is absent on minimal images
+fqdn() { hostname -f 2>/dev/null || hostname 2>/dev/null || uname -n 2>/dev/null || echo localhost; }   # hostname(1) is absent on minimal images
+port_listening() { (exec 4<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
+# ------------------------------------------------------------------------------------------------ compatibility check
+# Pre-flight verdict, computed before anything is changed (install / update / --dry-run / --check-compat).
+# The pre-flight runs BEFORE the prerequisites are installed and must work on a bare image: bash + coreutils + grep + sed only (no awk).
+pf_lines() { local l; while IFS= read -r l; do case "$l" in "$1|"*) printf '%s\n' "$l";; esac; done <<<"$PLATFORMS"; }   # every line of one kind
+# pf_get KIND MATCHCOL MATCHVALUE OUTCOL: field OUTCOL of the first KIND line whose field MATCHCOL equals MATCHVALUE ("kind" is field 0)
+pf_get() {
+  local l pa
+  while IFS= read -r l; do
+    case "$l" in "$1|"*) IFS='|' read -r -a pa <<<"$l"; if [ "${pa[$2]:-}" = "$3" ]; then printf '%s' "${pa[$4]:-}"; return 0; fi;; esac
+  done <<<"$PLATFORMS"
+  return 0
+}
+pf_req() { pf_get req 1 "$1" 2; }
+pf_fam() { pf_get family 1 "$1" "$2"; }                                       # pf_fam FAMILY COL: 2 name, 3 package manager, 4 firewall, 5 MAC (fields counted from 0 = "family")
+pf_pkg() {                                                                    # pf_pkg FAMILY LOGICAL-NAME -> package name ("-" = none)
+  local l pa
+  while IFS= read -r l; do
+    case "$l" in "pkg|$1|$2|"*) IFS='|' read -r -a pa <<<"$l"; printf '%s' "${pa[3]}"; return 0;; esac
+  done <<<"$PLATFORMS"
+  return 0
+}
+# vcmp A B: -1 / 0 / 1 for dotted numeric versions (non-numeric characters are ignored)
+vcmp() {
+  local IFS=. va=() vb=() i x y
+  read -ra va <<<"$1"; read -ra vb <<<"$2"
+  for i in 0 1 2 3; do
+    x="${va[i]:-0}"; y="${vb[i]:-0}"; x="${x//[!0-9]/}"; y="${y//[!0-9]/}"; x=$((10#${x:-0})); y=$((10#${y:-0}))
+    if [ "$x" -lt "$y" ]; then echo -1; return 0; fi
+    if [ "$x" -gt "$y" ]; then echo 1; return 0; fi
+  done
+  echo 0
+}
+vlt() { [ "$(vcmp "$1" "$2")" = -1 ]; }
+
+CP_NAME=""; CP_LABEL=""; CP_STATUS="expected"; CP_FAMILY=""; CP_REASONS=(); CP_NOTES=(); CP_TESTED_ON=""
+CP_HARD=0; COMPAT_OK=0; CP_GLIBC="?"; CP_SYSTEMD="?"; CP_KERNEL="?"; CP_ARCHRAW=""; COMPAT_LINE=""; SKIP_OS_CHECK="${SKIP_OS_CHECK:-0}"
+cp_reason() { CP_REASONS+=("$(t "$@")"); }
+cp_note()   { CP_NOTES+=("$(t "$@")"); }
+
+compat_eval() {
+  local IFS=' ' line l id al fam name min key flags ver wild entry k max st code tok v1 s1 c1
+  local aid ast archok un m gl sv kv ub pim
+  CP_REASONS=(); CP_NOTES=(); CP_STATUS=expected; CP_FAMILY=""; CP_NAME="${OS_NAME:-$OS_ID}"; CP_LABEL="$CP_NAME"
+  # ---- distribution and version
+  if [ "$OS_RELEASE_MISSING" = 1 ]; then
+    CP_STATUS=unsupported; cp_reason cp_r_noosr
+  else
+    id="$OS_ID"; al="$(pf_get alias 1 "$id" 2)"; [ -z "$al" ] || id="$al"
+    line=""
+    while IFS= read -r l; do case "$l" in "distro|$id|"*) line="$l"; break;; esac; done <<<"$PLATFORMS"
+    if [ -n "$line" ]; then
+      IFS='|' read -r _ _ fam name min key flags <<<"$line"
+      [ "$fam" != "-" ] || fam=""
+      CP_FAMILY="$fam"; CP_NAME="$name"; ver="$OS_VER"; CP_LABEL="$name${ver:+ $ver}"
+      case ",$flags," in *,derived,*) CP_LABEL="${OS_NAME:-$name}";; *,rolling,*) CP_LABEL="$name";; esac
+      st=""; code="-"; wild=0; entry=0; max=""; k=""; tx="-"; tl="-"
+      case "$key" in minor) k="$(printf '%s' "$ver" | cut -d. -f1-2)";; *) k="${ver%%.*}";; esac
+      while IFS= read -r l; do                                  # the version lines of this distribution
+        case "$l" in "ver|$id|"*) ;; *) continue;; esac
+        IFS='|' read -r _ _ v1 s1 c1 x1 l1 <<<"$l"
+        if [ "$v1" = "*" ]; then st="$s1"; code="$c1"; wild=1
+        elif [ -n "$ver" ] && [ "$v1" = "$k" ]; then st="$s1"; code="$c1"; entry=1; tx="${x1:--}"; tl="${l1:--}"; fi
+        if [ "$s1" != unsupported ] && [ "$v1" != "*" ] && { [ -z "$max" ] || vlt "$max" "$v1"; }; then max="$v1"; fi
+      done <<<"$PLATFORMS"
+      if [ "$wild" = 1 ]; then :                                 # derived / rolling / one status for every version
+      elif [ -z "$ver" ]; then st=expected; cp_note cp_w_nover "$name"
+      elif [ "$entry" = 1 ]; then
+        # one version of this major branch ran (a derivative: tested_exact): another version of the branch is told so, honestly, and goes on
+        if [ "$st" = tested ] && [ "$tx" != "-" ] && [ "$ver" != "$tx" ]; then st=branch; CP_TESTED_ON="$tl"; fi
+      elif [ "$min" != "-" ] && vlt "$k" "$min"; then st=unsupported; code=old
+      else
+        st=expected
+        if [ -n "$max" ] && vlt "$max" "$k"; then cp_note cp_w_newer "$name" "$ver"; else cp_note cp_w_unlisted "$name" "$ver"; fi
+      fi
+      if [ "$st" = unsupported ]; then
+        CP_STATUS=unsupported
+        case "$code" in
+          old) cp_reason cp_r_old "$name" "$ver" "$min";;
+          init) cp_reason cp_r_init "$name" "$ver";;
+          immutable) cp_reason cp_r_immutable "$name" "$ver";;
+          layout) cp_reason cp_r_layout "$name" "$ver";;
+          musl) cp_reason cp_r_musl "$(pf_req glibc)";;
+          arm32) cp_reason cp_r_arm32; CP_HARD=1;;
+          arch) cp_reason cp_r_distro_arch "$name" "$ver";;
+          *) cp_reason cp_r_eol "$name" "$ver";;
+        esac
+      else CP_STATUS="$st"; fi
+    else
+      # unknown identifier: a known family in ID_LIKE is enough (derivative), otherwise refuse
+      fam=""
+      for tok in $OS_LIKE; do
+        fam="$(pf_get like 2 "$tok" 1)"; [ -z "$fam" ] || break
+      done
+      if [ -n "$fam" ]; then CP_FAMILY="$fam"; cp_note cp_w_like "$CP_NAME" "$(pf_fam "$fam" 2)"
+      else CP_STATUS=unsupported; cp_reason cp_r_unknown "$OS_ID" "$OS_LIKE"; fi
+    fi
+  fi
+  # ---- architecture
+  m="${TEST_ARCH:-$(uname -m)}"; CP_ARCHRAW="$m"; ARCH="$m"
+  ast=unknown; archok=""
+  while IFS= read -r l; do
+    case "$l" in "arch|"*) ;; *) continue;; esac
+    IFS='|' read -r _ aid s1 _ un <<<"$l"
+    [ "$s1" != supported ] || archok="$archok${archok:+ }$aid"
+    case " $un " in *" $m "*) ARCH="$aid"; ast="$s1";; esac
+  done <<<"$PLATFORMS"
+  if [ "$ARCH" = arm32 ]; then cp_reason cp_r_arm32; CP_HARD=1                       # no binary exists: --skip-os-check cannot help
+  elif [ "$ast" != supported ]; then cp_reason cp_r_arch "$m" "$archok"
+  elif [ "$ARCH" = arm64 ]; then                                                  # a 64-bit kernel can run a 32-bit userland (32-bit Raspberry Pi OS on a Pi 4 / 5)
+    ub="${TEST_USERLAND_BITS:-$(getconf LONG_BIT 2>/dev/null || true)}"
+    if [ -z "$ub" ] && have dpkg; then case "$(dpkg --print-architecture 2>/dev/null || true)" in armhf|armel) ub=32;; esac; fi
+    if [ "$ub" = 32 ]; then cp_reason cp_r_arm_userland32; CP_HARD=1; fi
+    pim=""; if [ -r "${TEST_DT_MODEL:-/proc/device-tree/model}" ]; then pim="$(tr -d '\0' <"${TEST_DT_MODEL:-/proc/device-tree/model}" 2>/dev/null || true)"; fi
+    case "$CP_STATUS" in tested|branch) CP_STATUS=expected;; esac        # arm64 is only emulation-tested: never "tested"
+    case "$pim" in "Raspberry Pi"*) cp_note cp_w_pi;; esac
+  fi
+  # ---- glibc
+  gl="${TEST_GLIBC:-}"
+  if [ -z "$gl" ]; then
+    gl="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"; case "$gl" in glibc\ *) gl="${gl#glibc }";; *) gl="";; esac
+    if [ -z "$gl" ]; then
+      gl="$(ldd --version 2>&1 | head -n1 || true)"
+      case "$gl" in *[Mm][Uu][Ss][Ll]*) gl=musl;; *) gl="$(printf '%s' "$gl" | grep -Eo '[0-9]+\.[0-9]+$' || true)";; esac
+    fi
+  fi
+  if [ "$gl" = musl ]; then CP_GLIBC=musl; cp_reason cp_r_musl "$(pf_req glibc)"
+  elif [ -n "$gl" ]; then
+    CP_GLIBC="$gl"
+    if vlt "$gl" "$(pf_req glibc)"; then cp_reason cp_r_glibc "$gl" "$(pf_req glibc)"; fi
+  else cp_note cp_w_glibc; fi
+  # ---- systemd (running as init, version)
+  sv="${TEST_SYSTEMD:-}"
+  if [ "$STAGING" = 1 ] && [ -z "$sv" ]; then sv="?"            # staging (--destdir) does not use the running systemd
+  elif [ -z "$sv" ]; then
+    if [ -d /run/systemd/system ] && have systemctl; then sv="$(systemctl --version 2>/dev/null | head -n1 || true)"; sv="${sv#systemd }"; sv="${sv%%[!0-9]*}"; [ -n "$sv" ] || sv="?"
+    else sv=none; fi
+  fi
+  if [ "$sv" = none ]; then CP_SYSTEMD=none; cp_reason cp_r_systemd
+  else
+    CP_SYSTEMD="$sv"
+    if [ "$sv" != "?" ] && vlt "$sv" "$(pf_req systemd)"; then cp_reason cp_r_systemd_old "$sv" "$(pf_req systemd)"; fi
+  fi
+  # ---- kernel
+  kv="${TEST_KERNEL:-$(uname -r)}"; kv="$(printf '%s' "$kv" | grep -Eo '^[0-9]+(\.[0-9]+)*' || true)"
+  if [ -n "$kv" ]; then
+    CP_KERNEL="$kv"
+    if vlt "$kv" "$(pf_req kernel)"; then cp_reason cp_r_kernel "$kv" "$(pf_req kernel)"; fi
+  fi
+  [ "${#CP_REASONS[@]}" -eq 0 ] || CP_STATUS=unsupported
+  return 0
+}
+
+# the word after "Compatible: <system>": tested, expected, or for another version of a branch that ran (derivatives) what exactly ran
+cp_status_text() {
+  if [ "$CP_STATUS" = branch ]; then t cp_branch "$CP_TESTED_ON" "${OS_VER:-?}"; else t "cp_$CP_STATUS"; fi
+}
+
+# compact table of the compatible systems (generated from the platform data)
+compat_table() {
+  local IFS=' ' l id fam name min key flags tested exp any v s lab seen
+  printf '  %s\n' "$(t cp_list "$(pf_req glibc)" "$(pf_req systemd)")"
+  while IFS= read -r l; do
+    case "$l" in "distro|"*) ;; *) continue;; esac
+    IFS='|' read -r _ id fam name min key flags <<<"$l"
+    tested=""; exp=""; any=""; seen=0
+    while IFS= read -r l; do
+      case "$l" in "ver|$id|"*) ;; *) continue;; esac
+      IFS='|' read -r _ _ v s _ <<<"$l"
+      [ "$s" != unsupported ] || continue
+      seen=1
+      if [ "$v" = "*" ]; then
+        case ",$flags," in *,rolling,*) lab="$(t cp_rolling)";; *) lab="$(t cp_any)";; esac
+        any="$lab ($(t "cp_$s"))"
+      elif [ "$s" = tested ]; then tested="$tested $v"
+      else exp="$exp $v"; fi
+    done <<<"$PLATFORMS"
+    [ "$seen" = 1 ] || continue
+    s="$any"
+    [ -z "$tested" ] || s="$s${s:+; }$(t cp_tested):${tested}"
+    [ -z "$exp" ] || s="$s${s:+; }$(t cp_expected):${exp}"
+    printf '    %-34s %s\n' "$name" "$s"
+  done <<<"$PLATFORMS"
+}
+
+# compat_print: verdict + table on stdout (or stderr with a refusal when called as compat_print err)
+compat_print() {
+  local r w
+  printf '\n  %s\n' "$(t cp_title)"
+  printf '  %s\n' "$(t cp_detected "$CP_LABEL" "$CP_ARCHRAW" "$CP_GLIBC" "$CP_SYSTEMD" "$CP_KERNEL")"
+  if [ "$CP_STATUS" = unsupported ]; then
+    printf '  %s\n' "$(t cp_refused)"
+    for r in "${CP_REASONS[@]}"; do printf '    - %s\n' "$r"; done
+  else
+    printf '  %s\n' "$(t cp_ok "$CP_LABEL" "$(cp_status_text)")"
+    for w in ${CP_NOTES[@]+"${CP_NOTES[@]}"}; do printf '  [warn] %s\n' "$w"; done
+  fi
+  echo
+  compat_table
+  echo
+}
+
+# compat_gate: called once the action is known (never for --uninstall / --status / --links): refuse before any change
+compat_gate() {
+  local r
+  if [ "$ACTION" = update ] && [ "$(conf_get SKIP_OS_CHECK)" = 1 ]; then SKIP_OS_CHECK=1; fi   # an installation made with --skip-os-check stays updatable
+  if [ "$CP_STATUS" = unsupported ]; then
+    if [ "$SKIP_OS_CHECK" = 1 ] && [ "$CP_HARD" = 0 ]; then
+      warn "$(t cp_w_skip)"; for r in "${CP_REASONS[@]}"; do warn "  - $r"; done
+      COMPAT_LINE="$(t cp_w_skip) $(jn "${CP_REASONS[@]}")"
+    elif [ "$STAGING" = 1 ]; then
+      warn "$(t cp_w_stage)"; for r in "${CP_REASONS[@]}"; do warn "  - $r"; done
+      COMPAT_LINE="$(t cp_w_stage) $(jn "${CP_REASONS[@]}")"
+    else
+      { compat_print; printf '  %s\n' "$(t cp_nochange)"; [ "$CP_HARD" = 1 ] || printf '  %s\n' "$(t cp_override)"; echo; } >&2
+      exit 3
+    fi
+  else
+    COMPAT_LINE="$(t cp_ok "$CP_LABEL" "$(cp_status_text)")"
+    COMPAT_OK=1
+  fi
+  case "$ARCH" in amd64|arm64) ;; *) die "unsupported architecture: $CP_ARCHRAW";; esac
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ environment check (the installation matrix)
+# "One does not install what will not work" (docs/install/modes-matrix.md). Before anything is changed, the installer looks at what the
+# components it is about to install need from THIS machine: the ports (another web server on 80 and 443 is the usual cause of a failed
+# installation), a web server that starts at boot and would win them back at the next restart, a firewall, the control plane a data plane
+# has to reach, a router in front of the machine. Each problem is said with its cause and what to do; nothing is left to guess and
+# nobody is asked to type a command. A refusal exits with status 4 and changes nothing. Read-only; --check-env prints the verdict and
+# stops; --skip-env-check goes on regardless (and says so).
+SKIP_ENV_CHECK=0
+EC_LV=(); EC_CA=(); EC_AC=()
+ec_raw=""
+
+ec_prog_label() {   # raw program (or service) name -> the name shown
+  case "$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')" in
+    apache|apache2*|httpd*) printf 'Apache';;
+    nginx*|openresty*) printf 'Nginx';;
+    caddy*) printf 'Caddy';;
+    litespeed*|lshttpd*|openlitespeed*|lsws*) printf 'LiteSpeed';;
+    haproxy*) printf 'HAProxy';;
+    toutwaf*|toutpanel*) printf 'ToutWAF';;
+    "") t pf_prog_unknown;;
+    *) t pf_prog_other;;
+  esac
+}
+
+ec_load() {   # who listens where: ss, or netstat on a machine without it
+  ec_raw=""
+  if have ss; then ec_raw="$(ss -ltnp 2>/dev/null || ss -ltn 2>/dev/null || true)"
+  elif have netstat; then ec_raw="$(netstat -ltnp 2>/dev/null || netstat -ltn 2>/dev/null || true)"; fi
+}
+
+ec_owner() {   # ec_owner PORT -> "x:NAME" when something listens on the TCP port (NAME empty when it cannot be read), nothing when it is free
+  local port="$1" line name
+  line="$(printf '%s\n' "$ec_raw" | awk -v p="$port" '($1 == "LISTEN" || $1 ~ /^tcp/) { for (i = 1; i <= NF; i++) if ($i ~ ("[:.]" p "$")) { print; exit } }' || true)"
+  [ -n "$line" ] || return 0
+  name="$(printf '%s' "$line" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p; s/.* [0-9][0-9]*\/\([^ :]*\).*/\1/p' | head -n1 || true)"
+  printf 'x:%s' "$name"
+}
+
+ec_add() {   # ec_add LEVEL CAUSE ACTION (the same cause is said once)
+  local i=0 n=${#EC_CA[@]}
+  while [ "$i" -lt "$n" ]; do [ "${EC_CA[$i]}" = "$2" ] && return 0; i=$((i + 1)); done
+  EC_LV+=("$1"); EC_CA+=("$2"); EC_AC+=("$3")
+}
+
+ec_is_private() {   # RFC 1918 and carrier-grade NAT addresses
+  case "$1" in
+    10.*|192.168.*) return 0;;
+    172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 0;;
+    100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) return 0;;
+  esac
+  return 1
+}
+
+env_check() {   # fills EC_LV / EC_CA / EC_AC from what this machine is; changes nothing
+  EC_LV=(); EC_CA=(); EC_AC=()
+  local reinstall=0 refuse=refuse port purpose own prog act u fw="" p fwp="" nostart=""
+  if [ "$STAGING" = 1 ] || [ "$DRY_RUN" = 1 ] || [ "$NO_START" = 1 ]; then refuse=warn; nostart=" $(t pf_nostart)"; fi   # nothing is started: the ports are only reported
+  [ "$CHECK_ENV_STARTS" = 1 ] && { refuse=refuse; nostart=""; }
+  detect_installed
+  { [ "$INST_DP" = 1 ] || [ "$INST_CP" = 1 ]; } && reinstall=1
+  ec_load
+
+  # 1. the ports the components listen on
+  local needs=""
+  if want_dp; then needs+="$HTTP_PORT|web"$'\n'"$HTTPS_PORT|web"$'\n'"9101|admin"$'\n'; fi
+  if want_cp; then needs+="$CP_PORT|console"$'\n'"9444|agent"$'\n'; fi
+  local line
+  while IFS='|' read -r port purpose; do
+    [ -n "$port" ] || continue
+    own="$(ec_owner "$port")"
+    [ -n "$own" ] || continue
+    prog="${own#x:}"
+    if [ "$reinstall" = 1 ] && [ "$(ec_prog_label "$prog")" = ToutWAF ]; then continue; fi   # an update or a repair: ToutWAF's own programs are expected
+    case "$purpose" in
+      web) act="$(t pf_act_web "$HTTP_PORT" "$HTTPS_PORT")";;
+      console) act="$(t pf_act_console)";;
+      agent) act="$(t pf_act_agent)";;
+      *) act="$(t pf_act_admin)";;
+    esac
+    ec_add "$refuse" "$(t pf_port_busy "$port" "$(ec_prog_label "$prog")")$nostart" "$act"
+  done <<<"$needs"
+
+  # 2. a web server that is stopped now but starts at boot takes 80 and 443 back at the next restart
+  if want_dp && { [ "$HTTP_PORT" = 80 ] || [ "$HTTPS_PORT" = 443 ]; } && have systemctl; then
+    for u in apache2 httpd nginx caddy lighttpd openlitespeed lsws haproxy; do
+      systemctl is-enabled --quiet "$u" 2>/dev/null || continue
+      systemctl is-active --quiet "$u" 2>/dev/null && continue   # running: the ports it holds were looked at above
+      ec_add warn "$(t pf_boot "$(ec_prog_label "$u")" "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_act_boot)"
+    done
+  fi
+
+  # 3. the firewall, when the installer was told not to open it (otherwise it opens what is needed), and the ones it never changes
+  if want_dp; then
+    if firewalld_running; then
+      fw=firewalld
+      for p in "$HTTP_PORT" "$HTTPS_PORT"; do
+        firewall-cmd --query-port="$p/tcp" >/dev/null 2>&1 && continue
+        { [ "$p" = 80 ] && firewall-cmd --query-service=http >/dev/null 2>&1; } && continue
+        { [ "$p" = 443 ] && firewall-cmd --query-service=https >/dev/null 2>&1; } && continue
+        fwp="$fwp $p"
+      done
+      if [ "$OPEN_FW" = 0 ] && [ -n "$fwp" ]; then ec_add warn "$(t pf_fw_cause "$fw" "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fw_action)"; fi
+    elif have ufw && grep -qi 'status: active' <<<"$(ufw status 2>/dev/null | sed -n 1p)"; then
+      fw=ufw
+      for p in "$HTTP_PORT" "$HTTPS_PORT"; do
+        grep -Eq "^$p(/tcp)?[[:space:]]+ALLOW" <<<"$(ufw status 2>/dev/null)" || fwp="$fwp $p"
+      done
+      if [ "$OPEN_FW" = 0 ] && [ -n "$fwp" ]; then ec_add warn "$(t pf_fw_cause "$fw" "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fw_action)"; fi
+    elif have iptables && grep -Eq '^-P INPUT (DROP|REJECT)' <<<"$(iptables -S INPUT 2>/dev/null | sed -n 1p)"; then
+      for p in "$HTTP_PORT" "$HTTPS_PORT"; do
+        grep -Eq -- "--dports? ([0-9:,]*,)?$p([, ]|$).*-j ACCEPT" <<<"$(iptables -S INPUT 2>/dev/null)" || fwp="$fwp $p"
+      done
+      if [ -n "$fwp" ]; then ec_add warn "$(t pf_fwx_cause iptables "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fwx_action)"; fi
+    elif have nft && grep -q 'policy drop' <<<"$(nft list ruleset 2>/dev/null)"; then
+      for p in "$HTTP_PORT" "$HTTPS_PORT"; do
+        grep -Eq "dport (\{[^}]*\b$p\b[^}]*\}|$p)\b.*accept" <<<"$(nft list ruleset 2>/dev/null)" || fwp="$fwp $p"
+      done
+      if [ -n "$fwp" ]; then ec_add warn "$(t pf_fwx_cause nftables "$HTTP_PORT" "$HTTPS_PORT")" "$(t pf_fwx_action)"; fi
+    fi
+  fi
+
+  # 4. a data plane that has to enrol with a control plane it cannot reach
+  if want_dp && [ -n "$CLOUD_URL" ] && [ "$COMPONENT" = dp ]; then
+    local ok=1
+    # the cloud is reached with the proxy of the environment (HTTPS_PROXY), certificate verified: a node that cannot get out cannot enrol
+    # a platform with a private certificate authority (--cloud-ca) is checked with that authority, like the link will do
+    if have curl; then curl -s -o /dev/null --max-time 15 ${CLOUD_CA:+--cacert} ${CLOUD_CA:+"$CLOUD_CA"} "$CLOUD_URL/cloud/v1/node/info" >/dev/null 2>&1 || ok=0
+    elif have wget; then wget -q -O /dev/null --timeout=15 ${CLOUD_CA:+"--ca-certificate=$CLOUD_CA"} "$CLOUD_URL/cloud/v1/node/info" >/dev/null 2>&1 || ok=0; fi
+    [ "$ok" = 1 ] || ec_add "$refuse" "$(t pf_cp_cause "$CLOUD_URL")$nostart" "$(t pf_cloud_action)"
+  elif want_dp && [ -n "$CP_URL" ] && [ "$COMPONENT" = dp ]; then
+    local ok=1
+    if have curl; then curl -sk -o /dev/null --max-time 8 "$CP_URL" >/dev/null 2>&1 || ok=0
+    else
+      local hp="${CP_URL#*://}"; hp="${hp%%/*}" hh hpt
+      hpt="${hp##*:}"; hh="${hp%:*}"; hh="${hh#[}"; hh="${hh%]}"   # https://[2001:db8::1]:9444 -> 2001:db8::1 and 9444
+      { if have timeout; then timeout 8 bash -c "exec 4<>/dev/tcp/$hh/$hpt"; else bash -c "exec 4<>/dev/tcp/$hh/$hpt"; fi; } >/dev/null 2>&1 || ok=0
+    fi
+    [ "$ok" = 1 ] || ec_add "$refuse" "$(t pf_cp_cause "$CP_URL")$nostart" "$(t pf_cp_action)"
+  fi
+
+  # 5. a private address: probably behind a router (said once installed, by the console; here a note so that nothing is a surprise)
+  if want_dp && [ "$STAGING" = 0 ]; then
+    local lip; lip="$(local_ips4 | head -n1 || true)"
+    if [ -n "$lip" ] && ec_is_private "$lip"; then ec_add info "$(t pf_router_cause "$lip")" "$(t pf_router_action)"; fi
+  fi
+  return 0
+}
+
+ec_refusals() { local i=0 n=${#EC_LV[@]} c=0; while [ "$i" -lt "$n" ]; do [ "${EC_LV[$i]}" = refuse ] && c=$((c + 1)); i=$((i + 1)); done; echo "$c"; }
+
+ec_print() {   # ec_print FD-OF-THE-PROBLEMS: the title, then each finding with its cause and its action
+  local fd="$1" i=0 n=${#EC_LV[@]} lab col
+  { printf '\n  %s\n' "$(paint "$B" "$(t pf_title)")"
+    while [ "$i" -lt "$n" ]; do
+      case "${EC_LV[$i]}" in refuse) lab="$(t pf_l_refuse)"; col="$RED";; warn) lab="$(t pf_l_warn)"; col="$YLW";; *) lab="$(t pf_l_info)"; col="$D";; esac
+      printf '  %s %s\n      %s\n' "$(paint "$col" "[$lab]")" "${EC_CA[$i]}" "${EC_AC[$i]}"
+      i=$((i + 1))
+    done
+  } >&"$fd"
+}
+
+CHECK_ENV_STARTS=0
+env_gate() {   # called before the installation; exits 4 on a refusal
+  if [ "$SKIP_ENV_CHECK" = 1 ]; then warn "$(t pf_skipped)"; return 0; fi
+  # test hook (like the TOUTWAF_TEST_* of the compatibility check): with --dry-run nothing can be changed, so a test may ask for the verdict a real run would get
+  if [ "${TOUTWAF_TEST_ENV_STRICT:-}" = 1 ] && [ "$DRY_RUN" = 1 ]; then CHECK_ENV_STARTS=1; fi
+  env_check
+  [ "${#EC_LV[@]}" -gt 0 ] || return 0
+  if [ "$(ec_refusals)" -gt 0 ]; then
+    ec_print 2
+    printf '\n  %s\n\n' "$(t pf_refused)" >&2
+    exit 4
+  fi
+  [ "$QUIET" = 1 ] || ec_print 1
+  return 0
+}
+
+env_run_check() {   # --check-env: the verdict, nothing is changed; exit 0 (nothing refuses) or 4
+  CHECK_ENV_STARTS=1
+  env_check
+  if [ "${#EC_LV[@]}" -eq 0 ]; then printf '\n  %s\n  %s %s\n\n' "$(paint "$B" "$(t pf_title)")" "$(paint "$GRN" "$OKM")" "$(t pf_ok)"; return 0; fi
+  if [ "$(ec_refusals)" -gt 0 ]; then ec_print 2; printf '\n  %s\n\n' "$(t pf_refused)" >&2; return 4; fi
+  ec_print 1
+  printf '\n  %s %s\n\n' "$(paint "$GRN" "$OKM")" "$(t pf_ok_warn)"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ prerequisites of the machine, then the system update
+# Said BEFORE anything is changed, each problem with its cause and its fix (the same words and thresholds as the link command the console gives for a web
+# server). Only a disk that is really full refuses (exit 4; TOUTWAF_SKIP_PREREQ=1 goes on anyway): an unresolvable name or a wrong clock is a warning.
+# Then the packages of the system are updated (Linux, a real installation only) unless TOUTWAF_SKIP_SYSUPDATE=1 (--skip-sysupdate). That never blocks (a
+# failure is a warning), it is not repeated within 6 hours, and the machine is never restarted. Read-only checks: running them again changes nothing.
+# BEGIN prereq (extracted by tests/prereq-test.sh: keep the markers)
+SKIP_PREREQ="${TOUTWAF_SKIP_PREREQ:-0}"
+# Run by the update assistant of the console (it sets TOUTWAF_CP_PREP_HANDOFF=1): a product update does not update the packages of the whole system
+# (a new kernel, libraries, minutes of the 15 that the installer has, then a service that runs over replaced libraries). That is the job of the
+# "System updates" page, with its window, its reboot decision and its rollback. An owner who wants both says so: TOUTWAF_SKIP_SYSUPDATE=0.
+SKIP_SYSUPDATE="${TOUTWAF_SKIP_SYSUPDATE:-${TOUTWAF_NO_SYSTEM_UPDATE:-$([ "${TOUTWAF_CP_PREP_HANDOFF:-0}" = 1 ] && echo 1 || echo 0)}}"
+prereq_dir() {   # the nearest existing directory of a path: a path that does not exist yet lives on the file system of its parent
+  local d="$1"
+  while [ -n "$d" ] && [ "$d" != / ] && [ ! -d "$d" ]; do d="$(dirname "$d")"; done
+  printf '%s' "${d:-/}"
+}
+prereq_host() {   # URL -> its host NAME (nothing for an IP address, a file:// URL or an empty URL)
+  local h
+  case "$1" in ""|file://*|*://\[*) return 0;; esac
+  h="${1#*://}"; h="${h%%/*}"; h="${h##*@}"; h="${h%%:*}"
+  case "$h" in ""|*[!A-Za-z0-9.-]*|*[!0-9.]*) ;; *) return 0;; esac   # only digits and dots: an IP address
+  case "$h" in ""|*[!A-Za-z0-9.-]*) return 0;; esac
+  printf '%s' "$h"
+}
+prereq_resolves() {   # NAME -> 0 when it resolves (or when this machine has no tool to ask)
+  local to=()
+  have timeout && to=(timeout 15)
+  if have getent; then "${to[@]+"${to[@]}"}" getent ahosts "$1" >/dev/null 2>&1
+  elif have host; then "${to[@]+"${to[@]}"}" host "$1" >/dev/null 2>&1
+  elif have nslookup; then "${to[@]+"${to[@]}"}" nslookup "$1" >/dev/null 2>&1
+  else return 0; fi
+}
+prereq_check() {   # fills EC_LV / EC_CA / EC_AC; changes nothing
+  EC_LV=(); EC_CA=(); EC_AC=()
+  local refuse=refuse e d min wrn free mnt seen=" " h hosts=() n ds t0 skew
+  [ "$SKIP_PREREQ" = 0 ] || refuse=warn
+  # 1. disk space where the programs, the data and the download go (MIN: below it the installation could not finish; WARN: comfortable)
+  for e in "$BIN_DIR:300:1024" "$DATA_DIR:300:1024" "$TMP:100:300"; do
+    d="$(prereq_dir "${e%%:*}")"; min="${e#*:}"; wrn="${min#*:}"; min="${min%%:*}"
+    mnt="$(df -P "$d" 2>/dev/null | awk 'NR==2 {print $6}' || true)"; free="$(df -Pm "$d" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+    case "$free" in ""|*[!0-9]*) continue;; esac
+    case "$seen" in *" ${mnt:-$d} "*) continue;; esac
+    seen+="${mnt:-$d} "
+    if [ "$free" -lt "$min" ]; then ec_add "$refuse" "$(t pr_disk_full "$free" "${mnt:-$d}" "$min")" "$(t pr_disk_full_a)"
+    elif [ "$free" -lt "$wrn" ]; then ec_add warn "$(t pr_disk_low "$free" "${mnt:-$d}" "$wrn")" "$(t pr_disk_low_a)"; fi
+  done
+  # 2. DNS and 3. the clock, for the places the installation downloads from (nothing to resolve when it installs from a local archive)
+  if [ -z "$TARBALL" ]; then
+    if [ -n "$BASE_URL" ]; then hosts+=("$(prereq_host "$BASE_URL")"); else hosts+=("$(prereq_host "$SRC_PRIMARY")" "$(prereq_host "$SRC_FALLBACK")"); fi
+  fi
+  hosts+=("$(prereq_host "$CP_URL")")
+  seen=" "; ds=""
+  for h in ${hosts[@]+"${hosts[@]}"}; do
+    [ -n "$h" ] || continue
+    case "$seen" in *" $h "*) continue;; esac
+    seen+="$h "
+    if prereq_resolves "$h"; then
+      [ -n "$ds" ] || [ -n "$TARBALL" ] || ds="$h"
+    else
+      ec_add warn "$(t pr_dns "$h")" "$(t pr_dns_a)"
+    fi
+  done
+  if [ -n "$ds" ] && have curl; then   # the date of a server of the download against ours
+    n="$(curl -skI --connect-timeout 5 -m 10 "https://$ds/" 2>/dev/null | sed -n 's/^[Dd]ate: *//p' | head -n1 | tr -d '\r' || true)"
+    if [ -n "$n" ] && t0="$(date -d "$n" +%s 2>/dev/null)"; then
+      skew=$(( $(date +%s) - t0 )); [ "$skew" -ge 0 ] || skew=$(( -skew ))
+      if [ "$skew" -gt 300 ]; then ec_add warn "$(t pr_clock "$skew")" "$(t pr_clock_a)"; fi
+    fi
+  fi
+  return 0
+}
+prereq_gate() {   # before an installation or an update; exits 4 only for a full disk. Nothing is changed or downloaded in staging or dry-run
+  { [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; } || return 0
+  prereq_check
+  [ "${#EC_LV[@]}" -gt 0 ] || return 0
+  if [ "$(ec_refusals)" -gt 0 ]; then
+    ec_print 2
+    printf '\n  %s\n\n' "$(t pf_refused)" >&2
+    exit 4
+  fi
+  [ "$QUIET" = 1 ] || ec_print 1
+  return 0
+}
+# shellcheck disable=SC2034  # the outcome of the update: read by deploy/tests/prereq-test.sh, which sources this block
+SYSUPD=skipped
+# su_stream KIND CMD...: runs CMD in the background with its whole output in a private file and follows that file: every line goes to the
+# log as it comes (tail -f /var/log/toutwaf-install.log shows the update live), the lines that tell what the package manager does are repeated on
+# the console (su_show), and when nothing was printed for TOUTWAF_HEARTBEAT_SECS (20) a heartbeat line says how long it has been running and the
+# last line seen. Nothing ever waits on a pipe: the command writes to a file, a slow or silent package manager only makes the loop sleep.
+# KIND (dnf, apt, zypper, none) says how the packages are counted (SU_PKGS). Returns the status of CMD.
+SU_PKGS=0
+su_now() { date +%s; }
+su_dur() { local s="${1:-0}"; if [ "$s" -ge 60 ]; then printf '%s min %s s' $((s / 60)) $((s % 60)); else printf '%s s' "$s"; fi; }
+su_emit() {   # a progress line on the console (standard error, kept apart from the log) and for the console's progress file
+  local IFS=' '
+  progress "$*"
+  if [ "${QUIET:-0}" = 0 ]; then { printf '    %s %s\n' "${BUL:--}" "$*" >&3; } 2>/dev/null || true; fi
+  return 0
+}
+su_show() {   # true for the lines worth repeating (what is downloaded, unpacked, installed, the counts and the errors), not the noise
+  local l="${1#"${1%%[![:space:]]*}"}"
+  case "$l" in
+    "Hit:"*|"Ign:"*|"Verifying"*|"Cleanup"*|"Running scriptlet"*) return 1;;
+    "Get:"*|"Err:"*|"Fetched "*|"Reading package"*|"Unpacking "*|"Setting up "*|"Preparing to unpack"*|"Processing triggers"*|"Retrieving"*) return 0;;
+    "E: "*|"W: "*|"Error"*|"Failed"*|"Running transaction"*|"Transaction "*|"Downloading Packages"*|"Dependencies resolved"*|"Complete!"*) return 0;;
+    "Nothing to do"*|"Last metadata"*|"Upgrade "*|"Install "*|"Remove "*|"Upgrading:"*|"Installing:"*|"The following"*|"Overall download"*) return 0;;
+    "Checking for file conflicts"*|*" upgraded, "*|*" newly installed"*) return 0;;
+  esac
+  # dnf: "Upgrading : pkg 12/250", dnf5: "[ 12/250] Upgrading pkg", downloads "(3/54): pkg.rpm", zypper "(12/50) Installing: pkg"
+  [[ "$l" =~ ^(\[[[:space:]]*[0-9]+/[0-9]+\][[:space:]]*)?(Upgrading|Installing|Updating|Removing|Erasing|Downgrading|Reinstalling|Obsoleting)([[:space:]]|:) ]] && return 0
+  [[ "$l" =~ ^\([0-9]+/[0-9]+\)[[:space:]:] ]] && return 0
+  return 1
+}
+su_count() {   # su_count KIND FILE: the number of packages the output says were installed or updated
+  local n=0
+  case "$1" in
+    dnf) n="$(grep -cE '^[[:space:]]*(\[[[:space:]]*[0-9]+/[0-9]+\][[:space:]]*)?(Upgrading|Installing|Updating)([[:space:]]|:)' "$2" 2>/dev/null || true)";;
+    apt) n="$(grep -c '^Unpacking ' "$2" 2>/dev/null || true)";;
+    zypper) n="$(grep -cE '^\([0-9]+/[0-9]+\) (Installing|Updating)' "$2" 2>/dev/null || true)";;
+  esac
+  printf '%s' "${n:-0}"
+}
+su_stream() {
+  local kind="$1" out pid rc=0 sfd l pend="" now start last hb poll alive lastraw="" n rdrc IFS=' '
+  su_line() {   # one line of the output: into the log, and on the console when it is worth it
+    local x="${1//$'\r'/}"
+    printf '%s\n' "$x" >>"${LOG:-/dev/null}" 2>/dev/null || true
+    [ -n "${x//[[:space:]]/}" ] || return 0
+    lastraw="${x:0:100}"
+    if su_show "$x"; then su_emit "${x:0:160}"; last="$(su_now)"; fi
+    return 0
+  }
+  shift
+  hb="${TOUTWAF_HEARTBEAT_SECS:-20}"; poll="${TOUTWAF_POLL_SECS:-1}"
+  [[ "$hb" =~ ^[0-9]+$ ]] && [ "$hb" -ge 1 ] || hb=20
+  out="$(mktemp "${TMPDIR:-/tmp}/toutwaf-sysupdate.XXXXXX" 2>/dev/null || true)"
+  if [ -z "$out" ]; then "$@" >>"${LOG:-/dev/null}" 2>&1 </dev/null || rc=$?; return "$rc"; fi
+  log "+ $*"
+  "$@" >"$out" 2>&1 </dev/null 3>&- &   # (fd 3, the console's stream, is not inherited: a service started by a scriptlet must not hold the session open)
+  pid=$!
+  exec {sfd}<"$out"
+  start="$(su_now)"; last="$start"
+  while :; do
+    alive=1; kill -0 "$pid" 2>/dev/null || alive=0       # looked at BEFORE reading: what the command wrote up to its end is still read
+    while :; do
+      rdrc=0; IFS= read -r l <&"$sfd" || rdrc=$?
+      if [ "$rdrc" != 0 ]; then pend="${pend}${l}"; break; fi   # end of what is written so far: a line without its newline is finished by the next read
+      su_line "${pend}${l}"; pend=""
+    done
+    if [ "$alive" = 0 ] && [ -n "$pend" ]; then su_line "$pend"; pend=""; fi
+    now="$(su_now)"
+    if [ "$alive" = 0 ]; then break; fi
+    if [ $((now - last)) -ge "$hb" ]; then
+      su_emit "$(t su_beat "$(su_dur $((now - start)))" "${lastraw:--}")"; last="$now"
+    fi
+    sleep "$poll"
+  done
+  wait "$pid" || rc=$?
+  exec {sfd}<&-
+  n="$(su_count "$kind" "$out")"; SU_PKGS=$((SU_PKGS + ${n:-0}))
+  rm -f "$out"
+  return "$rc"
+}
+sysupdate_do() {   # the update itself, run as a step (output goes to the log, the progress to the console); never fails
+  local pm="" rc=0 to=() fam="${FAMILY:-${FAMILY_GUESS:-}}" stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}" t0
+  have timeout && to=(timeout "${TOUTWAF_UPDATE_TIMEOUT:-1800}")
+  case "$(pf_fam "$fam" 3)" in
+    dnf) if have dnf; then pm=dnf; elif have yum; then pm=yum; fi;;
+    apt) have apt-get && pm=apt;;
+    zypper) have zypper && pm=zypper;;
+  esac
+  if [ -z "$pm" ] && [ "$(pf_fam "$fam" 3)" != pacman ]; then   # the family is unknown: whatever is installed (Arch is a rolling release: never updated from here)
+    if have dnf; then pm=dnf; elif have yum; then pm=yum; elif have apt-get; then pm=apt; elif have zypper; then pm=zypper; fi
+  fi
+  if [ -z "$pm" ]; then warn "$(t su_nopm)"; return 0; fi
+  log "System update with $pm"
+  SU_PKGS=0; t0="$(su_now)"
+  case "$pm" in
+    dnf) su_stream dnf "${to[@]+"${to[@]}"}" dnf -y update --skip-broken || rc=$?;;
+    yum) su_stream dnf "${to[@]+"${to[@]}"}" yum -y update --skip-broken || rc=$?;;
+    apt) export DEBIAN_FRONTEND=noninteractive
+         { su_stream none "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 update \
+             && su_stream apt "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y upgrade; } || rc=$?;;
+    zypper) su_stream zypper "${to[@]+"${to[@]}"}" zypper --non-interactive update || rc=$?;;
+  esac
+  if [ "$rc" = 0 ]; then
+    SYSUPD=ok; { mkdir -p "$(dirname "$stamp")" && : >"$stamp"; } 2>/dev/null || true
+    su_emit "$(t su_done "$(su_dur $(($(su_now) - t0)))" "$SU_PKGS")"
+  else
+    SYSUPD=failed; warn "$(t su_failed "$rc" "$LOG")"
+  fi
+  if { have needs-restarting && ! needs-restarting -r >/dev/null 2>&1; } || [ -f /var/run/reboot-required ]; then warn "$(t su_reboot)"; fi
+  return 0
+}
+sysupdate_run() {   # before the prerequisites are installed: a failed or skipped update never changes what follows
+  # shellcheck disable=SC2034  # the outcome of the update: read by deploy/tests/prereq-test.sh, which sources this block
+  SYSUPD=skipped
+  { [ "$STAGING" = 0 ] && { [ "$ACTION" = install ] || [ "$ACTION" = update ]; }; } || return 0
+  if [ "$SKIP_SYSUPDATE" = 1 ]; then say "  $BUL $(t su_skipped)"; return 0; fi
+  if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) $(t su_dry)"; return 0; fi
+  local stamp="${TOUTWAF_STAMP:-/var/lib/toutwaf-system-update.stamp}"
+  if [ "${TOUTWAF_FORCE_SYSTEM_UPDATE:-}" != 1 ] && [ -e "$stamp" ] && [ $(( $(date +%s) - $(stat -c %Y "$stamp" 2>/dev/null || echo 0) )) -lt 21600 ]; then say "  $BUL $(t su_recent)"; return 0; fi
+  STEP_NOSPIN=1 step "$(t s_sysupdate)" sysupdate_do   # no spinner: the progress lines of the update are printed in its place
+  return 0
+}
+# END prereq
+prereq_run_check() {   # --check-prereq: the verdict on the disk space, DNS and the clock, nothing is changed; exit 0 (nothing refuses) or 4
+  prereq_check
+  if [ "${#EC_LV[@]}" -eq 0 ]; then printf '\n  %s\n  %s %s\n\n' "$(paint "$B" "$(t pf_title)")" "$(paint "$GRN" "$OKM")" "$(t pr_ok)"; return 0; fi
+  if [ "$(ec_refusals)" -gt 0 ]; then ec_print 2; printf '\n  %s\n\n' "$(t pf_refused)" >&2; return 4; fi
+  ec_print 1
+  printf '\n  %s %s\n\n' "$(paint "$GRN" "$OKM")" "$(t pf_ok_warn)"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ interactive input
+TTY_DEV=""
+if [ -t 0 ] && [ -t 1 ]; then TTY_DEV=/dev/stdin
+elif [ -t 1 ] && { : </dev/tty; } 2>/dev/null; then TTY_DEV=/dev/tty; fi
+# BEGIN autofix (extracted by deploy/tests/autofix-test.sh: keep the markers)
+# ------------------------------------------------------------------------------------------------ automatic correction
+# "When something goes wrong the installer corrects it by itself": a catalogue of  diagnosis -> correction -> new attempt, run at every failure
+# (a step that fails, a service that does not start, a health check that is too slow). Each correction is
+#   * idempotent (a second run changes nothing), bounded (a wait has a limit, a fix is tried once per installation, two new attempts at most),
+#   * reversible (what it changed is written with the command that undoes it: /var/log/toutwaf-autofix.undo and the installer log),
+#   * never destructive for the data (caches, rotated logs and labels only; nothing of the data directory is ever deleted).
+# Every action is told in one line, in the console, in /var/log/toutwaf-install.log and in the progress file the update task of the console shows:
+#   [autofix] Problem detected: ...; correction applied: ...; new attempt: succeeded|failed
+# A new attempt = the installer starts again from its own file with what it was asked (steps are idempotent); a failure that nothing can correct
+# keeps the old behaviour (clean rollback) and writes a diagnostic ready to be sent. --no-autofix switches all of it off, --autofix-dry-run only
+# says what would be done. Messages: the af_* keys of the catalogue (10 languages).
+AUTOFIX=1; case "${TOUTWAF_NO_AUTOFIX:-}" in 1|yes|true|on) AUTOFIX=0;; esac
+AUTOFIX_DRY=0
+AUTOFIX_STOP_CONFLICTS=0; case "${TOUTWAF_AUTOFIX_STOP_CONFLICTS:-}" in 1|yes|true|on) AUTOFIX_STOP_CONFLICTS=1;; esac
+AF_RESUME=""; AF_FLOW=0         # AF_FLOW=1 once the installation or the update itself starts: a refused option or a wrong command line is not a failure to correct
+AUTOFIX_AGENT_FROM="${TOUTWAF_AUTOFIX_AGENT_FROM:-}"       # the address that may reach the port 9444 (console <-> node link): never opened to everyone
+AF_ROOT=""                      # a prefix for every path read or written (the tests); empty on a real machine
+AF_ACTIVE=""; AF_CTX=""; AF_PROBLEM=""; AF_PLAN=""; AF_ACTION=""; AF_ADVICE=""; AF_UNIT=""; AF_DIAG_PATH=""
+AF_CATALOG="tmp disk locks clock source selinux perms exec ipv6 port firewall boolean pkgkey unitload startlimit nofile"
+AF_SVC_CATALOG="unitload startlimit nofile selinux perms exec ipv6 port boolean"
+AF_MAX_TRIES=2
+AF_TRY=0; case "${TOUTWAF_AUTOFIX_TRY:-0}" in [0-9]) AF_TRY="${TOUTWAF_AUTOFIX_TRY:-0}";; esac
+AF_PREV="${TOUTWAF_AUTOFIX_APPLIED:-}"        # the corrections of the earlier attempts: id US problem US action, records separated by RS
+AF_REC=()                                     # the corrections of this attempt (same format, one record per element)
+AF_FAILED=()                                  # ids tried without success
+AF_PEND=()                                    # lines said before the installer log exists
+AF_SELF="${BASH_SOURCE[0]:-}"; if [ -n "$AF_SELF" ] && [ -f "$AF_SELF" ] && head -c2 "$AF_SELF" 2>/dev/null | grep -q '^#!'; then AF_SELF="$(cd "$(dirname "$AF_SELF")" && pwd)/$(basename "$AF_SELF")"; else AF_SELF=""; fi
+AF_ARGS=("$@")
+AF_US=$'\037'; AF_RS=$'\036'
+
+af_p() { printf '%s%s' "$AF_ROOT" "$1"; }
+af_want_dp() { case "${COMPONENT:-all}" in dp|all) return 0;; esac; return 1; }
+af_want_cp() { case "${COMPONENT:-all}" in cp|all) return 0;; esac; return 1; }
+af_is_root() { [ "$(id -u 2>/dev/null || echo 1)" = 0 ]; }
+af_ctx_has() { grep -Eiq -e "$1" <<<"$AF_CTX"; }
+af_ctx_first() { grep -Eio -e "$1" <<<"$AF_CTX" | head -n1 || true; }
+af_bounded() { local s="$1"; shift; if have timeout; then timeout "$s" "$@"; else "$@"; fi; }
+af_now() { date +%s; }
+af_out() { "$@" 2>/dev/null || true; }   # the output of a command whatever its status (no pipeline: a reader that stops early must not fail the test under pipefail)
+af_unit_known() { have systemctl && grep -q "^${1%.service}" <<<"$(af_out systemctl list-unit-files "$1")"; }
+af_poll() { sleep "${AF_POLL:-5}" 2>/dev/null || true; }
+af_num() { case "${1:-}" in ""|*[!0-9]*) printf '0';; *) printf '%s' "$1";; esac; }
+af_df() {   # af_df COLUMN PATH: column 4 = free MB, 5 = percent used (df -Pm)
+  local v; v="$(df -Pm "$2" 2>/dev/null | awk -v c="$1" 'NR==2{gsub("%","",$c); print $c}' | head -n1 || true)"
+  af_num "$v"
+}
+af_known() {   # af_known ID: already corrected earlier in this installation (this attempt or an earlier one)
+  local r
+  case "$AF_RS$AF_PREV" in *"$AF_RS$1$AF_US"*) return 0;; esac
+  for r in ${AF_REC[@]+"${AF_REC[@]}"}; do case "$r" in "$1$AF_US"*) return 0;; esac; done
+  for r in ${AF_FAILED[@]+"${AF_FAILED[@]}"}; do [ "$r" = "$1" ] && return 0; done
+  return 1
+}
+# af_emit TEXT: one line, in the console (unless --quiet), the installer log and the progress file of the console's update task
+af_emit() {
+  local IFS=' '
+  if [ -n "${LOG:-}" ]; then log "[autofix] $*"; else AF_PEND+=("[autofix] $*"); fi
+  progress "[autofix] $*"
+  if [ "${QUIET:-0}" = 0 ]; then { printf '    %s\n' "[autofix] $*" >&3; } 2>/dev/null || true; fi
+  return 0
+}
+autofix_flush_pending() { local l; for l in ${AF_PEND[@]+"${AF_PEND[@]}"}; do log "$l"; done; AF_PEND=(); return 0; }
+# af_undo COMMAND: what undoes the change just made (kept in the log and in /var/log/toutwaf-autofix.undo)
+af_undo() {
+  local f; f="$(af_p /var/log/toutwaf-autofix.undo)"
+  af_emit "$(t af_undo "$*")"
+  { printf '# %s %s\n%s\n' "$(date -u +%FT%TZ 2>/dev/null || echo now)" "${AF_PROBLEM:-}" "$*" >>"$f"; chmod 0600 "$f"; } 2>/dev/null || true
+  return 0
+}
+af_guard_begin() { AF_SAVED_E=0; case "$-" in *e*) AF_SAVED_E=1;; esac; AF_SAVED_ERR="$(trap -p ERR)"; trap - ERR; set +e; return 0; }
+af_guard_end() { [ "$AF_SAVED_E" = 1 ] && set -e; [ -n "$AF_SAVED_ERR" ] && eval "$AF_SAVED_ERR"; return 0; }
+# (the actions that only read or remove -- --check-env, --check-prereq, --status, --links, --uninstall -- never correct anything)
+af_enabled() {
+  case "${ACTION:-}" in checkenv|checkprereq|verifyself|status|links|uninstall) return 1;; esac
+  [ "$AUTOFIX" = 1 ] && [ "${DRY_RUN:-0}" = 0 ] && [ "${STAGING:-0}" = 0 ]
+}
+
+# ---- work directory: /tmp full, or mounted noexec (the incident "curl: (23) Failure writing output")
+af_tmp_bad() {   # af_tmp_bad DIR: prints why when DIR cannot hold the download and the unpacked archive; returns 0 then
+  local d="$1" free opts
+  [ -d "$d" ] || return 1
+  free="$(af_df 4 "$d")"
+  if [ "$free" -gt 0 ] && [ "$free" -lt "${AF_TMP_MIN_MB:-300}" ]; then t af_w_full "$free"; return 0; fi
+  if have findmnt; then
+    opts="$(findmnt -no OPTIONS -T "$d" 2>/dev/null || true)"
+    case ",$opts," in *,noexec,*) t af_w_noexec; return 0;; esac
+  fi
+  return 1
+}
+af_pick_workdir() {   # a root's directory with room that allows execution: prints it
+  local c why
+  for c in "${TOUTWAF_AUTOFIX_TMPDIR:-}" /var/tmp /var/lib /root /opt; do
+    [ -n "$c" ] || continue
+    c="$(af_p "$c")"
+    [ -d "$c" ] && [ -w "$c" ] || continue
+    why="$(af_tmp_bad "$c" || true)"; [ -z "$why" ] || continue
+    printf '%s' "$c"; return 0
+  done
+  return 1
+}
+# autofix_prepare_tmp: before the work directory is made (in the CURRENT shell: TMPDIR must reach every program started later): when /tmp is full, not
+# writable or mounted noexec, another directory of root's is used
+autofix_prepare_tmp() {
+  local base="${TMPDIR:-/tmp}" why="" alt="" probe=""
+  af_enabled || return 0
+  why="$(af_tmp_bad "$base" || true)"
+  if [ -z "$why" ]; then
+    probe="$(mktemp -d 2>/dev/null || true)"
+    if [ -n "$probe" ]; then rm -rf "$probe"; else why="$(t af_w_nowrite)"; fi
+  fi
+  [ -n "$why" ] || return 0
+  alt="$(af_pick_workdir)" || return 0
+  AF_PROBLEM="$(t af_p_tmp "$base" "$why")"
+  if [ "$AUTOFIX_DRY" = 1 ]; then af_emit "$(t af_plan_line "$AF_PROBLEM" "$(t af_a_tmp "$alt")")"; return 0; fi
+  export TMPDIR="$alt"
+  af_emit "$(t af_line "$AF_PROBLEM" "$(t af_a_tmp "$alt")" "$(t af_try_ok)")"
+  return 0
+}
+af_diag_tmp() {
+  local d why alt
+  d="${TMP:-${TMPDIR:-/tmp}}"
+  why="$(af_tmp_bad "$d" || true)"; [ -n "$why" ] || return 1
+  alt="$(af_pick_workdir)" || return 1
+  AF_PROBLEM="$(t af_p_tmp "$d" "$why")"; AF_PLAN="$(t af_a_tmp "$alt")"; AF_WORKDIR="$alt"
+  return 0
+}
+af_fix_tmp() { export TMPDIR="$AF_WORKDIR"; AF_ACTION="$AF_PLAN"; return 0; }
+
+# ---- disk almost full: package caches and old logs, never data
+af_disk_paths() { printf '%s\n' /var / "${DATA_DIR:-/var/lib/toutwaf}" "${BIN_DIR:-/usr/local/bin}"; }
+af_disk_worst() {   # prints "PATH PCT FREE" of the file system that is over the limit
+  local d pct free
+  while IFS= read -r d; do
+    d="$(af_p "$d")"; [ -d "$d" ] || continue
+    pct="$(af_df 5 "$d")"; free="$(af_df 4 "$d")"
+    [ "$pct" -gt 0 ] || continue
+    if [ "$pct" -ge "${AF_DISK_PCT:-95}" ] || [ "$free" -lt "${AF_DISK_MIN_MB:-200}" ]; then printf '%s %s %s' "$d" "$pct" "$free"; return 0; fi
+  done < <(af_disk_paths)
+  return 1
+}
+af_diag_disk() {
+  local w
+  if [ -n "$AF_CTX" ] && ! af_ctx_has 'No space left on device|ENOSPC|Failure writing output|curl: \(23\)|write error|disk full|Disk quota exceeded|out of space'; then return 1; fi
+  w="$(af_disk_worst)" || return 1
+  { IFS=' ' read -r AF_D_PATH AF_D_PCT AF_D_FREE; } <<<"$w"
+  AF_PROBLEM="$(t af_p_disk "$AF_D_PATH" "$AF_D_PCT" "$AF_D_FREE")"; AF_PLAN="$(t af_a_disk)"
+  return 0
+}
+af_fix_disk() {
+  local f now old
+
+  have dnf && af_bounded 120 dnf clean packages >/dev/null 2>&1 || true
+  have yum && ! have dnf && af_bounded 120 yum clean packages >/dev/null 2>&1 || true
+  have apt-get && af_bounded 120 apt-get clean >/dev/null 2>&1 || true
+  have zypper && af_bounded 120 zypper --non-interactive clean --all >/dev/null 2>&1 || true
+  if have journalctl; then
+    af_bounded 120 journalctl --vacuum-time="${AF_JOURNAL_DAYS:-14}d" >/dev/null 2>&1 || true
+    if [ "$(af_df 5 "$(af_p /var)")" -ge "${AF_DISK_PCT:-95}" ]; then af_bounded 120 journalctl --vacuum-size="${AF_JOURNAL_MB:-200}M" >/dev/null 2>&1 || true; fi
+  fi
+  now="$(date +%s)"; old=$((${AF_LOG_DAYS:-30} * 86400))
+  for f in "$(af_p /var/log)"/*.gz "$(af_p /var/log)"/*.xz "$(af_p /var/log)"/*.old "$(af_p /var/log)"/*-[0-9]*; do   # rotated logs of other programs, never ours, never the audit trail
+    [ -f "$f" ] || continue
+    case "${f##*/}" in toutwaf*|audit*) continue;; esac
+    [ $((now - $(stat -c %Y "$f" 2>/dev/null || echo "$now"))) -gt "$old" ] || continue
+    rm -f -- "$f" 2>/dev/null || true
+  done
+  AF_ACTION="$AF_PLAN"
+  if af_disk_worst >/dev/null 2>&1; then AF_ADVICE="$(t af_h_disk)"; return 1; fi   # still over the limit
+  return 0
+}
+
+# ---- a package manager that is locked (another dnf / apt / rpm, a stale lock)
+af_pkg_busy() {   # prints the name of a package program that runs
+  local n
+  have pgrep || return 1
+  for n in dnf dnf5 yum rpm apt apt-get dpkg packagekitd unattended-upgr zypper; do pgrep -x "$n" >/dev/null 2>&1 && { printf '%s' "$n"; return 0; }; done
+  return 1
+}
+af_stale_locks() {   # prints the pid / lock files whose process is gone
+  local f pid
+  for f in "$(af_p /var/run/yum.pid)" "$(af_p /var/run/dnf.pid)" "$(af_p /var/lib/dnf/rpmdb_lock.pid)" "$(af_p /var/cache/dnf)"/*_lock.pid; do
+    [ -f "$f" ] || continue
+    pid="$(tr -dc '0-9' <"$f" 2>/dev/null | head -c 10 || true)"
+    if [ -n "$pid" ] && [ ! -d "$(af_p /proc/$pid)" ] && ! kill -0 "$pid" 2>/dev/null; then printf '%s\n' "$f"; fi
+  done
+  return 0
+}
+af_diag_locks() {
+  local who stale
+  who="$(af_pkg_busy || true)"; stale="$(af_stale_locks)"
+  if [ -n "$AF_CTX" ] && ! af_ctx_has "yum\.pid|dnf\.pid|another app is currently holding|Waiting for process with pid|rpmdb.*lock|Could not get lock|Unable to acquire the dpkg|dpkg was interrupted|database is locked|unable to lock database|Failed to obtain lock|is held by process|lock-frontend"; then return 1; fi
+  [ -n "$who$stale" ] || [ -n "$AF_CTX" ] || return 1
+  AF_PROBLEM="$(t af_p_lock "${who:-?}")"; AF_PLAN="$(t af_a_lock_wait "${AF_LOCK_WAIT:-180}")"
+  return 0
+}
+af_fix_locks() {
+  local waited=0 who stale f max="${AF_LOCK_WAIT:-180}" inc="${AF_POLL:-5}" msg=""
+  [ "$inc" -gt 0 ] || inc=1
+  while who="$(af_pkg_busy || true)"; [ -n "$who" ] && [ "$waited" -lt "$max" ]; do af_poll; waited=$((waited + inc)); done
+  if [ -n "$who" ]; then AF_ADVICE="$(t af_h_lock "$who")"; AF_ACTION="$(t af_a_lock_wait "$waited")"; return 1; fi
+  [ "$waited" = 0 ] || msg="$(t af_a_lock_wait "$waited")"
+  stale="$(af_stale_locks)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    mv -f -- "$f" "$f.autofix-stale" 2>/dev/null && { msg="${msg:+$msg, }$(t af_a_lock_stale "$f")"; af_undo "mv $f.autofix-stale $f"; }
+  done <<<"$stale"
+  if [ -d "$(af_p /var/lib/rpm)" ] && ls "$(af_p /var/lib/rpm)"/__db.0* >/dev/null 2>&1; then   # Berkeley DB environment files of an interrupted rpm: rebuilt at the next use
+    rm -f "$(af_p /var/lib/rpm)"/__db.0* 2>/dev/null && msg="${msg:+$msg, }$(t af_a_lock_stale "/var/lib/rpm/__db.*")"
+  fi
+  if af_ctx_has 'dpkg was interrupted' && have dpkg; then af_bounded 300 dpkg --configure -a >/dev/null 2>&1 && msg="${msg:+$msg, }dpkg --configure -a"; fi
+  AF_ACTION="${msg:-$(t af_a_lock_none)}"
+  return 0
+}
+
+# ---- the clock (a certificate "not yet valid", a signature "expired")
+af_clock_skew() {   # seconds between this machine and the Date header of the download sources (0 when unknown)
+  local u d t now diff
+  for u in "${SRC_PRIMARY:-}" "${SRC_FALLBACK:-}"; do
+    case "$u" in http://*|https://*) ;; *) continue;; esac
+    d="$(curl -skI --max-time 8 "$u" 2>/dev/null | tr -d '\r' | sed -n 's/^[Dd]ate:[[:space:]]*//p' | head -n1 || true)"
+    [ -n "$d" ] || continue
+    t="$(date -d "$d" +%s 2>/dev/null || true)"; [ -n "$t" ] || continue
+    now="$(date +%s)"; diff=$((now - t)); [ "$diff" -ge 0 ] || diff=$((0 - diff))
+    printf '%s' "$diff"; return 0
+  done
+  printf '0'
+}
+af_diag_clock() {
+  local s
+  if [ -n "$AF_CTX" ] && ! af_ctx_has 'not yet valid|has expired|certificate (has )?expired|Signature (made|.*expired)|clock|not valid yet|NotBefore|time.*(wrong|incorrect)|SSL certificate problem'; then return 1; fi
+  s="$(af_clock_skew)"; [ "$s" -gt "${AF_CLOCK_MAX:-300}" ] || return 1
+  AF_PROBLEM="$(t af_p_clock "$s")"; AF_PLAN="$(t af_a_clock "timedatectl / chronyd")"
+  return 0
+}
+af_fix_clock() {
+  local how="" s i
+  if have timedatectl; then timedatectl set-ntp true >/dev/null 2>&1 && how="timedatectl set-ntp true"; fi
+  if have chronyc || af_unit_known chronyd.service; then
+    have systemctl && systemctl enable --now chronyd >/dev/null 2>&1 || true
+    have chronyc && af_bounded 30 chronyc makestep >/dev/null 2>&1 && how="${how:+$how, }chronyc makestep"
+  elif af_unit_known systemd-timesyncd.service; then
+    systemctl enable --now systemd-timesyncd >/dev/null 2>&1 && how="${how:+$how, }systemd-timesyncd"
+  fi
+  if [ -z "$how" ]; then AF_ADVICE="$(t af_h_clock)"; return 2; fi
+  for i in 1 2 3 4 5 6; do s="$(af_clock_skew)"; [ "$s" -le "${AF_CLOCK_MAX:-300}" ] && break; af_poll; done
+  AF_ACTION="$(t af_a_clock "$how")"
+  [ "${s:-0}" -le "${AF_CLOCK_MAX:-300}" ] && return 0
+  AF_ADVICE="$(t af_h_clock)"; return 1
+}
+
+# ---- a download source that does not answer: GitLab -> GitHub -> a mirror
+af_sources() {   # kind|url|label, in the order of preference
+  local u
+  printf 'root|%s|GitLab\n' "${SRC_PRIMARY:-}"
+  printf 'root|%s|GitHub\n' "${SRC_FALLBACK:-}"
+  u="$(sed -n 's/^BASE_URL=//p' "$(af_p "${CONF_DIR:-/etc/toutwaf}/installer.conf")" 2>/dev/null | head -n1 | tr -d '\r"'"'" || true)"; [ -z "$u" ] || printf 'base|%s|mirror\n' "$u"
+  u="$(sed -n 's/^DIRECT_URL=//p' "$(af_p "${CONF_DIR:-/etc/toutwaf}/upgrade.conf")" 2>/dev/null | head -n1 | tr -d '\r"'"'" || true)"; [ -z "$u" ] || printf 'base|%s|mirror\n' "${u%/}"
+  [ -z "${TOUTWAF_MIRROR_URL:-}" ] || printf 'base|%s|mirror\n' "${TOUTWAF_MIRROR_URL%/}"
+  return 0
+}
+af_src_probe() {   # af_src_probe KIND URL
+  local url="$2"
+  case "$url" in http://*|https://*) ;; *) return 1;; esac
+  if [ "$1" = root ]; then url="$url/$(channel_branch)/channel.json"; else url="$url/channel.json"; fi
+  curl -fsS -o /dev/null --max-time "${AF_PROBE_S:-12}" "$url" >/dev/null 2>&1
+}
+af_src_current() {   # the source in use: kind|url
+  if [ -n "${BASE_URL:-}" ]; then printf 'base|%s' "${BASE_URL%/}"; else printf 'root|%s' "${SRC_ROOT:-${SRC_PRIMARY:-}}"; fi
+}
+af_diag_source() {
+  local cur kind url label
+  case "${BASE_URL:-}" in file://*) return 1;; esac   # a local tree (the console's update): nothing to switch
+  [ -n "${TARBALL:-}" ] && return 1
+  af_ctx_has 'Could not resolve host|Connection timed out|Failed to connect|Connection refused|Couldn.t connect|curl: \((6|7|28|35|52|56)\)|SSL connect error|Operation timed out|cannot read .*channel\.json|Network is unreachable|Name or service not known' || return 1
+  AF_SRC_NEW=""
+  cur="$(af_src_current)"
+  if af_src_probe "${cur%%|*}" "${cur#*|}"; then return 1; fi   # it answers now: a passing failure, the new attempt is enough
+  while IFS='|' read -r kind url label; do
+    [ -n "$url" ] || continue
+    [ "$kind|${url%/}" != "$cur" ] || continue
+    if af_src_probe "$kind" "$url"; then AF_SRC_NEW="$kind|${url%/}"; AF_SRC_LABEL="$label ($url)"; break; fi
+  done < <(af_sources)
+  [ -n "$AF_SRC_NEW" ] || { AF_ADVICE="$(t af_h_src)"; AF_PROBLEM="$(t af_p_src "${cur#*|}")"; AF_PLAN="$(t af_h_src)"; return 0; }
+  AF_PROBLEM="$(t af_p_src "${cur#*|}")"; AF_PLAN="$(t af_a_src "$AF_SRC_LABEL")"
+  return 0
+}
+af_fix_source() {
+  [ -n "${AF_SRC_NEW:-}" ] || return 2
+  export TOUTWAF_AUTOFIX_SRC="$AF_SRC_NEW"
+  AF_ACTION="$AF_PLAN"; return 0
+}
+autofix_apply_env() {   # at the start of a new attempt: the source and the work directory chosen by the attempt before
+  case "${TOUTWAF_AUTOFIX_SRC:-}" in
+    root\|http://*|root\|https://*) SRC_ROOT="${TOUTWAF_AUTOFIX_SRC#root|}";;
+    base\|http://*|base\|https://*) BASE_URL="${TOUTWAF_AUTOFIX_SRC#base|}";;
+  esac
+  return 0
+}
+
+# ---- SELinux: wrong labels, booleans
+af_se_on() { [ "${NO_SELINUX:-0}" = 0 ] && have getenforce && have restorecon && [ "$(getenforce 2>/dev/null || echo Disabled)" != Disabled ]; }
+af_toutwaf_paths() {   # the paths ToutWAF owns (one per line)
+  local f
+  printf '%s\n' "$(af_p "${CONF_DIR:-/etc/toutwaf}")" "$(af_p "${DATA_DIR:-/var/lib/toutwaf}")" "$(af_p "${LOG_DIR:-/var/log/toutwaf}")"
+  for f in "$(af_p "${BIN_DIR:-/usr/local/bin}")"/toutwaf* "$(af_p /etc/systemd/system)"/toutwaf-*; do [ -e "$f" ] && printf '%s\n' "$f"; done
+  return 0
+}
+af_mislabelled() { local p out=""; while IFS= read -r p; do [ -e "$p" ] || continue; out+="$(restorecon -nRv "$p" 2>/dev/null | grep -i 'would relabel' | head -n 3 || true)"$'\n'; done < <(af_toutwaf_paths); printf '%s' "$out" | sed '/^$/d'; }
+af_diag_selinux() {
+  local m
+  af_se_on || return 1
+  if [ -n "$AF_CTX" ] && ! af_ctx_has 'Permission denied|AVC|avc:  *denied|SELinux|status=203/EXEC|203/EXEC|Failed to execute|code=exited, status=(13|203)|not permitted'; then return 1; fi
+  m="$(af_mislabelled)"; [ -n "$m" ] || return 1
+  AF_PROBLEM="$(t af_p_label "$(head -n1 <<<"$m" | cut -c1-120)")"; AF_PLAN="$(t af_a_label "?")"
+  return 0
+}
+af_fix_selinux() {
+  local p ps=()
+  while IFS= read -r p; do [ -n "$p" ] && ps+=("$p"); done < <(af_toutwaf_paths)
+  restorecon -R "${ps[@]}" >/dev/null 2>&1 || true
+  if declare -F selinux_label_bin >/dev/null 2>&1; then selinux_label_bin; fi
+  [ -z "$(af_mislabelled)" ] || { AF_ADVICE="$(t af_h_label)"; return 1; }
+  AF_ACTION="$(t af_a_label "${#ps[@]}")"
+  return 0
+}
+af_wl_bool() { case "$1" in httpd_can_network_connect|httpd_can_network_connect_db|nis_enabled) return 0;; esac; return 1; }
+af_bool_list() {   # the booleans the audit trail says would allow what toutwaf was refused (known ones only)
+  local out b
+  have ausearch && have audit2why || return 0
+  out="$(ausearch -m avc,user_avc -c toutwaf -ts recent 2>/dev/null | audit2why 2>/dev/null || true)"
+  [ -n "$out" ] || out="$(ausearch -m avc,user_avc -ts recent 2>/dev/null | grep -i toutwaf | audit2why 2>/dev/null || true)"
+  sed -n 's/.*setsebool -P \([A-Za-z0-9_]*\) 1.*/\1/p' <<<"$out" | while IFS= read -r b; do af_wl_bool "$b" && printf '%s\n' "$b"; done | awk '!s[$0]++'
+  return 0
+}
+af_diag_boolean() {
+  local b
+  af_se_on || return 1
+  [ "$(getenforce 2>/dev/null)" = Enforcing ] || return 1
+  have setsebool && have getsebool || return 1
+  b="$(af_bool_list | while IFS= read -r x; do [ "$(getsebool "$x" 2>/dev/null | awk '{print $NF}')" = on ] || printf '%s ' "$x"; done || true)"
+  AF_BOOLS="${b% }"; [ -n "$AF_BOOLS" ] || return 1
+  AF_PROBLEM="$(t af_p_bool "$AF_BOOLS")"; AF_PLAN="$(t af_a_bool "$AF_BOOLS")"
+  return 0
+}
+af_fix_boolean() {
+  local b done_="" IFS=' '
+
+  for b in $AF_BOOLS; do
+    if setsebool -P "$b" on >/dev/null 2>&1; then done_="${done_:+$done_ }$b"; af_undo "setsebool -P $b off"; fi
+  done
+  [ -n "$done_" ] || return 1
+  AF_ACTION="$(t af_a_bool "$done_")"; return 0
+}
+
+# ---- owner and permissions of the data directory and of the configuration (a restore or a manual run as root left files of root's)
+af_perm_issues() {   # prints one line per problem
+  local d c f own
+  d="$(af_p "${DATA_DIR:-/var/lib/toutwaf}")"; c="$(af_p "${CONF_DIR:-/etc/toutwaf}")"
+  id "${SVC_USER:-toutwaf}" >/dev/null 2>&1 || return 0
+  if [ -d "$d" ]; then
+    own="$(stat -c '%U' "$d" 2>/dev/null || true)"; [ "$own" = "${SVC_USER:-toutwaf}" ] || printf '%s (%s)\n' "$d" "$own"
+    for f in "$d"/toutwaf.db "$d"/toutwaf.db-wal "$d"/toutwaf.db-shm "$d"/ctl.sock "$d"/*.key; do
+      [ -e "$f" ] || continue
+      own="$(stat -c '%U' "$f" 2>/dev/null || true)"; [ "$own" = "${SVC_USER:-toutwaf}" ] || printf '%s (%s)\n' "$f" "$own"
+    done
+  fi
+  if [ -d "$c" ]; then
+    own="$(stat -c '%G' "$c" 2>/dev/null || true)"; [ "$own" = "${SVC_USER:-toutwaf}" ] || printf '%s (%s)\n' "$c" "$own"
+    case "$(stat -c '%a' "$c" 2>/dev/null || echo 750)" in *[1-7]) printf '%s (%s)\n' "$c" "$(stat -c '%a' "$c")";; esac
+    for f in "$c"/*.yaml "$c"/cp.env "$c"/db.dsn; do
+      [ -f "$f" ] || continue
+      own="$(stat -c '%G' "$f" 2>/dev/null || true)"; [ "$own" = "${SVC_USER:-toutwaf}" ] || printf '%s (%s)\n' "$f" "$own"
+    done
+  fi
+  return 0
+}
+af_diag_perms() {
+  local i
+  [ -z "$AF_CTX" ] || af_ctx_has 'Permission denied|EACCES|status=(13|203|200|226)|cannot open|unable to open|not permitted|readonly database|attempt to write a readonly' || return 1
+  i="$(af_perm_issues)"; [ -n "$i" ] || return 1
+  AF_PROBLEM="$(t af_p_perm "$(head -n1 <<<"$i" | cut -c1-120)")"; AF_PLAN="$(t af_a_perm "$(head -n1 <<<"$i" | cut -c1-120)")"
+  return 0
+}
+af_fix_perms() {
+  local d c f u="${SVC_USER:-toutwaf}"
+  d="$(af_p "${DATA_DIR:-/var/lib/toutwaf}")"; c="$(af_p "${CONF_DIR:-/etc/toutwaf}")"
+  if [ -d "$d" ]; then chown -R -h "$u:$u" "$d" 2>/dev/null || true; chmod 0750 "$d" 2>/dev/null || true; fi
+  if [ -d "$c" ]; then
+    chown "root:$u" "$c" 2>/dev/null || true; chmod 0750 "$c" 2>/dev/null || true
+    for f in "$c"/*.yaml "$c"/cp.env "$c"/db.dsn; do [ -f "$f" ] && { chgrp "$u" "$f" 2>/dev/null || true; chmod 0640 "$f" 2>/dev/null || true; }; done
+  fi
+  [ -z "$(af_perm_issues)" ] || { AF_ADVICE="$(t af_h_perm)"; return 1; }
+  AF_ACTION="$(t af_a_perm "$d $c")"
+  return 0
+}
+af_diag_exec() {   # a program that lost its execute bit (status=203/EXEC)
+  local f
+  [ -z "$AF_CTX" ] || af_ctx_has '203/EXEC|Failed to execute|Permission denied|cannot execute' || return 1
+  AF_EXEC_LIST=""
+  for f in "$(af_p "${BIN_DIR:-/usr/local/bin}")"/toutwaf-cp "$(af_p "${BIN_DIR:-/usr/local/bin}")"/toutwaf-dp "$(af_p "${BIN_DIR:-/usr/local/bin}")"/toutwafctl; do
+    [ -f "$f" ] && [ ! -x "$f" ] && AF_EXEC_LIST+="$f "
+  done
+  [ -n "$AF_EXEC_LIST" ] || return 1
+  AF_PROBLEM="$(t af_p_exec "${AF_EXEC_LIST% }")"; AF_PLAN="$(t af_a_exec "${AF_EXEC_LIST% }")"
+  return 0
+}
+af_fix_exec() { local f IFS=' '; for f in $AF_EXEC_LIST; do chmod 0755 "$f" 2>/dev/null || true; done; AF_ACTION="$AF_PLAN"; return 0; }
+
+# ---- IPv6 absent while the configuration listens on [::]
+af_no_ipv6() { [ ! -e "$(af_p /proc/net/if_inet6)" ] || [ "$(cat "$(af_p /proc/sys/net/ipv6/conf/all/disable_ipv6)" 2>/dev/null || echo 0)" = 1 ]; }
+af_v6_files() { local f; for f in "$(af_p "${CONF_DIR:-/etc/toutwaf}")"/*.yaml "$(af_p "${CONF_DIR:-/etc/toutwaf}")"/cp.env; do [ -f "$f" ] && grep -q '\[::\]' "$f" 2>/dev/null && printf '%s\n' "$f"; done; return 0; }
+af_diag_ipv6() {
+  local fl
+  af_no_ipv6 || return 1
+  [ -z "$AF_CTX" ] || af_ctx_has 'address family not supported|Address family|cannot assign requested address|EAFNOSUPPORT|listen tcp \[::\]|\[::\]:[0-9]+|IPv6' || return 1
+  fl="$(af_v6_files)"; [ -n "$fl" ] || return 1
+  AF_V6_FILES="$fl"; AF_PROBLEM="$(t af_p_v6)"; AF_PLAN="$(t af_a_v6 "$(wc -l <<<"$fl" | tr -d ' ')")"
+  return 0
+}
+af_fix_ipv6() {
+  local f n=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    cp -p -- "$f" "$f.autofix-bak" 2>/dev/null || continue
+    sed -i 's/\[::\]/0.0.0.0/g' "$f" 2>/dev/null || { cp -p -- "$f.autofix-bak" "$f" 2>/dev/null; continue; }
+    af_undo "cp -p $f.autofix-bak $f"; n=$((n + 1))
+  done <<<"$AF_V6_FILES"
+  [ "$n" -gt 0 ] || return 1
+  AF_ACTION="$(t af_a_v6 "$n")"; return 0
+}
+
+# ---- a port that is taken by something else
+af_listeners() {   # port|name|pid  of every TCP listener
+  have ss || return 0
+  ss -H -ltnp 2>/dev/null | awk '{ a=$4; sub(/.*:/,"",a); n=""; p=""; if (match($0,/\(\("[^"]*"/)) n=substr($0,RSTART+3,RLENGTH-4); if (match($0,/pid=[0-9]+/)) p=substr($0,RSTART+4,RLENGTH-4); print a "|" n "|" p }'
+}
+af_our_ports() {
+  af_want_dp && printf '%s\n' "${HTTP_PORT:-80}" "${HTTPS_PORT:-443}"
+  af_want_cp && printf '%s\n' "${CP_PORT:-9443}" 9444
+  return 0
+}
+af_unit_of_pid() {   # the systemd service of a process
+  local pid="$1" u
+  [ -n "$pid" ] || return 0
+  u="$(grep -o '[^/]*\.service' "$(af_p "/proc/$pid/cgroup")" 2>/dev/null | tail -n1 || true)"
+  printf '%s' "$u"
+}
+af_diag_port() {
+  local pp name pid port found="" l
+  [ -z "$AF_CTX" ] || af_ctx_has 'address already in use|bind: .*in use|EADDRINUSE|Address in use|port .*(already|in use)' || return 1
+  AF_PORT_LIST=()
+  while IFS= read -r port; do
+    [ -n "$port" ] || continue
+    while IFS='|' read -r pp name pid; do
+      [ "$pp" = "$port" ] || continue
+      case "$name" in toutwaf*) continue;; esac
+      AF_PORT_LIST+=("$port|$name|$pid|$(af_unit_of_pid "$pid")"); found=1
+    done < <(af_listeners)
+  done < <(af_our_ports)
+  [ -n "$found" ] || return 1
+  IFS='|' read -r port name pid l <<<"${AF_PORT_LIST[0]}"
+  AF_PROBLEM="$(t af_p_port "$port" "${name:-?}" "${l:-pid ${pid:-?}}")"
+  if [ "$AUTOFIX_STOP_CONFLICTS" = 1 ] && [ -n "$l" ]; then AF_PLAN="$(t af_a_port "$l")"; else AF_PLAN="$(t af_h_port "${l:-pid ${pid:-?}}")"; fi
+  return 0
+}
+af_fix_port() {
+  local e port name pid unit stopped=""
+  [ "$AUTOFIX_STOP_CONFLICTS" = 1 ] || { AF_ADVICE="$AF_PLAN"; return 2; }
+  for e in "${AF_PORT_LIST[@]}"; do
+    IFS='|' read -r port name pid unit <<<"$e"
+    [ -n "$unit" ] || continue
+    case "$unit" in toutwaf*|sshd.service|systemd*|dbus*|NetworkManager*) continue;; esac
+    if systemctl stop "$unit" >/dev/null 2>&1; then stopped="${stopped:+$stopped }$unit"; af_undo "systemctl start $unit"; fi
+  done
+  [ -n "$stopped" ] || { AF_ADVICE="$AF_PLAN"; return 2; }
+  AF_ACTION="$(t af_a_port "$stopped")"; return 0
+}
+
+# ---- the host firewall: what ToutWAF needs open (the port 9444 of the console <-> node link only from a known address)
+af_fw_backend() {
+  if have firewall-cmd && have systemctl && systemctl is-active --quiet firewalld 2>/dev/null; then printf 'firewalld'; return 0; fi
+  if have ufw && grep -qi '^status: active' <<<"$(af_out ufw status)"; then printf 'ufw'; return 0; fi
+  if have nft && grep -q 'policy drop' <<<"$(af_out nft list chain inet filter input)"; then printf 'nft'; return 0; fi
+  return 1
+}
+af_fw_open_q() {   # af_fw_open_q BACKEND PORT
+  case "$1" in
+    firewalld) firewall-cmd --query-port="$2/tcp" >/dev/null 2>&1 || { [ "$2" = 80 ] && firewall-cmd --query-service=http >/dev/null 2>&1; } || { [ "$2" = 443 ] && firewall-cmd --query-service=https >/dev/null 2>&1; };;
+    ufw) grep -Eq "^$2(/tcp)?[[:space:]]+ALLOW" <<<"$(af_out ufw status)";;
+    nft) grep -Eq "dport[^;]*[^0-9]$2([^0-9]|$)" <<<"$(af_out nft list ruleset)";;
+  esac
+}
+af_fw_needed() {   # the ports of this installation, one per line (public ones; 9444 only when a source is known)
+  [ "${OPEN_FW:-1}" != 0 ] || return 0
+  af_want_dp && printf '%s\n' "${HTTP_PORT:-80}" "${HTTPS_PORT:-443}"
+  af_want_cp && [ "${OPEN_CP_PORT:-1}" != 0 ] && printf '%s\n' "${CP_PORT:-9443}"
+  return 0
+}
+af_diag_firewall() {
+  local be p miss=""
+  [ "${OPEN_FW:-1}" != 0 ] || return 1
+  [ -z "$AF_CTX" ] || af_ctx_has 'timed out|Connection refused|No route to host|unreachable|TW-9028|9444|firewall|curl: \((7|28)\)' || return 1
+  be="$(af_fw_backend)" || return 1
+  while IFS= read -r p; do [ -n "$p" ] && { af_fw_open_q "$be" "$p" || miss+="$p "; }; done < <(af_fw_needed)
+  AF_FW_9444=0
+  if af_want_cp && { [ -z "$AF_CTX" ] || af_ctx_has 'TW-9028|9444'; } && ! af_fw_open_q "$be" 9444; then AF_FW_9444=1; fi
+  [ -n "$miss" ] || [ "$AF_FW_9444" = 1 ] || return 1
+  AF_FW_BE="$be"; AF_FW_MISS="${miss% }"
+  AF_PROBLEM="$(t af_p_fw "$be" "${AF_FW_MISS:-9444}")"
+  if [ -z "$AF_FW_MISS" ] && [ -z "${AUTOFIX_AGENT_FROM:-}" ]; then AF_PLAN="$(t af_h_fw9444 "$be")"; else AF_PLAN="$(t af_a_fw "${AF_FW_MISS:-9444}" "$be")"; fi
+  return 0
+}
+af_fw_run() {   # af_fw_run PORT [FROM]
+  local port="$1" from="${2:-}" be="$AF_FW_BE" fam=ipv4
+  case "$be" in
+    firewalld)
+      if [ -n "$from" ]; then case "$from" in *:*) fam=ipv6;; esac
+        firewall-cmd --permanent --add-rich-rule="rule family=\"$fam\" source address=\"$from\" port port=\"$port\" protocol=\"tcp\" accept" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 \
+          && af_undo "firewall-cmd --permanent --remove-rich-rule='rule family=\"$fam\" source address=\"$from\" port port=\"$port\" protocol=\"tcp\" accept' && firewall-cmd --reload"
+      else
+        firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 && af_undo "firewall-cmd --permanent --remove-port=$port/tcp && firewall-cmd --reload"
+      fi;;
+    ufw)
+      if [ -n "$from" ]; then ufw allow proto tcp from "$from" to any port "$port" >/dev/null 2>&1 && af_undo "ufw delete allow proto tcp from $from to any port $port"
+      else ufw allow "$port/tcp" >/dev/null 2>&1 && af_undo "ufw delete allow $port/tcp"; fi;;
+    nft)
+      # the rule is added to the running table only: it is NOT kept at a reboot (the exact line to keep it is said)
+      if [ -n "$from" ]; then nft add rule inet filter input ip saddr "$from" tcp dport "$port" accept >/dev/null 2>&1; else nft add rule inet filter input tcp dport "$port" accept >/dev/null 2>&1; fi \
+        && af_undo "nft -a list chain inet filter input   # then: nft delete rule inet filter input handle <the handle of the tcp dport $port rule>" \
+        && af_emit "$(t af_h_nftkeep "$port")";;
+  esac
+}
+af_fix_firewall() {
+  local p done_="" bad="" IFS=' '
+  for p in $AF_FW_MISS; do
+    if [ "$p" = "${CP_PORT:-9443}" ] && [ -n "${CONSOLE_FROM:-}" ]; then af_fw_run "$p" "$CONSOLE_FROM" && done_="$done_$p " || bad="$bad$p "
+    else af_fw_run "$p" && done_="$done_$p " || bad="$bad$p "; fi
+  done
+  if [ "${AF_FW_9444:-0}" = 1 ]; then   # the link console <-> node: never to everyone, only from the address the owner gave
+    if [ -n "${AUTOFIX_AGENT_FROM:-}" ]; then af_fw_run 9444 "$AUTOFIX_AGENT_FROM" && done_="${done_}9444 " || bad="${bad}9444 "
+    else AF_ADVICE="$(t af_h_fw9444 "$AF_FW_BE")"; fi
+  fi
+  [ -z "$bad" ] || { AF_ADVICE="${AF_ADVICE:-$(t af_h_fw "${bad% }")}"; [ -n "$done_" ] || return 1; }
+  [ -n "$done_" ] || return 2
+  AF_ACTION="$(t af_a_fw "${done_% }" "$AF_FW_BE")"; return 0
+}
+
+# ---- package key or repository expired
+af_pkg_pm() { if have dnf; then printf dnf; elif have yum; then printf yum; elif have apt-get; then printf apt; elif have zypper; then printf zypper; fi; }
+af_toutwaf_repos() { local f; for f in "$(af_p /etc/yum.repos.d)"/toutwaf*.repo "$(af_p /etc/apt/sources.list.d)"/toutwaf*.list "$(af_p /etc/zypp/repos.d)"/toutwaf*.repo; do [ -f "$f" ] && printf '%s\n' "$f"; done; return 0; }
+af_diag_pkgkey() {
+  local pm
+  af_ctx_has 'GPG key.*(expired|not|invalid)|public key is not installed|NO_PUBKEY|EXPKEYSIG|repository .* is not signed|GPG check FAILED|Failed to download metadata|repomd\.xml|Cannot download repodata|Signature .*expired|KEYEXPIRED|Release file .* expired|Cannot prepare internal mirrorlist|Status code: 404|Failed to synchronize cache' || return 1
+  pm="$(af_pkg_pm)"; [ -n "$pm" ] || return 1
+  AF_PM="$pm"; AF_PROBLEM="$(t af_p_key "$(af_ctx_first 'GPG key[^;]*|NO_PUBKEY [0-9A-F]+|EXPKEYSIG [0-9A-F]+|repomd\.xml|Failed to download metadata[^;]*|KEYEXPIRED' | cut -c1-80)")"
+  AF_PLAN="$(t af_a_key_cache)"
+  return 0
+}
+af_refresh_cache() {
+  case "$AF_PM" in
+    dnf|yum) af_bounded 120 "$AF_PM" clean metadata >/dev/null 2>&1 || true; af_bounded 180 "$AF_PM" -y makecache >/dev/null 2>&1;;
+    apt) af_bounded 180 apt-get update -qq >/dev/null 2>&1;;
+    zypper) af_bounded 180 zypper --non-interactive refresh >/dev/null 2>&1;;
+  esac
+}
+af_fix_pkgkey() {
+  local f off=""
+  if af_refresh_cache; then AF_ACTION="$(t af_a_key_cache)"; return 0; fi
+  while IFS= read -r f; do   # the repository of the ToutWAF mirror is never a reason to stop: the distribution's own repositories stay
+    [ -n "$f" ] || continue
+    mv -f -- "$f" "$f.autofix-disabled" 2>/dev/null && { off="${off:+$off }$f"; af_undo "mv $f.autofix-disabled $f"; }
+  done < <(af_toutwaf_repos)
+  if [ -n "$off" ] && af_refresh_cache; then AF_ACTION="$(t af_a_key_off "$off")"; return 0; fi
+  AF_ADVICE="$(t af_h_key)"; return 1
+}
+
+# ---- systemd: unit not reloaded, start limit, files limit
+af_diag_unitload() {
+  local u need=0 IFS=' '
+  [ "${HAS_SYSTEMD:-0}" = 1 ] || return 1
+  for u in ${AF_UNIT:-toutwaf-dp toutwaf-cp}; do [ "$(systemctl show "$u" -p NeedDaemonReload --value 2>/dev/null)" = yes ] && need=1; done
+  af_ctx_has "changed on disk|daemon-reload" && need=1
+  [ "$need" = 1 ] || return 1
+  AF_PROBLEM="$(t af_p_unitload)"; AF_PLAN="$(t af_a_unitload)"; return 0
+}
+af_fix_unitload() { systemctl daemon-reload >/dev/null 2>&1 || return 1; AF_ACTION="$AF_PLAN"; return 0; }
+af_diag_startlimit() {
+  [ "${HAS_SYSTEMD:-0}" = 1 ] && [ -n "$AF_UNIT" ] || return 1
+  af_ctx_has 'start-limit-hit|Start request repeated too quickly|start limit' || return 1
+  AF_PROBLEM="$(t af_p_startlimit "$AF_UNIT")"; AF_PLAN="$(t af_a_startlimit "$AF_UNIT")"; return 0
+}
+af_fix_startlimit() { systemctl reset-failed "$AF_UNIT" >/dev/null 2>&1 || return 1; AF_ACTION="$AF_PLAN"; return 0; }
+af_diag_nofile() {
+  local d
+  [ "${HAS_SYSTEMD:-0}" = 1 ] && [ -n "$AF_UNIT" ] || return 1
+  af_ctx_has 'Too many open files|EMFILE|too many files' || return 1
+  d="$(af_p "/etc/systemd/system/$AF_UNIT.service.d")"; [ ! -f "$d/autofix-nofile.conf" ] || return 1
+  AF_PROBLEM="$(t af_p_nofile "$AF_UNIT")"; AF_PLAN="$(t af_a_nofile "$AF_UNIT")"; return 0
+}
+af_fix_nofile() {
+  local d; d="$(af_p "/etc/systemd/system/$AF_UNIT.service.d")"
+  mkdir -p "$d" 2>/dev/null && printf '[Service]\nLimitNOFILE=262144\n' >"$d/autofix-nofile.conf" || return 1
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  af_undo "rm -f $d/autofix-nofile.conf && systemctl daemon-reload"
+  AF_ACTION="$AF_PLAN"; return 0
+}
+
+# ---- the engine
+af_context() {   # af_context MESSAGE: what the failure says (the message and the end of the installer log)
+  { printf '%s\n' "$1"; [ -n "${LOG:-}" ] && [ -f "$LOG" ] && tail -n 300 "$LOG" 2>/dev/null; } | cut -c1-400
+}
+af_apply() {   # af_apply "ID ID ...": diagnoses and corrects; the number of corrections made is in AF_N
+  local id rc IFS=' '
+  AF_N=0
+  for id in $1; do
+    af_known "$id" && continue
+    declare -F "af_diag_$id" >/dev/null 2>&1 || continue
+    AF_PROBLEM=""; AF_PLAN=""; AF_ACTION=""; AF_ADVICE=""
+    "af_diag_$id" || continue
+    if [ "$AUTOFIX_DRY" = 1 ]; then af_emit "$(t af_plan_line "$AF_PROBLEM" "$AF_PLAN")"; AF_FAILED+=("$id"); continue; fi
+    rc=0; "af_fix_$id" || rc=$?
+    case "$rc" in
+      0) AF_REC+=("$id$AF_US$AF_PROBLEM$AF_US$AF_ACTION"); AF_N=$((AF_N + 1));;
+      2) af_emit "$(t af_manual_line "$AF_PROBLEM" "${AF_ADVICE:-$AF_PLAN}")"; AF_FAILED+=("$id");;
+      *) af_emit "$(t af_failed_line "$AF_PROBLEM" "${AF_ACTION:+$AF_ACTION; }${AF_ADVICE:-?}")"; AF_FAILED+=("$id");;
+    esac
+  done
+  return 0
+}
+af_state_vars="ACTION COMPONENT VERSION CHANNEL TARBALL BASE_URL CP_URL ENROLL_TOKEN NODE_TOKEN CP_CA NODE_GROUP CP_PORT HTTP_PORT HTTPS_PORT PUBLIC_HOST PRIVATE_HOST OPEN_FW OPEN_CP_PORT CONSOLE_FROM HTTP3 DNS_SERVER DNS_FREE FW_MODULE NO_ENABLE NO_START SKIP_SYSUPDATE DB_ENGINE DB_DSN DB_DSN_FILE DB_LOCAL DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD_FILE DB_TLS_MODE DB_CA DB_ADMIN_DSN_FILE BIN_DIR HOME_DIR LAYOUT LANG_CODE FORCE NO_EXTRAS NO_TELEMETRY TELEMETRY_OPTIN CLOUD_URL"
+af_save_state() {   # an interactive run: what was answered, for the new attempt (a private file; removed when read)
+  local f v IFS=' '
+  f="$(mktemp "$(af_p /run)/toutwaf-autofix.XXXXXX" 2>/dev/null || mktemp)"; chmod 0600 "$f"
+  for v in $af_state_vars; do if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}"; fi; done >"$f"
+  [ -z "${HOME_DIR:-}" ] || printf 'HOME_EXPLICIT=1\n' >>"$f"
+  printf 'ASSUME_YES=1\n' >>"$f"
+  printf '%s' "$f"
+}
+autofix_resume_load() {   # at the start of a new attempt of an interactive run
+  [ -n "$AF_RESUME" ] && [ -f "$AF_RESUME" ] && [ -O "$AF_RESUME" ] || return 0   # only a file this very user wrote
+  # shellcheck disable=SC1090
+  . "$AF_RESUME" 2>/dev/null || true
+  rm -f -- "$AF_RESUME"; AF_RESUME=""
+  return 0
+}
+af_reexec() {   # a new attempt: the installer starts again from its own file; returns only when it cannot
+  local recs="$AF_PREV" r rp ra args=() st=""
+  if [ -z "$AF_SELF" ] || [ ! -r "$AF_SELF" ]; then   # read from a pipe: nothing to start again from; what was corrected is said, the command is to be run again
+    for r in ${AF_REC[@]+"${AF_REC[@]}"}; do IFS="$AF_US" read -r _ rp ra <<<"$r"; af_emit "$(t af_line "$rp" "$ra" "$(t af_try_manual)")"; done
+    af_emit "$(t af_noself)"; return 1
+  fi
+  for r in ${AF_REC[@]+"${AF_REC[@]}"}; do
+    recs+="${recs:+$AF_RS}$r"
+    IFS="$AF_US" read -r _ rp ra <<<"$r"
+    af_emit "$(t af_line "$rp" "$ra" "$(t af_try_run)")"
+  done
+  export TOUTWAF_AUTOFIX_TRY=$((AF_TRY + 1)) TOUTWAF_AUTOFIX_APPLIED="$recs"
+  # The new attempt starts from nothing but this: programs this attempt already replaced look "already up to date" to it, and a service that
+  # runs the old program would then never be restarted (an update that said success while the old version kept running). Remembered across the restart.
+  case "${CHANGED:-0}" in 1) export TOUTWAF_AUTOFIX_CHANGED=1;; *) unset TOUTWAF_AUTOFIX_CHANGED;; esac
+  if declare -F interactive >/dev/null 2>&1 && interactive; then st="$(af_save_state)"; args=(--autofix-resume "$st")   # answered at the keyboard: the answers go with it
+  else args=("${AF_ARGS[@]+"${AF_ARGS[@]}"}"); fi
+  spin_kill 2>/dev/null || true
+  [ "${UI_COLOR:-0}" = 1 ] && printf '\033[?25h' >&3 2>/dev/null
+  [ -z "${TMP:-}" ] || rm -rf "$TMP"
+  exec bash "$AF_SELF" "${args[@]+"${args[@]}"}"
+}
+# autofix_failure MESSAGE: called by die and by the ERR trap before the failure is reported; may start the installer again (it then does not return)
+autofix_failure() {
+  local rc=0
+  [ "${BASHPID:-$$}" = "$$" ] && [ "$AF_FLOW" = 1 ] && [ -z "$AF_ACTIVE" ] && af_enabled || return 1
+  AF_ACTIVE=1; af_guard_begin
+  AF_UNIT=""; AF_CTX="$(af_context "$1")"
+  af_apply "$AF_CATALOG"
+  if [ "$AF_N" -gt 0 ] && [ "$AF_TRY" -lt "$AF_MAX_TRIES" ]; then
+    # the failure that made a new attempt necessary is said BEFORE the installer starts again (it is never reported otherwise: the new attempt
+    # replaces this process, and a quiet run, like the one of the update assistant, printed nothing of it)
+    af_emit "$(t af_failed_at "${CUR_STEP:-?}" "$(printf '%s' "$1" | { if declare -F diag_redact >/dev/null 2>&1; then diag_redact; else cat; fi; } | head -n1 | cut -c1-300)")"
+    af_reexec || rc=1
+  else rc=1; fi
+  [ "$AF_N" -gt 0 ] && [ "$AF_TRY" -ge "$AF_MAX_TRIES" ] && af_emit "$(t af_giveup "$AF_MAX_TRIES")"
+  autofix_diagnostic "$1"
+  af_guard_end; AF_ACTIVE=""
+  return "$rc"
+}
+# autofix_service UNIT WAITFN: UNIT did not start or did not become healthy: reads what the system says, corrects the known causes, starts it
+# again and waits with WAITFN. True when it is healthy. Called before the rollback, so that a cause that can be corrected does not cost the update.
+autofix_service() {
+  local unit="$1" waitfn="$2" ok=1 r problem action first i
+  af_enabled && [ "${HAS_SYSTEMD:-0}" = 1 ] || return 1
+  case " ${AF_SVC_DONE:-} " in *" $unit "*) return 1;; esac
+  AF_SVC_DONE="${AF_SVC_DONE:-} $unit"
+  af_guard_begin
+  AF_UNIT="$unit"
+  AF_CTX="$({ journalctl -u "$unit" -n 80 --no-pager; systemctl status "$unit" --no-pager -l; systemctl show "$unit" -p Result -p ExecMainStatus; } 2>&1 | diag_redact | tail -n 200)"
+  if ! af_ctx_has "status=|Result=|exit-code|failed|denied|error" ; then AF_CTX="$AF_CTX"$'\n'"unit $unit failed"; fi
+  first=${#AF_REC[@]}
+  af_apply "$AF_SVC_CATALOG"
+  if [ "$AF_N" -gt 0 ]; then
+    systemctl restart "$unit" >>"${LOG:-/dev/null}" 2>&1 || true
+    if "$waitfn"; then ok=0; fi
+    for ((i = first; i < ${#AF_REC[@]}; i++)); do
+      IFS="$AF_US" read -r _ problem action <<<"${AF_REC[$i]}"
+      if [ "$ok" = 0 ]; then af_emit "$(t af_line "$problem" "$action" "$(t af_try_ok)")"; else af_emit "$(t af_line "$problem" "$action" "$(t af_try_ko)")"; fi
+    done
+  fi
+  AF_UNIT=""
+  af_guard_end
+  return "$ok"
+}
+# autofix_slow_health UNIT WAITFN: a service that is still starting: wait on while it progresses (its processor time or its journal move), within a limit
+autofix_slow_health() {
+  local unit="$1" waitfn="$2" max="${AF_HEALTH_MAX:-240}" waited=0 idle=0 last cur pid nr0 nr t0
+  af_enabled && [ "${HAS_SYSTEMD:-0}" = 1 ] || return 1
+  af_guard_begin
+  t0="$(af_now)"
+  nr0="$(systemctl show "$unit" -p NRestarts --value 2>/dev/null || echo 0)"
+  last=""
+  while [ "$waited" -lt "$max" ]; do
+    systemctl is-active --quiet "$unit" 2>/dev/null || [ "$(af_out systemctl show "$unit" -p ActiveState --value)" = activating ] || break
+    nr="$(systemctl show "$unit" -p NRestarts --value 2>/dev/null || echo 0)"; [ "$nr" = "$nr0" ] || break   # restarting in a loop is not progress
+    pid="$(systemctl show "$unit" -p MainPID --value 2>/dev/null || echo 0)"
+    cur="$(awk '{print $14 + $15}' "$(af_p "/proc/$pid/stat")" 2>/dev/null || true)|$(journalctl -u "$unit" -n 200 --no-pager 2>/dev/null | wc -l)"
+    if [ -n "$last" ] && [ "$cur" = "$last" ]; then idle=$((idle + 1)); else idle=0; fi
+    last="$cur"
+    [ "$idle" -lt 3 ] || break
+    if "$waitfn"; then
+      af_emit "$(t af_line "$(t af_p_slow "$unit")" "$(t af_a_slow "$waited")" "$(t af_try_ok)")"
+      af_guard_end; return 0
+    fi
+    waited=$(($(af_now) - t0))
+  done
+  [ "$waited" = 0 ] || af_emit "$(t af_line "$(t af_p_slow "$unit")" "$(t af_a_slow "$waited")" "$(t af_try_ko)")"
+  af_guard_end
+  return 1
+}
+# autofix_unhealthy UNIT WAITFN [noslow]: after a failed start: wait more while it progresses, then diagnose and correct
+autofix_unhealthy() {
+  af_enabled || return 1
+  if [ "${3:-}" != noslow ] && autofix_slow_health "$1" "$2"; then return 0; fi
+  autofix_service "$1" "$2"
+}
+# the diagnostic ready to be sent: what failed, what was tried, the state of the machine, the end of the log (secrets hidden)
+autofix_diagnostic() {
+  local f msg="$1" r pr ac
+  [ "$AUTOFIX" = 1 ] && [ "${STAGING:-0}" = 0 ] || return 0
+  f="$(af_p /var/log/toutwaf-install-diagnostic.txt)"
+  {
+    printf 'ToutWAF installer %s - diagnostic %s\nstep: %s\nmessage: %s\n' "${INSTALLER_VERSION:-?}" "$(date -u +%FT%TZ 2>/dev/null || echo now)" "${CUR_STEP:-?}" "$msg"
+    printf 'action=%s component=%s channel=%s os=%s %s arch=%s\n' "${ACTION:-?}" "${COMPONENT:-?}" "${CHANNEL:-?}" "${OS_ID:-?}" "${OS_VER:-}" "${ARCH:-?}"
+    printf '\n== automatic corrections\n'
+    printf '%s\n' "$AF_PREV" | tr "$AF_RS$AF_US" '\n;'
+
+    for r in ${AF_REC[@]+"${AF_REC[@]}"}; do IFS="$AF_US" read -r _ pr ac <<<"$r"; printf '%s -> %s\n' "$pr" "$ac"; done
+    printf '\n== system\n'; uname -a 2>&1; df -h 2>&1 | head -n 15; free -m 2>&1 | head -n 3
+    have getenforce && getenforce 2>&1
+    if [ "${HAS_SYSTEMD:-0}" = 1 ]; then
+      systemctl --no-pager --failed 2>&1 | head -n 15
+      for r in toutwaf-dp toutwaf-cp; do systemctl cat "$r" >/dev/null 2>&1 || continue; printf '\n== %s\n' "$r"; systemctl status "$r" --no-pager -l 2>&1 | tail -n 15; journalctl -u "$r" -n 50 --no-pager 2>&1; done
+    fi
+    printf '\n== end of the installer log\n'; [ -n "${LOG:-}" ] && [ -f "$LOG" ] && tail -n 150 "$LOG"
+  } 2>&1 | diag_redact >"$f" 2>/dev/null || true
+  if [ -s "$f" ]; then chmod 0600 "$f" 2>/dev/null || true; AF_DIAG_PATH="$f"; fi
+  return 0
+}
+af_each_prev() {   # af_each_prev OUTCOME-KEY: one line per correction of the earlier attempts
+  local one pr ac recs=()
+  [ -n "$AF_PREV" ] || return 0
+  IFS="$AF_RS" read -r -a recs <<<"$AF_PREV"
+  for one in "${recs[@]}"; do
+    [ -n "$one" ] || continue
+    IFS="$AF_US" read -r _ pr ac <<<"$one"
+    af_emit "$(t af_line "$pr" "$ac" "$(t "$1")")"
+  done
+  return 0
+}
+autofix_report_tail() {   # at the end of a failure report: the earlier corrections did not cure it, and where the diagnostic is
+  [ "$AUTOFIX" = 1 ] || return 0
+  af_each_prev af_try_ko
+  AF_PREV=""
+  [ -z "$AF_DIAG_PATH" ] || { printf '    %s\n' "$(t af_diag_ready "$AF_DIAG_PATH")" >&3 2>/dev/null || true; log "$(t af_diag_ready "$AF_DIAG_PATH")"; }
+  return 0
+}
+autofix_report_success() {   # the installation went through after a new attempt: each correction says so
+  [ "$AUTOFIX" = 1 ] && [ -n "$AF_PREV" ] || return 0
+  af_each_prev af_try_ok
+  AF_PREV=""
+  return 0
+}
+af_check_options() {
+  [ -z "$AUTOFIX_AGENT_FROM" ] && return 0
+  if ! [[ "$AUTOFIX_AGENT_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$AUTOFIX_AGENT_FROM" == */0 ]]; then die "--autofix-agent-from must be an address or a CIDR such as 203.0.113.0/24 (not 0.0.0.0/0)"; fi
+  return 0
+}
+# autofix_preflight: --autofix-dry-run, before anything is changed: what the corrections would do to this machine now
+autofix_preflight() {
+  [ "$AUTOFIX_DRY" = 1 ] && [ "$AUTOFIX" = 1 ] || return 0
+  AF_CTX=""; AF_UNIT=""
+  af_guard_begin
+  AF_N=0; af_apply "tmp disk locks clock selinux perms exec ipv6 port firewall"
+  [ "${#AF_FAILED[@]}" -gt 0 ] || af_emit "$(t af_none)"
+  AF_FAILED=()
+  af_guard_end
+  return 0
+}
+# END autofix
+interactive() { [ -n "$TTY_DEV" ] && [ "$ASSUME_YES" = 0 ] && [ "$ACCEPT_DEFAULTS" = 0 ]; }
+
+ask() {   # VAR label default [secret]
+  local var="$1" label="$2" def="${3:-}" ans=""
+  printf '  %s%s%s %s%s%s%s ' "$ACC" "$ARW" "$R" "$label" "$D" "${def:+ [$def]}" "$R" >&3
+  if [ "${4:-}" = secret ]; then IFS= read -r -s ans <"$TTY_DEV" || true; echo >&3; else IFS= read -r ans <"$TTY_DEV" || true; fi
+  printf -v "$var" '%s' "${ans:-$def}"
+}
+ask_yn() {  # VAR label default(1|0)
+  local var="$1" label="$2" def="$3" ans hint="Y/n"; [ "$def" = 0 ] && hint="y/N"
+  while :; do
+    printf '  %s%s%s %s %s[%s]%s ' "$ACC" "$ARW" "$R" "$label" "$D" "$hint" "$R" >&3
+    IFS= read -r ans <"$TTY_DEV" || true
+    case "$(printf '%s' "${ans:-}" | tr '[:upper:]' '[:lower:]')" in
+      "") printf -v "$var" '%s' "$def"; return;;
+      y*|o*|j*|s*|d*|1|是*|ن*|д*) printf -v "$var" 1; return;;
+      n*|0|否*|л*|н*) printf -v "$var" 0; return;;
+    esac
+  done
+}
+
+# ------------------------------------------------------------------------------------------------ usage
+# ------------------------------------------------------------------------------------------------ --via-repo (ToutWAF's own package repository)
+# BEGIN via-repo (extracted by tools/tests/build-repos-test.sh: keep the markers)
+# --via-repo adds ToutWAF's package repository to dnf / apt (signed .repo / .list), DOWNLOADS the package `toutwaf` without installing it (apt-get
+# download / dnf download: no maintainer script runs), unpacks it to read the staged signed release archive, verifies SHA256SUMS and the Ed25519
+# release signature of this installer, and only then installs the package (it only stages the archive under /usr/share/toutwaf/release, nothing is
+# started). The repository key is checked against REPO_KEY_FPR, a fingerprint FROZEN in this installer: while it is empty --via-repo is refused (never
+# trust on first use) and the normal download (GitLab, then GitHub) takes over. ANY problem leaves the system as it was: this option never blocks an
+# installation. See tools/repo/README.md.
+VIA_REPO="${TOUTWAF_VIA_REPO:-0}"
+REPO_LINUX="${TOUTWAF_REPO_LINUX_URL:-https://repo.qu3ntin.com/include/toutwaf/linux/-/raw}"   # + /main (stable) or /dev
+REPO_KEY_FPR="7A816F4DD2C6953E25517531DCB7102BD9AE62F1"   # 40-hex fingerprint of the repository key, frozen here at release time (no environment override); empty = --via-repo refused
+VIA_REPO_EL="9 10"                            # Enterprise Linux majors the repository serves
+VIA_PAYLOAD="${TOUTWAF_VIA_PAYLOAD:-/usr/share/toutwaf/release}"
+via_repo_fail() { local IFS=' '; warn "--via-repo: $*; using the direct download instead (GitLab, then GitHub)"; return 1; }
+via_repo_stage() {   # DIR (the unpacked package payload) -> BASE_URL = a file:// tree in the release layout; 1 when the payload is unusable or not signed by the release key
+  local d="$1" asset="toutwaf-linux-$ARCH.tar.gz" pv want got tree="$TMP/viarepo" f vrc=0
+  for f in "$asset" SHA256SUMS SHA256SUMS.sig channel.json; do [ -s "$d/$f" ] || { via_repo_fail "the package has no $f"; return 1; }; done
+  CH_JSON="$(cat "$d/channel.json")"; pv="$(ch_str version | tr -d '[:space:]')"; CH_JSON=""
+  [ -n "$pv" ] && [[ "$pv" =~ ^[0-9A-Za-z.+~-]+$ ]] || { via_repo_fail "the package carries no valid version"; return 1; }
+  if [ "$VERSION" != latest ] && [ "$pv" != "${VERSION#v}" ]; then via_repo_fail "the repository holds $pv, not $VERSION"; return 1; fi
+  want="$(grep " $asset\$" "$d/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"; got="$(sha256sum "$d/$asset" | awk '{print $1}')"
+  [ -n "$want" ] && [ "$want" = "$got" ] || { via_repo_fail "the packaged $asset does not match its SHA256SUMS"; return 1; }
+  mkdir -p "$tree/releases/$pv" && cp "$d/channel.json" "$tree/" && cp "$d/$asset" "$d/SHA256SUMS" "$d/SHA256SUMS.sig" "$tree/releases/$pv/" || { via_repo_fail "cannot stage the package"; return 1; }
+  # the Ed25519 signature is checked HERE, before the package is installed. verify_signature dies on a bad one: in a subshell whose die only logs
+  # and exits, so that a bad package means "use the direct download" and not "the installation failed"
+  cp "$d/SHA256SUMS" "$TMP/SHA256SUMS" || { via_repo_fail "cannot stage the package"; return 1; }
+  ( die() { printf 'via-repo: %s\n' "$*" >>"$LOG"; exit 1; }; RESOLVED_VERSION="$pv"; verify_signature "file://$tree/releases/$pv" "" ) || vrc=$?
+  [ "$vrc" = 0 ] || { via_repo_fail "the Ed25519 release signature of the package could not be verified (see $LOG)"; return 1; }
+  BASE_URL="file://$tree"
+  return 0
+}
+via_repo_unpack() {   # PKGFILE DESTDIR: unpack a .deb / .rpm WITHOUT running anything from it
+  case "$1" in
+    *.deb) have dpkg-deb && dpkg-deb -x "$1" "$2" >>"$LOG" 2>&1;;
+    *.rpm) have rpm2cpio && have cpio && (cd "$2" && rpm2cpio "$1" | cpio -idm --quiet) >>"$LOG" 2>&1;;
+    *) return 1;;
+  esac
+}
+via_repo_try() {
+  local pm="" base branch suite maj="" rarch probe keyurl key="$TMP/toutwaf-repo.key" fpr want="toutwaf" cfg="" keydst="" v pkgdir="$TMP/viapkg" pkg="" ex="$TMP/viaroot"
+  local to=(); have timeout && to=(timeout 900)
+  [ "$STAGING" = 0 ] || return 1
+  if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) --via-repo: would add the ToutWAF package repository ($REPO_LINUX), download the package 'toutwaf', verify its release signature, then install it and install from it; any failure falls back to the direct download"; return 1; fi
+  [[ "$REPO_KEY_FPR" =~ ^[0-9A-Fa-f]{40}$ ]] || { via_repo_fail "this installer carries no pinned fingerprint of the repository key yet, so the repository is not trusted"; return 1; }
+  have curl || { via_repo_fail "curl is missing"; return 1; }
+  have gpg || { via_repo_fail "gpg is needed to check the repository key fingerprint"; return 1; }
+  case "$ARCH" in amd64) rarch=x86_64;; arm64) rarch=aarch64;; *) via_repo_fail "architecture '$ARCH' has no package"; return 1;; esac
+  suite=stable; branch=main; if [ "$CHANNEL" = dev ]; then suite=dev; branch=dev; fi
+  base="${REPO_LINUX%/}/$branch"
+  if have apt-get && [ "$(pf_fam "${FAMILY:-${FAMILY_GUESS:-}}" 3)" = apt ]; then pm=apt
+  elif have dnf; then
+    case "$OS_ID" in almalinux|rocky|rhel|centos|ol) maj="${OS_VER%%.*}";; esac
+    case " $VIA_REPO_EL " in *" ${maj:-x} "*) pm=dnf;; esac
+  fi
+  [ -n "$pm" ] || { via_repo_fail "this system is not covered by the package repository (AlmaLinux / Rocky / RHEL $VIA_REPO_EL, Debian family)"; return 1; }
+  if [ "$pm" = apt ]; then probe="$base/deb/dists/$suite/InRelease"; keyurl="$base/toutwaf.gpg"; keydst=/usr/share/keyrings/toutwaf.gpg; cfg=/etc/apt/sources.list.d/toutwaf.list
+  else probe="$base/rpm/el$maj/$rarch/repodata/repomd.xml"; keyurl="$base/toutwaf.asc"; keydst=/etc/pki/rpm-gpg/RPM-GPG-KEY-toutwaf; cfg=/etc/yum.repos.d/toutwaf.repo; fi
+  curl_s -fsSL --connect-timeout 8 --max-time 25 -o "$TMP/via-probe" "$probe" 2>>"$LOG" || { via_repo_fail "the ToutWAF repository is not reachable ($probe)"; return 1; }
+  curl_s -fsSL --connect-timeout 8 --max-time 25 -o "$key" "$keyurl" 2>>"$LOG" || { via_repo_fail "cannot download the repository key ($keyurl)"; return 1; }
+  fpr="$(gpg --batch --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+  [ "$(printf '%s' "$fpr" | tr 'a-f' 'A-F')" = "$(printf '%s' "$REPO_KEY_FPR" | tr -d ' ' | tr 'a-f' 'A-F')" ] || { via_repo_fail "the repository key fingerprint (${fpr:-unreadable}) is not the expected one"; return 1; }
+  # the repository definition is generated here from this installer's own constants, never downloaded
+  run install -d -m 0755 "$(p "$(dirname "$keydst")")" "$(p "$(dirname "$cfg")")" || { via_repo_fail "cannot create $(dirname "$cfg")"; return 1; }
+  run install -m 0644 "$key" "$(p "$keydst")" || { via_repo_fail "cannot write $keydst"; return 1; }
+  if [ "$pm" = apt ]; then
+    printf '# ToutWAF package repository (%s channel), written by install.sh --via-repo\ndeb [signed-by=%s] %s/deb %s main\n' "$suite" "$keydst" "$base" "$suite" >"$(p "$cfg")" \
+      || { via_repo_fail "cannot write $cfg"; return 1; }
+  else
+    printf '# ToutWAF package repository (%s channel), written by install.sh --via-repo\n[toutwaf]\nname=ToutWAF (%s)\nbaseurl=%s/rpm/el%s/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=file://%s\nskip_if_unavailable=1\nmetadata_expire=1h\n' \
+      "$suite" "$suite" "$base" "$maj" "$keydst" >"$(p "$cfg")" || { via_repo_fail "cannot write $cfg"; return 1; }
+  fi
+  if [ "$VERSION" != latest ]; then v="$(printf '%s' "${VERSION#v}" | sed 's/-/~/')"; if [ "$pm" = apt ]; then want="toutwaf=$v-*"; else want="toutwaf-$v"; fi; fi
+  info "downloading the package $want from the ToutWAF repository ($pm, $suite); it is installed only after its release signature is verified"
+  mkdir -p "$pkgdir" "$ex" || { rm -f "$(p "$cfg")"; via_repo_fail "cannot create a work directory"; return 1; }
+  if [ "$pm" = apt ]; then
+    "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 update -qq >>"$LOG" 2>&1 </dev/null || true   # another repository may be unhappy: that is not ours to fix
+    ( cd "$pkgdir" && DEBIAN_FRONTEND=noninteractive "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 download "$want" ) >>"$LOG" 2>&1 </dev/null \
+      || { rm -f "$(p "$cfg")"; via_repo_fail "apt-get could not download $want from the ToutWAF repository"; return 1; }
+  else
+    "${to[@]+"${to[@]}"}" dnf download -y --refresh --destdir "$pkgdir" "$want" >>"$LOG" 2>&1 </dev/null || { rm -f "$(p "$cfg")"; via_repo_fail "dnf could not download $want from the ToutWAF repository"; return 1; }
+  fi
+  for v in "$pkgdir"/*.deb "$pkgdir"/*.rpm; do [ -f "$v" ] && { pkg="$v"; break; }; done
+  [ -n "$pkg" ] || { rm -f "$(p "$cfg")"; via_repo_fail "no package was downloaded"; return 1; }
+  via_repo_unpack "$pkg" "$ex" || { rm -f "$(p "$cfg")"; via_repo_fail "cannot unpack the package to check it (dpkg-deb, or rpm2cpio and cpio, are needed)"; return 1; }
+  via_repo_stage "$ex$VIA_PAYLOAD" || { rm -f "$(p "$cfg")"; return 1; }
+  # verified: only now does the package manager install it (its maintainer scripts run from here on)
+  if [ "$pm" = apt ]; then
+    DEBIAN_FRONTEND=noninteractive "${to[@]+"${to[@]}"}" apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends "$pkg" >>"$LOG" 2>&1 </dev/null \
+      || { rm -f "$(p "$cfg")"; via_repo_fail "apt-get could not install the verified package"; return 1; }
+  else
+    "${to[@]+"${to[@]}"}" dnf install -y "$pkg" >>"$LOG" 2>&1 </dev/null || { rm -f "$(p "$cfg")"; via_repo_fail "dnf could not install the verified package"; return 1; }
+  fi
+  say "  $BUL source: ToutWAF package repository ($pm, $suite channel)"
+  return 0
+}
+# END via-repo
+
+# BEGIN pkg-mirror (extracted by deploy/tests/pkg-mirror-test.sh: keep the markers)
+# ToutWAF's package mirror (vendor/ tree of the same repository as --via-repo): every package the installer needs from the distribution (curl, tar,
+# openssl, PostgreSQL...) is looked for at ToutWAF FIRST and at the distribution's own repositories as a FALLBACK. Before the first package manager call
+# the installer adds the mirror (apt: a signed-by source; dnf: a repo with cost=500 so that, for the SAME version, it is chosen before the vendor's
+# repositories at cost 1000, and skip_if_unavailable so that a dead repository never stops the run). A newer version at the vendor is still taken:
+# the mirror holds a snapshot, never a reason to stay behind on a security fix. The key is checked against the frozen REPO_KEY_FPR (the key file
+# comes from the mirror, its fingerprint does not). The mirror is skipped, with one clear line in the log, when: --no-mirror, an unsupported system,
+# an unreachable mirror (5 s to connect, 20 s in all), a key that is not the frozen one. It NEVER blocks the installation.
+NO_MIRROR=0; case "${TOUTWAF_NO_MIRROR:-}" in 1|yes|true|on) NO_MIRROR=1;; esac
+MIRROR_DONE=0; MIRROR_DNF_OPTS=(); MIRROR_SOURCE="not used"
+mirror_skip() { local IFS=' '; MIRROR_DONE=1; MIRROR_SOURCE="not used ($*)"; info "package mirror: $*; the distribution's own repositories are used"; return 1; }
+mirror_setup() {
+  [ "$MIRROR_DONE" = 0 ] || return 0
+  MIRROR_DONE=1
+  [ "$STAGING" = 0 ] || return 1
+  [ "$NO_MIRROR" = 0 ] || { MIRROR_SOURCE="disabled (--no-mirror)"; log "package mirror: disabled (--no-mirror)"; return 1; }
+  local pm="" maj="" suite="" base probe keyurl key="$TMP/toutwaf-mirror.key" fpr keydst cfg rarch
+  if [ "$DRY_RUN" = 1 ]; then say "  $BUL (dry-run) package mirror: would add ${REPO_LINUX%/}/main/vendor first, the distribution's repositories stay as fallback (--no-mirror to skip)"; return 1; fi
+  [[ "$REPO_KEY_FPR" =~ ^[0-9A-Fa-f]{40}$ ]] || { mirror_skip "this installer carries no pinned repository key fingerprint"; return 1; }
+  have curl && have gpg || { mirror_skip "curl and gpg are needed to check the mirror key"; return 1; }
+  case "$ARCH" in amd64) rarch=x86_64;; arm64) rarch=aarch64;; *) mirror_skip "no packages for architecture $ARCH"; return 1;; esac
+  if have apt-get && [ "$(pf_fam "${FAMILY:-${FAMILY_GUESS:-}}" 3)" = apt ]; then
+    pm=apt
+    # shellcheck disable=SC1090
+    suite="$( . "$(p /etc/os-release)" 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")"
+    case "$suite" in bookworm|trixie|jammy|noble) ;; *) mirror_skip "no mirror for this release (${suite:-unknown codename}); the mirror covers Debian 12/13 and Ubuntu 22.04/24.04"; return 1;; esac
+  elif have dnf || have yum; then
+    case "$OS_ID" in almalinux|rocky|rhel|centos|ol) maj="${OS_VER%%.*}";; esac
+    case "$maj" in 9|10) pm=dnf;; *) mirror_skip "no mirror for this system (the mirror covers AlmaLinux / Rocky / RHEL 9 and 10)"; return 1;; esac
+  else mirror_skip "no supported package manager"; return 1; fi
+  base="${REPO_LINUX%/}/main"
+  if [ "$pm" = apt ]; then probe="$base/vendor/deb/dists/$suite/InRelease"; keyurl="$base/toutwaf.gpg"; keydst=/usr/share/keyrings/toutwaf.gpg; cfg=/etc/apt/sources.list.d/toutwaf-mirror.list
+  else probe="$base/vendor/rpm/el$maj/$rarch/repodata/repomd.xml"; keyurl="$base/toutwaf.asc"; keydst=/etc/pki/rpm-gpg/RPM-GPG-KEY-toutwaf; cfg=/etc/yum.repos.d/toutwaf-mirror.repo; fi
+  curl_s -fsSL --connect-timeout 5 --max-time 20 -o "$TMP/mirror-probe" "$probe" 2>>"$LOG" || { mirror_skip "the ToutWAF mirror is not reachable ($probe)"; return 1; }
+  curl_s -fsSL --connect-timeout 5 --max-time 20 -o "$key" "$keyurl" 2>>"$LOG" || { mirror_skip "cannot download the mirror key ($keyurl)"; return 1; }
+  fpr="$(gpg --batch --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+  [ "$(printf '%s' "$fpr" | tr 'a-f' 'A-F')" = "$(printf '%s' "$REPO_KEY_FPR" | tr -d ' ' | tr 'a-f' 'A-F')" ] || { mirror_skip "the mirror key fingerprint (${fpr:-unreadable}) is not the expected one"; return 1; }
+  run install -d -m 0755 "$(p "$(dirname "$keydst")")" "$(p "$(dirname "$cfg")")" || { mirror_skip "cannot create $(dirname "$cfg")"; return 1; }
+  run install -m 0644 "$key" "$(p "$keydst")" || { mirror_skip "cannot write $keydst"; return 1; }
+  if [ "$pm" = apt ]; then
+    printf '# ToutWAF package mirror (snapshot of the packages the ToutWAF installers need), written by install.sh; remove with --no-mirror or by deleting this file\ndeb [signed-by=%s] %s/vendor/deb %s main\n' "$keydst" "$base" "$suite" >"$(p "$cfg")" || { mirror_skip "cannot write $cfg"; return 1; }
+  else
+    # packages are signed by their vendors and were verified when the mirror was built; clients check the mirror's own signature on the metadata (repo_gpgcheck),
+    # which carries the checksum of every package
+    printf '# ToutWAF package mirror (snapshot of the packages the ToutWAF installers need), written by install.sh; remove with --no-mirror or by deleting this file\n[toutwaf-mirror]\nname=ToutWAF mirror (EL%s)\nbaseurl=%s/vendor/rpm/el%s/$basearch/\nenabled=1\ngpgcheck=0\nrepo_gpgcheck=1\ngpgkey=file://%s\ncost=500\nskip_if_unavailable=1\ntimeout=15\nretries=1\nmetadata_expire=1h\n' \
+      "$maj" "$base" "$maj" "$keydst" >"$(p "$cfg")" || { mirror_skip "cannot write $cfg"; return 1; }
+    MIRROR_DNF_OPTS=(--setopt=skip_if_unavailable=1 --setopt=timeout=30)
+  fi
+  MIRROR_SOURCE="ToutWAF mirror ($pm), vendor repositories as fallback"
+  say "  $BUL package source: $MIRROR_SOURCE"
+  log "package mirror: $cfg written ($base/vendor, key $fpr)"
+  return 0
+}
+# END pkg-mirror
+
+# BEGIN restore-fresh (extracted by tests/restore-fresh-test.sh: keep the markers)
+# install.sh --restore: a NEW, EMPTY machine with only the address of the ToutWAF Backup server and a restore token + key. It installs ToutWAF
+# as usual (and the backup client), then puts the latest (or the chosen) restore point in place of the fresh state: the client restores the
+# snapshot into a private folder, `toutwaf-cp restore-dir --apply` checks and applies it (the fresh state is kept in pre-restore-*), the
+# service is started again and checked. It NEVER asks a question: a missing value is an error that names it. docs/design/sauvegarde-restauration.md.
+# The restore token is the READ-ONLY token of the job and, like the key, never goes to the log or to the screen.
+# Tested offline with fakes (tests/restore-fresh-test.sh); NOT proven on a real machine. The client commands used here that this repository
+# cannot check (`client key import`) are those of the contract of the toutwaf-backup product: to be confirmed against it.
+RESTORE=0; RESTORE_FORCE=0
+RESTORE_URL=""; RESTORE_FP=""; RESTORE_JOB=""; RESTORE_DS="toutwaf"; RESTORE_NS=""; RESTORE_TOKEN="${TWB_RESTORE_TOKEN:-}"; RESTORE_TOKEN_FILE=""
+RESTORE_PASS=""; RESTORE_CLIENT=""
+RESTORE_KEYFILE="${TWB_RESTORE_KEY_FILE:-}"; RESTORE_SNAPSHOT=""; RESTORE_ERR=""; RESTORE_NAME=""
+
+# restore_validate: the values given on the command line, checked BEFORE anything is changed. Sets RESTORE_ERR (one line, no secret) and
+# returns 1 on the first problem.
+restore_validate() {
+  local missing="" v
+  [ -z "$RESTORE_TOKEN" ] && [ -n "$RESTORE_TOKEN_FILE" ] && [ -r "$RESTORE_TOKEN_FILE" ] && RESTORE_TOKEN="$(head -c 512 "$RESTORE_TOKEN_FILE" | tr -d '\r\n')"
+  [ -n "$RESTORE_URL" ] || missing="$missing --backup-url"
+  [ -n "$RESTORE_FP" ] || missing="$missing --backup-fingerprint"
+  [ -n "$RESTORE_JOB" ] || missing="$missing --restore-job"
+  [ -n "$RESTORE_TOKEN" ] || missing="$missing --restore-token"
+  [ -n "$RESTORE_KEYFILE" ] || missing="$missing --key-file"
+  if [ -n "$missing" ]; then RESTORE_ERR="--restore needs:$missing (it never asks a question)"; return 1; fi
+  case "$RESTORE_URL" in https://*) ;; *) RESTORE_ERR="--backup-url must start with https://"; return 1;; esac
+  v="${RESTORE_URL#https://}"
+  case "$v" in *[!A-Za-z0-9.:_\[\]-]*) RESTORE_ERR="--backup-url must be https://HOST[:PORT] only (no path, no credentials)"; return 1;; esac
+  [ -n "$v" ] || { RESTORE_ERR="--backup-url has no host"; return 1; }
+  v="$(printf '%s' "$RESTORE_FP" | tr -d ': -' | tr 'A-F' 'a-f')"
+  case "$v" in *[!0-9a-f]*|"") RESTORE_ERR="--backup-fingerprint must be the SHA-256 of the certificate of the backup server (64 hexadecimal digits)"; return 1;; esac
+  [ "${#v}" = 64 ] || { RESTORE_ERR="--backup-fingerprint must be the SHA-256 of the certificate of the backup server (64 hexadecimal digits)"; return 1; }
+  RESTORE_FP="$v"
+  [ -n "$RESTORE_NS" ] || RESTORE_NS="$RESTORE_JOB"
+  for v in "$RESTORE_JOB" "$RESTORE_DS" "$RESTORE_NS"; do
+    case "$v" in [a-z0-9]*) ;; *) RESTORE_ERR="--restore-job, --restore-datastore and --restore-namespace are lower-case names (letters, digits, . _ -)"; return 1;; esac
+    case "$v" in *[!a-z0-9._-]*) RESTORE_ERR="--restore-job, --restore-datastore and --restore-namespace are lower-case names (letters, digits, . _ -)"; return 1;; esac
+  done
+  case "$RESTORE_TOKEN" in *[!A-Za-z0-9._~+/=-]*) RESTORE_ERR="the restore token has characters a token never has"; return 1;; esac
+  [ "${#RESTORE_TOKEN}" -ge 8 ] || { RESTORE_ERR="the restore token is too short"; return 1; }
+  [ -f "$RESTORE_KEYFILE" ] && [ -r "$RESTORE_KEYFILE" ] && [ -s "$RESTORE_KEYFILE" ] || { RESTORE_ERR="--key-file does not name a readable, non-empty file: $RESTORE_KEYFILE"; return 1; }
+  if [ -n "$RESTORE_SNAPSHOT" ]; then
+    case "$RESTORE_SNAPSHOT" in toutwaf/"$RESTORE_JOB"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) ;;
+      *) RESTORE_ERR="--restore-snapshot must look like toutwaf/$RESTORE_JOB/YYYYMMDDTHHMMSSZ"; return 1;; esac
+  fi
+  return 0
+}
+
+# restore_redact: text on its way to the log or the screen, without the token and the key material.
+restore_redact() { local s="$1"; [ -z "$RESTORE_TOKEN" ] || s="${s//"$RESTORE_TOKEN"/***}"; printf '%s' "$s"; }
+
+# restore_profile DIR: client.json of the ToutWAF Backup client. The token travels in the environment, never in this file.
+restore_profile() {
+  local d="$1"
+  mkdir -p "$d/cache" && chmod 700 "$d" "$d/cache" || return 1
+  ( umask 077; printf '{"profiles":{"toutwaf":{"server":"%s","fingerprint":"%s","datastore":"%s","namespace":"%s","keyfile":"%s","cache_dir":"%s"}}}\n' \
+      "$RESTORE_URL" "$RESTORE_FP" "$RESTORE_DS" "$RESTORE_NS" "$d/key.json" "$d/cache" >"$d/client.json" )
+}
+
+# restore_run_client DIR ARGS...: the client with its secrets in the environment only.
+# DIR: the first manifest.json under DIR (the external tool for that is not part of minimal Rocky / Alma 8 images)
+restore_find_manifest() {
+  local e; [ -f "$1/manifest.json" ] && { printf '%s\n' "$1/manifest.json"; return 0; }
+  for e in "$1"/*; do [ -d "$e" ] && [ ! -L "$e" ] && restore_find_manifest "$e" && return 0; done
+  return 1
+}
+restore_run_client() {
+  local d="$1"; shift
+  TWB_TOKEN="$RESTORE_TOKEN" TWB_PASSPHRASE="$RESTORE_PASS" TWB_CONFIG="$d/client.json" TWB_CACHE_DIR="$d/cache" "$RESTORE_CLIENT" "$@"
+}
+
+restore_systemctl() { ${TOUTWAF_RESTORE_SYSTEMCTL:-systemctl} "$@"; }
+
+# restore_steps: the work, in a private folder. Returns 0, or 1 with RESTORE_ERR set.
+restore_steps() {
+  local w="$1" cpx names snap out
+  restore_profile "$w" || { RESTORE_ERR="could not write the client profile"; return 1; }
+  # the key: a key file the client can open as it is, or the paper key (a text) to import under a passphrase made here, for this run only
+  RESTORE_PASS="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  if head -n 1 "$RESTORE_KEYFILE" | grep -q 'PAPER KEY'; then
+    restore_run_client "$w" client key import --paper-file "$RESTORE_KEYFILE" --keyfile "$w/key.json" >"$w/out" 2>&1 \
+      || { RESTORE_ERR="the paper key was refused by the client: $(restore_redact "$(tail -n 2 "$w/out" | tr '\n' ' ')")"; return 1; }
+  else
+    cp "$RESTORE_KEYFILE" "$w/key.json" && chmod 600 "$w/key.json" || { RESTORE_ERR="could not read the key file"; return 1; }
+    RESTORE_PASS="${TWB_RESTORE_PASSPHRASE:-$RESTORE_PASS}"
+  fi
+  snap="$RESTORE_SNAPSHOT"
+  if [ -z "$snap" ]; then
+    restore_run_client "$w" engine snapshots --config "$w/client.json" --profile toutwaf --type toutwaf --id "$RESTORE_JOB" >"$w/snaps" 2>"$w/err" \
+      || { RESTORE_ERR="the backup server did not list the restore points: $(restore_redact "$(tail -n 2 "$w/err" | tr '\n' ' ')")"; return 1; }
+    names="$(grep -o '"name": *"toutwaf/[^"]*"' "$w/snaps" | sed 's/.*"\(toutwaf\/[^"]*\)"$/\1/' | sort)"
+    snap="$(printf '%s\n' "$names" | tail -n 1)"
+    [ -n "$snap" ] || { RESTORE_ERR="the backup server holds no restore point for $RESTORE_JOB"; return 1; }
+  fi
+  RESTORE_NAME="$snap"
+  say "  restore point: $snap"
+  mkdir -p "$w/files" && chmod 700 "$w/files"
+  restore_run_client "$w" engine restore "$snap" --config "$w/client.json" --profile toutwaf --target "$w/files" --verify >"$w/out" 2>&1 \
+    || { RESTORE_ERR="the restore point could not be read: $(restore_redact "$(tail -n 2 "$w/out" | tr '\n' ' ')")"; return 1; }
+  # the folder the client wrote holds the files under the path they had on the machine that made the backup: find manifest.json
+  out="$(restore_find_manifest "$w/files" || true)"
+  [ -n "$out" ] || { RESTORE_ERR="the restore point does not hold a ToutWAF backup (no manifest.json)"; return 1; }
+  cpx="$(cp_exe)"
+  restore_systemctl stop toutwaf-cp >>"$LOG" 2>&1 || true
+  if ! "$cpx" restore-dir --from "$(dirname "$out")" --apply >"$w/out" 2>&1; then
+    RESTORE_ERR="the restore was refused (the fresh state is untouched): $(tail -n 2 "$w/out" | tr '\n' ' ')"
+    restore_systemctl start toutwaf-cp >>"$LOG" 2>&1 || true
+    return 1
+  fi
+  restore_systemctl start toutwaf-cp >>"$LOG" 2>&1 || { RESTORE_ERR="the control plane did not start after the restore"; return 1; }
+  return 0
+}
+
+# restore_fresh: after the normal installation (the service is running, the backup client is installed).
+restore_fresh() {
+  local w rc=0
+  if [ "$STAGING" != 0 ] || [ "$DRY_RUN" != 0 ]; then say "  --restore: nothing is restored in a staging or dry run"; return 0; fi
+  RESTORE_CLIENT="${TOUTWAF_RESTORE_CLIENT:-$(p "$BIN_DIR/toutwaf-backup")}"
+  [ -x "$RESTORE_CLIENT" ] || { RESTORE_ERR="the ToutWAF Backup client is not installed ($RESTORE_CLIENT): see the lines above, or install it with --with-backup-client"; restore_fail; return $?; }
+  say "  ${D}restoring from $RESTORE_URL (job $RESTORE_JOB)$R"
+  w="$(mktemp -d "${TMPDIR:-/tmp}/toutwaf-restore.XXXXXX")" || { RESTORE_ERR="could not make a private folder"; restore_fail; return $?; }
+  chmod 700 "$w"
+  restore_steps "$w" || rc=1
+  rm -rf "$w"; RESTORE_PASS=""
+  [ "$rc" = 0 ] || { restore_fail; return $?; }
+  if ! ${TOUTWAF_RESTORE_WAIT:-wait_cp_healthy}; then RESTORE_ERR="the control plane does not answer after the restore (its previous data is in pre-restore-* in the data folder; see journalctl -u toutwaf-cp)"; restore_fail; return $?; fi
+  say "  $(paint "$GRN" "$OKM") restored from $RESTORE_NAME and the control plane answers"
+  say "  $BUL nodes and agents: they reconnect by themselves when they reach this control plane at its old address; if the address changed, create their commands again in the console (Fleet)."
+  say "  $BUL check in the console: applications, certificates and users are those of the restore point; renew the restore token of the job (Backup & restore > Restore a whole server)."
+  return 0
+}
+restore_fail() {
+  local _m; _m="$(restore_redact "restore failed: $RESTORE_ERR")"
+  [ -z "$LOG" ] || printf '%s\n' "$_m" >>"$LOG" 2>/dev/null || true
+  printf '%s\n' "$_m" >&2
+  exit 12
+}
+# END restore-fresh
+
+usage() {
+  cat <<EOF
+ToutWAF installer v$INSTALLER_VERSION
+
+Without options on a terminal the interactive menu is shown. Unattended examples:
+  install.sh --install --yes --public-host waf.example.com
+  install.sh --install --component dp --cp-url https://cp.example.com:9444 --enroll-token XXXX --yes
+
+Actions:
+  --install | --update | --uninstall | --status | --links | --extras-only
+                             install (default), update to the newest release, remove, health check, show panel links
+Options:
+  --component dp|cp|all      what to install (default: all)
+  --version X.Y.Z[.W]|latest release to install (default: latest of the channel)
+  --channel stable|dev       release channel: stable = branch main, dev = branch dev (remembered in <home>/conf/installer.conf)
+  --tarball FILE             install from a local release tarball (offline)
+  --extras FILE              also install the extras of the release (host agent for Windows, antivirus programs) from a local file
+                             toutwaf-extras*.tar.gz (offline; repeat for a release cut in parts). Without it the extras are downloaded with the
+                             archive, checked like it (SHA-256 and signature) and installed; a failure is a warning, the installation goes on
+  --no-extras                do not download nor install the extras (also TOUTWAF_NO_EXTRAS=1): the console then offers neither Windows nor the antivirus
+  --extras-only              install (or refresh) only the extras of the release that is installed, stopping nothing
+  --base-url URL             mirror of the release tree (expects <URL>/channel.json and <URL>/releases/<version>/..., see deploy/RELEASE-LAYOUT.md)
+  --via-repo                 install from ToutWAF's own package repository (adds a signed dnf .repo / apt .list, installs the package \`toutwaf\`);
+                             when it is unreachable or the system is not covered, falls back to the direct download (GitLab, then GitHub)
+  --mirror URL               raw base of the ToutWAF package repository whose vendor/ tree is the package MIRROR (default: the ToutWAF GitLab project; also
+                             TOUTWAF_REPO_LINUX_URL). The mirror is added to dnf / apt BEFORE the first package is installed and the distribution's
+                             repositories stay as fallback (skipped with a clear line in the log when unreachable, never blocking)
+  --no-mirror                do not use the package mirror: packages come from the distribution's repositories only (also TOUTWAF_NO_MIRROR=1)
+  --licence-api-url URL      address of the licence site of the common licence (license.common.api_url), written to the configuration before the
+                             first start (also TOUTWAF_LICENCE_API_URL). The default, and the ONLY licence server, is https://licences.toutwaf.com:
+                             give this option for a self-test only (a local test site); another host is flagged with a warning, here and in the console.
+                             https only (http on a loopback address only)
+  --licence-pin FP:KEY       pin the public key of the licence site without the console: FP is its fingerprint (SHA-256 of the raw key, the 32 first
+                             hex characters, in groups of 4 or not), KEY the key in base64 (32 bytes). Refused when FP is not the fingerprint of KEY.
+                             Repeat it for a rotation (four keys at most)
+  --licence-pin-file FILE    the same, one FP:KEY per line (lines starting with # ignored): the key does not show in the process list
+                             (also TOUTWAF_LICENCE_PIN_FILE)
+  --cp-url URL               enrol the data plane with this control plane (e.g. https://cp:9444)
+  --enroll-token TOKEN       one-time enrolment token (console: Nodes > Add node)
+  --node-token TOKEN         existing node token instead of enrolment
+  --cloud-url URL            ToutWAF CLOUD: enrol this node with your hosted account (https://<account>.cloud.<domain>) with --enroll-token. Installs the
+                             data plane and the cloud link; the node connects OUTBOUND over HTTPS (port 443, HTTPS_PROXY honoured), no port is opened
+                             for the platform, and your visitors' traffic never goes through ToutWAF servers
+  --cloud-pin PIN            (cloud) sha256//<base64> pin of the key of the platform certificate (repeatable); the console gives it when needed
+  --cloud-ca FILE            (cloud) PEM CA of a platform that uses a private CA
+  --cp-ca FILE               PEM CA / certificate of the control plane (self-signed control planes)
+  --group NAME               node group (default: default)
+  --cp-port N                console port (default 9443)        --http-port N / --https-port N   data-plane ports (80 / 443)
+  --public-host HOST         public host name or IP shown in the panel links (default: auto-detected)
+  --private-host HOST        address of this machine on the local network (a private IP such as 192.168.3.2, one of this machine's own addresses,
+                             or a local name), shown beside the public one in the panel links; for an installation whose ports are not open on
+                             the Internet (default: chosen automatically among the addresses of the interfaces)
+  --open-firewall            open the needed firewall ports (default when firewalld or ufw is active): 80/443 for the data plane and the
+                             console port. The data-plane API port (9444) is never opened by the installer.
+  --console-from CIDR        only allow this address / network to reach the console port (e.g. 203.0.113.0/24); default: anywhere
+  --no-firewall              never touch the firewall (nftables / iptables hosts are never modified either: the commands are printed)
+  --http3                    serve HTTP/3 (QUIC) too: sets listen.h3 in toutwaf-dp.yaml and opens UDP on the HTTPS port in firewalld / ufw (off by
+                             default, UDP stays closed unless this is on; also TOUTWAF_HTTP3=1). On an installed node it changes the setting.
+  --no-http3                 turn HTTP/3 off again: listen.h3 removed and the UDP rule this installer added closed (also TOUTWAF_HTTP3=0)
+  --dns-server               prepare the authoritative DNS server of the console (port 53; off by default, an existing installation is never changed
+                             without it; also TOUTWAF_DNS_SERVER=1): the control-plane unit may bind port 53 without root (CAP_NET_BIND_SERVICE),
+                             the local stub resolver of systemd-resolved is switched off when it is the only program on port 53 (reversible), port 53
+                             (UDP and TCP) is opened in firewalld / ufw (not with --no-firewall). No other program is ever stopped. The DNS role
+                             itself is given in the console (DNS > Servers).
+  --no-dns-server            undo what this installer did for it (capability, stub resolver, firewall rules) (also TOUTWAF_DNS_SERVER=0)
+  --no-telemetry             install with ZERO telemetry: nothing is sent to the publisher space (also TOUTWAF_TELEMETRY=0)
+  --telemetry                accept telemetry from the start (also TOUTWAF_TELEMETRY=1): the attacks ToutWAF blocks and aggregate figures are
+                             shared with app.toutwaf.com, never the content of requests nor legitimate visitors. Without --telemetry
+                             NOTHING is sent until an administrator accepts it in the console (first-run wizard, or Settings, Privacy
+                             and telemetry); it can be withdrawn at any time and the data erased
+  --with-firewall            ALSO let ToutWAF manage this machine's firewall (the optional Firewall module, off by default; also
+                             TOUTWAF_WITH_FIREWALL=1). It only switches the module on: no rule is applied by the installation, and every
+                             later change runs as a trial with automatic rollback and an anti-lockout guard (SSH and the console stay reachable).
+                             Not the same as the options above, which only decide whether the installer opens the ports ToutWAF needs.
+  --no-firewall-module       do not enable the Firewall module (the default; skips the question of the interactive mode)
+  --restore                  NEW, EMPTY machine: install ToutWAF, then put the latest (or the chosen) restore point of a ToutWAF Backup server in place of
+                             the fresh state, start the services again and check them. It never asks a question: give --backup-url, --backup-fingerprint,
+                             --restore-job, --restore-token (or --restore-token-file, or TWB_RESTORE_TOKEN) and --key-file (the paper key, a text file);
+                             optional: --restore-datastore (toutwaf), --restore-namespace (the job), --restore-snapshot toutwaf/JOB/YYYYMMDDTHHMMSSZ,
+                             --force-restore (restore over an existing installation: its data is kept in pre-restore-*). The console writes this command
+                             (Backup & restore > Restore a whole server). Exit 2: a value is missing or wrong (nothing was changed); 12: the restore failed.
+  --with-backup-client       ALSO install the ToutWAF Backup client (toutwaf-backup) next to the control plane, so that this machine can back itself up to a
+                             ToutWAF Backup server (console: Backups > Backup servers). Downloaded from the release channel of that product; the Ed25519
+                             signature of SHA256SUMS and the SHA-256 of the archive are verified BEFORE anything is installed (fail closed). Needs the public key
+                             of that product: --backup-client-pubkey (base64 of the raw key, or a PEM file), TOUTWAF_BACKUP_PUBKEY or $CONF_DIR/backup-release.pub.
+                             Also TOUTWAF_WITH_BACKUP_CLIENT=1. A failure is a warning: the installation goes on.
+  --backup-client-pubkey K   the release public key of ToutWAF Backup     --backup-client-version V   a version instead of the latest of the channel
+  --backup-client-base-url U where channel.json and releases/ of ToutWAF Backup are served (https://, or file:// for a mirror; default: the public repository)
+  --db postgres|sqlite       the database of the control plane (default: asked in the interactive mode, SQLite otherwise = unchanged behaviour).
+                             PostgreSQL is recommended for a server install and is required for several control planes; it is prepared
+                             COMPLETELY by the installer, no SQL to type. SQLite: one file, small installation on one server.
+  --db-install-local         install PostgreSQL on this machine if missing (package of the distribution), initialise it, listen on the loopback
+                             only, create the database and a dedicated user with a random password, schedule a daily verified pg_dump
+  --db-host H --db-port N --db-name NAME --db-user USER --db-password-file FILE
+                             use an existing PostgreSQL server (the user must exist, or give --db-admin-dsn-file)
+  --db-dsn-file FILE         the connection URL of the application user, in a file (copied to $CONF_DIR/db.dsn, mode 0600). --db-dsn URL does
+                             the same but the password is then visible in the process list: avoid it. TOUTWAF_DB_DSN / TOUTWAF_DB_DSN_FILE too.
+  --db-admin-dsn-file FILE   a privileged connection URL, used ONCE to create the user and the database, kept in memory only, never stored
+                             (TOUTWAF_DB_ADMIN_DSN does the same). Without it the user and the database must already exist; if the account
+                             lacks a right, the exact GRANT statements to ask the administrator for are printed.
+  --db-tls-mode MODE --db-ca FILE   disable|prefer|require|verify-ca|verify-full and the CA file of the server (TLS to the database)
+  --no-db-backup             do not schedule the daily pg_dump of a PostgreSQL database
+  --no-selinux               leave SELinux alone (file contexts, port labels; also TOUTWAF_NO_SELINUX=1); the SELinux mode is never changed
+  --no-sysctl --no-start --no-enable
+  --check-compat             print whether this system is compatible (and the list of compatible distributions), change nothing;
+                             exit 0 when compatible, 3 when not
+  --skip-os-check            install although the system is unsupported / unrecognised (warns loudly; at your own risk)
+  --verify-self              check THIS file against the signed SHA256SUMS of the release (signature, then SHA-256 of install.sh) and print its SHA-256;
+                             changes nothing, needs no root. Run it on a downloaded file, not through a pipe: exit 0 genuine, 1 not the signed one, 2 cannot read itself
+  --check-env                print what this machine lacks for the installation (ports held by another program, a web server that starts at
+                             boot, firewall, unreachable control plane) with the cause and what to do, and change nothing;
+                             exit 0 when nothing refuses, 4 when the installation would be refused
+  --check-prereq             check the disk space, DNS and the clock (cause and fix of each problem), change nothing; exit 0, or 4 when the disk is full
+  --skip-env-check           install although that check refuses (at your own risk: what is in the way fails later)
+  --no-autofix               do not correct problems automatically (also TOUTWAF_NO_AUTOFIX=1). By default every failure of a step is diagnosed and the known causes
+                             are corrected, then the step is tried again: SELinux labels, owner and permissions of the data and configuration, a locked package
+                             manager (waits), a nearly full disk (package caches and old logs only), a full or noexec /tmp (another work directory), an
+                             unreachable download source (GitLab, GitHub, a mirror), the clock, the firewall, a service that does not start, a slow start,
+                             an expired package key, IPv6 missing. Each correction is told in one line (also in /var/log/toutwaf-install.log and in the result of
+                             the console's update task) and written with the command that undoes it (/var/log/toutwaf-autofix.undo); a failure that nothing corrects
+                             is rolled back as before and a diagnostic ready to send is written (/var/log/toutwaf-install-diagnostic.txt)
+  --autofix-dry-run          say what the automatic corrections would do (now, and at every failure) without changing anything
+  --autofix-stop-conflicts   let a correction STOP (not disable, not kill) a third-party service that holds a port ToutWAF needs (otherwise it only says which)
+  --autofix-agent-from ADDR  the address (or CIDR, never /0) that may reach port 9444 (console <-> node link) when the firewall blocks it: 9444 is never opened to everyone
+  --skip-sysupdate           do not update the system packages first (same as TOUTWAF_SKIP_SYSUPDATE=1); the update is never blocking: a failure is a warning.
+                             Disk space, DNS and the clock are checked first; only a full disk stops (TOUTWAF_SKIP_PREREQ=1 goes on anyway)
+  --home DIR                 installation home (default /var/toutwaf, or TOUTWAF_HOME): bin/ conf/ data/ logs/ below it; CLIs are linked in
+                             /usr/local/bin. An existing installation keeps its paths and is never moved unless you pass --home.
+  --bin-dir DIR | --install-dir DIR   where the binaries go (default HOME/bin; /usr/local/bin for an installation made before HOME existed)
+  --purge                    with --uninstall: also delete configuration, data and logs
+  --force                    reinstall even when the same version is installed
+  --fr --en --es --de --it --pt --nl --ru --zh --ar    language of the installer
+  --lang CODE                same as --CODE (or set TOUTWAF_LANG); default: the system language, English when unsupported
+  --no-color  --quiet  --accept-defaults   plain output / only the summary / never prompt
+  --destdir DIR              stage into DIR without touching the running system
+  --dry-run                  print what would be done
+  -y, --yes                  non-interactive
+EOF
+}
+
+# BEGIN db-options
+db_valid_ident() { [[ "${1:-}" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; }
+db_valid_mode() { case "${1:-}" in ""|disable|allow|prefer|require|verify-ca|verify-full) return 0;; esac; return 1; }
+
+# options -> variables (called once, after the command line is read)
+db_check_options() {
+  case "$DB_ENGINE" in
+    ""|sqlite|postgres) ;;
+    postgresql|pg) DB_ENGINE=postgres;;
+    mysql|mariadb) die "the database engine \"$DB_ENGINE\" is not supported by this version: use postgres (recommended) or sqlite";;
+    *) die "--db must be postgres or sqlite";;
+  esac
+  db_valid_ident "$DB_NAME" || die "--db-name: lower case letters, digits and underscores only"
+  db_valid_ident "$DB_USER" || die "--db-user: lower case letters, digits and underscores only"
+  db_valid_mode "$DB_TLS_MODE" || die "--db-tls-mode must be disable, allow, prefer, require, verify-ca or verify-full"
+  if [ -n "$DB_PORT" ] && ! { [[ "$DB_PORT" =~ ^[0-9]+$ ]] && [ "$DB_PORT" -ge 1 ] && [ "$DB_PORT" -le 65535 ]; }; then die "--db-port: invalid port"; fi
+  [ -z "$DB_PASSWORD_FILE" ] || [ -r "$DB_PASSWORD_FILE" ] || die "--db-password-file: cannot read $DB_PASSWORD_FILE"
+  [ -z "$DB_CA" ] || [ -r "$DB_CA" ] || die "--db-ca: cannot read $DB_CA"
+  [ -z "$DB_ADMIN_DSN_FILE" ] || [ -r "$DB_ADMIN_DSN_FILE" ] || die "--db-admin-dsn-file: cannot read $DB_ADMIN_DSN_FILE"
+  if [ -z "$DB_ENGINE" ]; then
+    # the options say what is wanted when --db is not given
+    if [ "$DB_LOCAL" = 1 ] || [ -n "$DB_DSN$DB_DSN_FILE$DB_HOST" ]; then DB_ENGINE=postgres; fi
+  fi
+  if [ "$DB_ENGINE" = sqlite ] && { [ "$DB_LOCAL" = 1 ] || [ -n "$DB_DSN$DB_DSN_FILE$DB_HOST" ]; }; then die "--db sqlite cannot be combined with the options of a PostgreSQL server"; fi
+  return 0
+}
+# END db-options
+
+# BEGIN address-options (extracted by tests/private-host-test.sh: keep the markers)
+# --private-host: the address of this machine on the local network, stored beside the public one (toutwaf-cp bootstrap --private-host). The
+# control plane validates it again (access.NormalizePrivateHost); this check is there to fail before anything is installed.
+# A private address (RFC 1918, fc00::/7, 100.64.0.0/10) or a name is accepted; a public address only when it belongs to this machine.
+ph_local_addrs() {   # addresses of this machine, one per line (TOUTWAF_TEST_LOCAL_ADDRS replaces the lookup in tests)
+  if [ -n "${TOUTWAF_TEST_LOCAL_ADDRS+x}" ]; then local IFS=' '; printf '%s\n' $TOUTWAF_TEST_LOCAL_ADDRS; return 0; fi
+  if command -v ip >/dev/null 2>&1; then ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+  elif command -v hostname >/dev/null 2>&1; then hostname -I 2>/dev/null | tr ' ' '\n'; fi
+}
+ph_is_local() { local a; while IFS= read -r a; do [ "$a" = "$1" ] && return 0; done < <(ph_local_addrs); return 1; }
+# private_host_check VALUE -> prints the normalised value, or a reason on stdout and returns 1
+private_host_check() {
+  local h="${1:-}" a b c d
+  h="${h#http://}"; h="${h#https://}"; h="${h%/}"
+  case "$h" in *[[:space:]]*|*/*|*\?*|*\#*|*@*) printf 'it must be an address or a name, without path or spaces'; return 1;; esac
+  case "$h" in \[*\]) h="${h#\[}"; h="${h%\]}";; esac
+  [ -n "$h" ] || { printf 'it is empty'; return 1; }
+  if [[ "$h" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    a="${BASH_REMATCH[1]}"; b="${BASH_REMATCH[2]}"; c="${BASH_REMATCH[3]}"; d="${BASH_REMATCH[4]}"
+    local o; for o in "$a" "$b" "$c" "$d"; do [ $((10#$o)) -le 255 ] || { printf '%s is not an IPv4 address' "$h"; return 1; }; done
+    a=$((10#$a)); b=$((10#$b)); c=$((10#$c)); d=$((10#$d))
+    if [ "$a" = 127 ] || [ "$a" = 0 ]; then printf '%s is a loopback or unspecified address: nothing else can reach it' "$h"; return 1; fi
+    if [ "$a" = 169 ] && [ "$b" = 254 ]; then printf '%s is a link-local address' "$h"; return 1; fi
+    h="$a.$b.$c.$d"
+    if [ "$a" = 10 ] || { [ "$a" = 172 ] && [ "$b" -ge 16 ] && [ "$b" -le 31 ]; } || { [ "$a" = 192 ] && [ "$b" = 168 ]; } || { [ "$a" = 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ]; }; then
+      printf '%s' "$h"; return 0
+    fi
+    ph_is_local "$h" && { printf '%s' "$h"; return 0; }
+    printf '%s is a public address that is not on this machine: --private-host is the address on the local network (use --public-host for a public one)' "$h"; return 1
+  fi
+  if [[ "$h" == *:* ]]; then
+    [[ "$h" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$h" == *:*:* ]] || { printf '%s is not an IPv6 address' "$h"; return 1; }
+    h="$(printf '%s' "$h" | tr 'A-F' 'a-f')"
+    case "$h" in ::1|::) printf '%s is a loopback or unspecified address: nothing else can reach it' "$h"; return 1;; fe8*|fe9*|fea*|feb*) printf '%s is a link-local address' "$h"; return 1;; fc*|fd*) printf '%s' "$h"; return 0;; esac
+    ph_is_local "$h" && { printf '%s' "$h"; return 0; }
+    printf '%s is a public address that is not on this machine: --private-host is the address on the local network (use --public-host for a public one)' "$h"; return 1
+  fi
+  if [[ "$h" =~ ^[0-9.]+$ ]]; then printf '%s is not an IPv4 address' "$h"; return 1; fi
+  if [ "${#h}" -gt 253 ] || ! [[ "$h" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]]; then printf '%s is not a valid host name' "$h"; return 1; fi
+  case "$(printf '%s' "$h" | tr 'A-Z' 'a-z')" in localhost) printf 'localhost is the loopback name: nothing else can reach it'; return 1;; esac
+  printf '%s' "$h" | tr 'A-Z' 'a-z'
+}
+# private_host_options: validates and normalises PRIVATE_HOST (called once, after the command line is read)
+private_host_options() {
+  [ -n "${PRIVATE_HOST:-}" ] || return 0
+  local v
+  v="$(private_host_check "$PRIVATE_HOST")" || die "--private-host: $v"
+  PRIVATE_HOST="$v"
+}
+# END address-options
+
+# BEGIN licence-options
+# the common licence, non interactive: the address of the licence site and its public key(s), checked here and written to toutwaf-cp.yaml
+# (license.common.api_url / pinned_keys) before the first start. The public key is not a secret; nothing but the fingerprint is ever logged.
+licence_pin_parse() {   # "FP:KEY" -> LP_FP (32 lower case hex) LP_KEY (canonical base64); returns 1 and sets LP_ERR when it is not valid
+  local v="$1" fp key f size sum
+  LP_ERR=""; LP_FP=""; LP_KEY=""
+  case "$v" in *:*) ;; *) LP_ERR="expected FINGERPRINT:KEY"; return 1;; esac
+  key="${v##*:}"; fp="${v%:*}"
+  fp="$(printf '%s' "$fp" | tr -d ' \t-' | tr 'A-F' 'a-f')"
+  [[ "$fp" =~ ^[0-9a-f]{32}$ ]] || { LP_ERR="the fingerprint must be 32 hexadecimal characters (groups of 4 allowed)"; return 1; }
+  key="$(printf '%s' "$key" | tr -d ' \t\r\n' | tr '_-' '/+' | tr -d '=')"
+  [[ "$key" =~ ^[A-Za-z0-9+/]{43}$ ]] || { LP_ERR="the key must be a base64 Ed25519 public key of 32 bytes"; return 1; }
+  f="$(mktemp)" || { LP_ERR="no temporary file"; return 1; }
+  printf '%s=' "$key" | base64 -d >"$f" 2>/dev/null || true
+  size="$(wc -c <"$f" | tr -d ' ')"
+  sum="$(sha256sum "$f" | cut -c1-32)"; rm -f "$f"
+  [ "$size" = 32 ] || { LP_ERR="the key must be a base64 Ed25519 public key of 32 bytes"; return 1; }
+  [ "$sum" = "$fp" ] || { LP_ERR="the fingerprint is not the one of this key: nothing is pinned"; return 1; }
+  LP_FP="$fp"; LP_KEY="$key="
+  return 0
+}
+licence_warn() { local IFS=' '; if declare -F warn >/dev/null 2>&1; then warn "$@"; else printf 'WARNING: %s\n' "$*" >&2; fi; }
+licence_check_options() {
+  local line n=0 all=""
+  if [ -n "$LICENCE_API_URL" ]; then
+    [[ "$LICENCE_API_URL" =~ ^(https://[A-Za-z0-9.-]+|http://(localhost|127\.0\.0\.1|\[::1\]))(:[0-9]{1,5})?(/[A-Za-z0-9._~%+/-]*)?$ ]] \
+      || die "--licence-api-url: an https address without credentials nor query (http only on a loopback address)"
+    case "${LICENCE_API_URL%/}" in
+      https://licences.toutwaf.com|https://licences.toutwaf.com/api/licence) ;;
+      *) licence_warn "--licence-api-url $LICENCE_API_URL is NOT the official licence server (https://licences.toutwaf.com): for self-tests and development only; a licence checked elsewhere is not an official licence" ;;
+    esac
+  fi
+  if [ -n "$LICENCE_PIN_FILE" ]; then
+    [ -r "$LICENCE_PIN_FILE" ] || die "--licence-pin-file: cannot read $LICENCE_PIN_FILE"
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"; case "$line" in ""|"#"*) continue;; esac
+      all="${all:+$all
+}$line"
+    done <"$LICENCE_PIN_FILE"
+  fi
+  [ -z "$LICENCE_PINS" ] || all="${all:+$all
+}$LICENCE_PINS"
+  LICENCE_PINNED=""
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    licence_pin_parse "$line" || die "--licence-pin: $LP_ERR"
+    case "
+$LICENCE_PINNED
+" in *"
+$LP_FP $LP_KEY
+"*) continue;; esac
+    LICENCE_PINNED="${LICENCE_PINNED:+$LICENCE_PINNED
+}$LP_FP $LP_KEY"; n=$((n + 1))
+  done <<<"$all"
+  [ "$n" -le 4 ] || die "--licence-pin: four keys at most"
+  return 0
+}
+# the license: section of toutwaf-cp.yaml for the options above (empty when none was given)
+licence_yaml() {
+  local fp key
+  [ -n "$LICENCE_API_URL$LICENCE_PINNED" ] || return 0
+  printf 'license:\n  common:\n'
+  [ -z "$LICENCE_API_URL" ] || printf '    api_url: "%s"\n' "$LICENCE_API_URL"
+  if [ -n "$LICENCE_PINNED" ]; then
+    printf '    pinned_keys:\n'
+    while IFS=' ' read -r fp key; do [ -n "$key" ] && printf '      - "%s"\n' "$key"; done <<<"$LICENCE_PINNED"
+  fi
+  return 0
+}
+# END licence-options
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --install) ACTION=install; shift;;
+    --update) ACTION=update; shift;;
+    --db-prepare) ACTION=dbprepare; shift;;
+    --uninstall) ACTION=uninstall; shift;;
+    --status) ACTION=status; shift;;
+    --links|--show-links) ACTION=links; shift;;
+    --component) COMPONENT="$2"; shift 2;;
+    --version) VERSION="$2"; shift 2;;
+    --channel) CHANNEL="$2"; shift 2;;
+    --tarball) TARBALL="$2"; shift 2;;
+    --extras) EXTRAS_LOCAL="${EXTRAS_LOCAL:+$EXTRAS_LOCAL:}$2"; shift 2;;
+    --no-extras) NO_EXTRAS=1; shift;;
+    --extras-only) ACTION=extras; shift;;
+    --base-url) BASE_URL="$2"; shift 2;;
+    --via-repo) VIA_REPO=1; shift;;
+    --mirror) REPO_LINUX="$2"; shift 2;;
+    --no-mirror) NO_MIRROR=1; shift;;
+    --licence-api-url|--license-api-url) LICENCE_API_URL="$2"; shift 2;;
+    --licence-pin|--license-pin) LICENCE_PINS="${LICENCE_PINS:+$LICENCE_PINS
+}$2"; shift 2;;
+    --licence-pin-file|--license-pin-file) LICENCE_PIN_FILE="$2"; shift 2;;
+    --cp-url) CP_URL="$2"; shift 2;;
+    --enroll-token) ENROLL_TOKEN="$2"; shift 2;;
+    --node-token) NODE_TOKEN="$2"; shift 2;;
+    --cloud-url) CLOUD_URL="$2"; shift 2;;
+    --cloud-pin) CLOUD_PINS="$CLOUD_PINS $2"; shift 2;;
+    --cloud-ca) CLOUD_CA="$2"; shift 2;;
+    --cp-ca) CP_CA="$2"; shift 2;;
+    --group) NODE_GROUP="$2"; shift 2;;
+    --cp-port) CP_PORT="$2"; shift 2;;
+    --http-port) HTTP_PORT="$2"; shift 2;;
+    --https-port) HTTPS_PORT="$2"; shift 2;;
+    --public-host) PUBLIC_HOST="$2"; shift 2;;
+    --private-host) PRIVATE_HOST="$2"; shift 2;;
+    --open-firewall) OPEN_FW=1; shift;;
+    --open-cp-port) OPEN_CP_PORT=1; shift;;
+    --console-from) CONSOLE_FROM="$2"; shift 2;;
+    --no-firewall) OPEN_FW=0; shift;;
+    --http3) HTTP3=1; shift;;
+    --no-http3) HTTP3=0; shift;;
+    --dns-server) DNS_SERVER=1; shift;;
+    --no-dns-server) DNS_SERVER=0; shift;;
+    --no-telemetry) NO_TELEMETRY=1; TELEMETRY_OPTIN=0; shift;;
+    --telemetry) TELEMETRY_OPTIN=1; NO_TELEMETRY=0; shift;;
+    --with-firewall|--with-firewall-module) FW_MODULE=1; shift;;
+    --no-firewall-module) FW_MODULE=0; shift;;
+    --restore) RESTORE=1; shift;;
+    --force-restore) RESTORE_FORCE=1; shift;;
+    --backup-url) RESTORE_URL="$2"; shift 2;;
+    --backup-fingerprint) RESTORE_FP="$2"; shift 2;;
+    --restore-job) RESTORE_JOB="$2"; shift 2;;
+    --restore-datastore) RESTORE_DS="$2"; shift 2;;
+    --restore-namespace) RESTORE_NS="$2"; shift 2;;
+    --restore-token) RESTORE_TOKEN="$2"; shift 2;;
+    --restore-token-file) RESTORE_TOKEN_FILE="$2"; shift 2;;
+    --key-file) RESTORE_KEYFILE="$2"; shift 2;;
+    --restore-snapshot) RESTORE_SNAPSHOT="$2"; shift 2;;
+    --with-backup-client) BACKUP_CLIENT=1; shift;;
+    --backup-client-pubkey) BACKUP_CLIENT_PUBKEY="$2"; shift 2;;
+    --backup-client-version) BACKUP_CLIENT_VERSION="$2"; shift 2;;
+    --backup-client-base-url) BACKUP_CLIENT_BASE="$2"; shift 2;;
+    --db) DB_ENGINE="$2"; shift 2;;
+    --db-dsn) DB_DSN="$2"; shift 2;;
+    --db-dsn-file) DB_DSN_FILE="$2"; shift 2;;
+    --db-install-local) DB_LOCAL=1; shift;;
+    --db-host) DB_HOST="$2"; shift 2;;
+    --db-port) DB_PORT="$2"; shift 2;;
+    --db-name) DB_NAME="$2"; shift 2;;
+    --db-user) DB_USER="$2"; shift 2;;
+    --db-password-file) DB_PASSWORD_FILE="$2"; shift 2;;
+    --db-tls-mode) DB_TLS_MODE="$2"; shift 2;;
+    --db-ca) DB_CA="$2"; shift 2;;
+    --db-admin-dsn-file) DB_ADMIN_DSN_FILE="$2"; shift 2;;
+    --no-db-backup) DB_BACKUP_TIMER=0; shift;;
+    --no-selinux) NO_SELINUX=1; shift;;
+    --no-sysctl) NO_SYSCTL=1; shift;;
+    --no-start) NO_START=1; shift;;
+    --no-enable) NO_ENABLE=1; shift;;
+    --check-compat) CHECK_COMPAT=1; shift;;
+    --skip-os-check) SKIP_OS_CHECK=1; shift;;
+    --check-env) ACTION=checkenv; shift;;
+    --verify-self) ACTION=verifyself; shift;;
+    --check-prereq) ACTION=checkprereq; shift;;
+    --skip-env-check) SKIP_ENV_CHECK=1; shift;;
+    --skip-sysupdate) SKIP_SYSUPDATE=1; shift;;
+    --no-autofix) AUTOFIX=0; shift;;
+    --autofix-dry-run) AUTOFIX_DRY=1; shift;;
+    --autofix-stop-conflicts) AUTOFIX_STOP_CONFLICTS=1; shift;;
+    --autofix-agent-from) AUTOFIX_AGENT_FROM="$2"; shift 2;;
+    --autofix-resume) AF_RESUME="$2"; shift 2;;
+    --home) HOME_DIR="$2"; HOME_EXPLICIT=1; shift 2;;
+    --bin-dir|--install-dir) BIN_DIR="$2"; BIN_EXPLICIT=1; shift 2;;
+    --force) FORCE=1; shift;;
+    --destdir) DESTDIR="$2"; shift 2;;
+    --dry-run) DRY_RUN=1; shift;;
+    --purge) PURGE=1; shift;;
+    --lang) LANG_CODE="$2"; shift 2;;
+    --en|--fr|--es|--de|--it|--pt|--nl|--ru|--zh|--ar) LANG_CODE="${1#--}"; shift;;
+    --no-color) NO_COLOR_FLAG=1; shift;;
+    --quiet|-q) QUIET=1; shift;;
+    --accept-defaults) ACCEPT_DEFAULTS=1; shift;;
+    -y|--yes) ASSUME_YES=1; shift;;
+    -h|--help) usage; exit 0;;
+    *) printf '[error] unknown option: %s (see --help)\n' "$1" >&2; exit 1;;
+  esac
+done
+autofix_resume_load; autofix_apply_env
+detect_lang; detect_ui
+af_check_options
+db_check_options
+licence_check_options
+private_host_options
+case "$COMPONENT" in dp|cp|all) ;; *) die "--component must be dp, cp or all";; esac
+case "$CHANNEL" in beta) CHANNEL=dev;; esac
+case "$CHANNEL" in ""|stable|dev) ;; *) die "--channel must be stable or dev";; esac
+check_ports() { local pv; for pv in "$CP_PORT" "$HTTP_PORT" "$HTTPS_PORT"; do [[ "$pv" =~ ^[0-9]+$ ]] && [ "$pv" -ge 1 ] && [ "$pv" -le 65535 ] || die "invalid port: $pv"; done; }
+check_ports
+# firewall: opening what ToutWAF needs is the default when firewalld / ufw is active (the helper checks that); --no-firewall opts out
+[ -n "$OPEN_FW" ] || OPEN_FW=1
+[ "$OPEN_FW" = 1 ] && OPEN_CP_PORT=1
+if [ -n "$CONSOLE_FROM" ]; then
+  if ! [[ "$CONSOLE_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$CONSOLE_FROM" == */0 ]]; then die "--console-from must be an address or a CIDR such as 203.0.113.0/24 (not 0.0.0.0/0)"; fi
+fi
+# ------------------------------------------------------------------------------------------------ environment
+[ "$(uname -s)" = "Linux" ] || die "this installer is for Linux; on Windows use install.ps1"
+# test hooks (fake os-release / architecture / glibc / systemd / kernel): honoured ONLY when nothing can be changed (--dry-run, --check-compat)
+OS_RELEASE_FILE=/etc/os-release; TEST_ARCH=""; TEST_GLIBC=""; TEST_SYSTEMD=""; TEST_KERNEL=""; TEST_USERLAND_BITS=""; TEST_DT_MODEL=""
+if [ -n "${TOUTWAF_TEST_OS_RELEASE:-}${TOUTWAF_TEST_ARCH:-}${TOUTWAF_TEST_GLIBC:-}${TOUTWAF_TEST_SYSTEMD:-}${TOUTWAF_TEST_KERNEL:-}${TOUTWAF_TEST_USERLAND_BITS:-}${TOUTWAF_TEST_DT_MODEL:-}" ]; then
+  if [ "$DRY_RUN" = 1 ] || [ "$CHECK_COMPAT" = 1 ] || [ "$ACTION" = checkenv ]; then
+    [ -z "${TOUTWAF_TEST_OS_RELEASE:-}" ] || OS_RELEASE_FILE="$TOUTWAF_TEST_OS_RELEASE"
+    TEST_ARCH="${TOUTWAF_TEST_ARCH:-}"; TEST_GLIBC="${TOUTWAF_TEST_GLIBC:-}"; TEST_SYSTEMD="${TOUTWAF_TEST_SYSTEMD:-}"; TEST_KERNEL="${TOUTWAF_TEST_KERNEL:-}"
+    TEST_USERLAND_BITS="${TOUTWAF_TEST_USERLAND_BITS:-}"; TEST_DT_MODEL="${TOUTWAF_TEST_DT_MODEL:-}"
+    printf '[test] TOUTWAF_TEST_* hooks active: the compatibility check reads simulated values\n' >&2
+  else
+    printf '[warn] TOUTWAF_TEST_* variables are ignored: they only work with --dry-run or --check-compat\n' >&2
+  fi
+fi
+
+OS_ID="unknown"; OS_VER=""; OS_LIKE=""; OS_NAME=""; OS_RELEASE_MISSING=0
+if [ -r "$OS_RELEASE_FILE" ]; then
+  # read it in a subshell: os-release defines VERSION, NAME, ID ... which would clobber our own variables
+  # shellcheck disable=SC1090
+  _osr="$( . "$OS_RELEASE_FILE" >/dev/null 2>&1; printf '%s\n%s\n%s\n%s\n' "${ID:-unknown}" "${VERSION_ID:-}" "${ID_LIKE:-}" "${PRETTY_NAME:-${NAME:-}}" )" || _osr=""
+  { IFS= read -r OS_ID || true; IFS= read -r OS_VER || true; IFS= read -r OS_LIKE || true; IFS= read -r OS_NAME || true; } <<<"$_osr"   # (a trailing empty field is stripped by $(...))
+  OS_ID="${OS_ID,,}"; OS_LIKE="${OS_LIKE,,}"; [ -n "$OS_ID" ] || OS_ID=unknown
+else OS_RELEASE_MISSING=1; fi
+STAGING=0; [ -n "$DESTDIR" ] && STAGING=1
+compat_eval
+FAMILY="$CP_FAMILY"
+if [ "$CHECK_COMPAT" = 1 ]; then
+  compat_print
+  if [ "$(id -u)" -ne 0 ]; then printf '  %s\n\n' "$(t cp_not_root)"; fi
+  [ "$CP_STATUS" != unsupported ] || exit 3
+  exit 0
+fi
+if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ "$ACTION" != checkenv ] && [ "$ACTION" != checkprereq ] && [ "$ACTION" != verifyself ] && [ "$(id -u)" -ne 0 ]; then die "$(t root_required)"; fi
+autofix_prepare_tmp; TMP="$(mktemp -d)"; LOG="$TMP/install.log"; autofix_flush_pending
+# persist_log: from now on the log goes to /var/log/toutwaf-install.log (called once the compatibility gate has passed, so that a refused
+# run leaves nothing behind)
+persist_log() {
+  local f=/var/log/toutwaf-install.log
+  if [ "$STAGING" = 0 ] && [ "$(id -u)" -eq 0 ] && [ "$LOG" != "$f" ]; then
+    if { : >>"$f"; } 2>/dev/null; then chmod 0600 "$f"; cat "$LOG" >>"$f" 2>/dev/null || true; LOG="$f"; fi
+  fi
+  printf '\n#### %s toutwaf install.sh v%s %s\n' "$(date -u +%FT%TZ)" "$INSTALLER_VERSION" "${ACTION:-menu}" >>"$LOG"
+  return 0
+}
+
+# package manager when the distribution family is unknown (--skip-os-check on an unlisted system)
+if [ -z "$FAMILY" ]; then
+  for _pm in "dnf:rhel" "yum:rhel" "apt-get:debian" "zypper:suse" "pacman:arch"; do
+    if have "${_pm%%:*}"; then FAMILY_GUESS="${_pm##*:}"; break; fi
+  done
+  FAMILY_GUESS="${FAMILY_GUESS:-}"
+fi
+HAS_SYSTEMD=0; { [ -d /run/systemd/system ] && have systemctl; } && HAS_SYSTEMD=1
+[ "$STAGING" = 1 ] && HAS_SYSTEMD=0
+
+want_dp() { [ "$COMPONENT" = dp ] || [ "$COMPONENT" = all ]; }
+want_cp() { [ "$COMPONENT" = cp ] || [ "$COMPONENT" = all ]; }
+svc_active() { [ "$HAS_SYSTEMD" = 1 ] && systemctl is-active --quiet "$1"; }
+# svc_stale UNIT FILE: true when the program the unit RUNS (/proc/PID/exe: the file that was started, even if it was replaced since) is not the one now
+# installed at FILE. "Nothing to restart" is decided on what runs, never on "the files are already in place" (an installer started again after a
+# correction finds them in place, and the old program kept running: production, 0.6.1 -> 0.6.3). False when it cannot tell.
+svc_stale() {
+  local pid exe a b
+  [ "$HAS_SYSTEMD" = 1 ] || return 1
+  pid="$(systemctl show "$1" -p MainPID --value 2>/dev/null || true)"
+  case "$pid" in ""|0|*[!0-9]*) return 1;; esac
+  exe="${SVC_PROC_ROOT:-/proc}/$pid/exe"
+  [ -r "$exe" ] && [ -f "$2" ] || return 1
+  a="$(sha256sum <"$exe" 2>/dev/null | cut -d' ' -f1 || true)"; b="$(sha256sum <"$2" 2>/dev/null | cut -d' ' -f1 || true)"
+  [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$b" ]
+}
+cp_exe() { printf '%s' "${CP_BIN:-$(p "$BIN_DIR/toutwaf-cp")}"; }
+
+# what is installed right now (binaries on disk)
+INST_DP=0; INST_CP=0
+detect_installed() {
+  INST_DP=0; INST_CP=0
+  [ -x "$(p "$BIN_DIR/toutwaf-dp")" ] && INST_DP=1
+  [ -x "$(p "$BIN_DIR/toutwaf-cp")" ] && INST_CP=1
+  return 0
+}
+component_from_installed() {
+  if [ "$INST_DP" = 1 ] && [ "$INST_CP" = 1 ]; then COMPONENT="all"; elif [ "$INST_CP" = 1 ]; then COMPONENT="cp"; elif [ "$INST_DP" = 1 ]; then COMPONENT="dp"; fi
+  return 0
+}
+installed_version() { { "$1" --version 2>/dev/null || "$1" version 2>/dev/null; } | awk '{print $2}' | head -n1 || true; }
+# ---- build identity. The public development version keeps ONE name ("0.3.0-dev") from one publication to the next, so a build (the first 12
+# hexadecimal characters of the published commit) is what tells two publications apart. Binaries print it: "toutwaf-dp 0.3.0-dev (build a1b2c3d4e5f6)".
+# clean_build prints the normalised identifier, or nothing when there is none / it is not an identifier ("" means unknown inside this script;
+# ver_label shows it as "unknown", never as an empty string).
+clean_build() {
+  local b; b="$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  case "$b" in ""|unknown|*[!0-9a-z._-]*) return 0;; esac
+  [ "${#b}" -le 40 ] || return 0
+  printf '%s' "$b"
+}
+installed_build() { clean_build "$({ "$1" --version 2>/dev/null || "$1" version 2>/dev/null; } | sed -n 's/.*(build \([^) ]*\)).*/\1/p' | head -n1 || true)"; }
+ver_label() { local b; b="$(clean_build "${2:-}")"; printf '%s (build %s)' "${1:-?}" "${b:-unknown}"; }      # 0.3.0-dev (build a1b2c3d4e5f6)
+ver_short() { local b; b="$(clean_build "${2:-}")"; printf '%s, build %s' "${1:-?}" "${b:-unknown}"; }       # 0.3.0-dev, build a1b2c3d4e5f6 (for "(%s)")
+# the build of what is installed: the binary's own, else the one the installer recorded in installer.conf for that very version
+inst_build() {   # BINARY VERSION
+  local b; b="$(installed_build "$1")"
+  if [ -z "$b" ] && [ -n "${2:-}" ] && [ "$(conf_get INSTALLED_VERSION)" = "$2" ]; then b="$(clean_build "$(conf_get INSTALLED_BUILD)")"; fi
+  printf '%s' "$b"
+}
+installed_label() { local v; v="$(installed_version "$1")"; if [ -n "$v" ]; then ver_label "$v" "$(inst_build "$1" "$v")"; else printf '?'; fi; }
+state_line() {
+  local s=""; detect_installed
+  [ "$INST_DP" = 1 ] && s+="toutwaf-dp $(installed_label "$(p "$BIN_DIR/toutwaf-dp")")  "
+  [ "$INST_CP" = 1 ] && s+="toutwaf-cp $(installed_label "$(p "$BIN_DIR/toutwaf-cp")")  "
+  printf '%s' "$s"
+}
+# ports of an existing installation win over the defaults (re-run / update / status / links)
+load_existing_ports() {
+  local f v
+  f="$(p "$CONF_DIR/toutwaf-cp.yaml")"
+  if [ -r "$f" ]; then v="$(sed -n 's/^[[:space:]]*console:[[:space:]]*"\{0,1\}[^":]*:\([0-9]\{1,5\}\)"\{0,1\}.*/\1/p' "$f" | head -n1)"; [ -n "$v" ] && CP_PORT="$v"; fi
+  f="$(p "$CONF_DIR/toutwaf-dp.yaml")"
+  if [ -r "$f" ]; then
+    v="$(sed -n 's/^[[:space:]]*http:[[:space:]]*\[[[:space:]]*"[^"]*:\([0-9]\{1,5\}\)".*/\1/p' "$f" | head -n1)"; [ -n "$v" ] && HTTP_PORT="$v"
+    v="$(sed -n 's/^[[:space:]]*https:[[:space:]]*\[[[:space:]]*"[^"]*:\([0-9]\{1,5\}\)".*/\1/p' "$f" | head -n1)"; [ -n "$v" ] && HTTPS_PORT="$v"
+  fi
+  return 0
+}
+
+# HTTP/3 (QUIC): is it on for this node? The option wins; without it the node configuration says (`listen.h3: true`), a fresh install is off.
+http3_on() {
+  local f; f="$(p "$CONF_DIR/toutwaf-dp.yaml")"
+  if [ -n "$HTTP3" ]; then printf '%s' "$HTTP3"; return 0; fi
+  if [ -r "$f" ] && grep -Eq '^[[:space:]]*h3:[[:space:]]*(true|yes|on)([[:space:]]|$)' "$f"; then printf 1; else printf 0; fi
+}
+# apply_http3_config: an explicit --http3 / --no-http3 on an existing configuration edits ONLY the `h3:` line of the listen block
+apply_http3_config() {
+  local f tmp; f="$(p "$CONF_DIR/toutwaf-dp.yaml")"
+  [ -n "$HTTP3" ] && [ -f "$f" ] || return 0
+  tmp="$(mktemp)" || return 0
+  awk -v on="$HTTP3" '
+    /^[^[:space:]#][^:]*:/ { inlisten = ($0 ~ /^listen:/) }
+    inlisten && /^[[:space:]]+h3:/ { next }
+    { print }
+    inlisten && on == 1 && !done && /^[[:space:]]+https:/ { print "  h3: true               # HTTP/3 (QUIC) on UDP at the https address(es): keep that UDP port open in the firewall"; done = 1 }
+  ' "$f" >"$tmp" && cat "$tmp" >"$f"
+  rm -f "$tmp"
+  if [ "$HTTP3" = 1 ] && ! grep -Eq '^[[:space:]]+h3:[[:space:]]*true' "$f"; then warn "could not add listen.h3 to $f (no listen.https line?): add it by hand"; else info "HTTP/3: listen.h3 is now $([ "$HTTP3" = 1 ] && echo on || echo off) in $f"; fi
+}
+
+# ------------------------------------------------------------------------------------------------ release channel
+INSTALLER_CONF=""
+# ---- layout ---------------------------------------------------------------------------------------------------------------------
+valid_home() {
+  local h="$1"
+  [[ "$h" =~ ^/[A-Za-z0-9._/+-]+$ ]] || return 1
+  case "$h" in //*|*//*|*/../*|*/..|*/./*|*/.|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*) return 1;; esac
+  return 0
+}
+set_layout_vars() { INSTALLER_CONF="$(p "$CONF_DIR/installer.conf")"; }
+apply_home() {
+  HOME_DIR="${1%/}"; LAYOUT=home
+  [ "$BIN_EXPLICIT" = 1 ] || BIN_DIR="$HOME_DIR/bin"
+  CONF_DIR="$HOME_DIR/conf"; DATA_DIR="$HOME_DIR/data"; LOG_DIR="$HOME_DIR/logs"
+  set_layout_vars
+}
+# /etc/toutwaf.layout remembers a HOME layout (so that --update / --uninstall find it again even after an uninstall that kept the data)
+LAYOUT_FILE="$(p /etc/toutwaf.layout)"
+write_layout_file() {
+  [ "$LAYOUT" = home ] && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] || return 0
+  printf '# written by install.sh: installation home of this host (bin/ conf/ data/ logs/)\nHOME=%s\n' "$HOME_DIR" >"$LAYOUT_FILE" && chmod 0644 "$LAYOUT_FILE"
+  return 0
+}
+# EX_*: paths of an installation that already exists (read from its systemd units, else from the usual places)
+EX_FOUND=0; EX_BIN=""; EX_CONF=""; EX_DATA=""; EX_LOG=""; EX_HOME=""
+detect_existing_layout() {
+  EX_FOUND=0; EX_BIN=""; EX_CONF=""; EX_DATA=""; EX_LOG=""
+  local u f x
+  if [ -r "$LAYOUT_FILE" ]; then
+    x="$(sed -n 's/^HOME=//p' "$LAYOUT_FILE" | head -n1)"
+    if valid_home "$x" && { [ -d "$(p "$x/conf")" ] || [ -d "$(p "$x/data")" ]; }; then
+      EX_FOUND=1; EX_CONF="$x/conf"; EX_DATA="$x/data"; EX_LOG="$x/logs"; EX_BIN="$x/bin"; EX_HOME="$x"; return 0
+    fi
+  fi
+  for u in toutwaf-cp toutwaf-dp; do
+    f="$(p /etc/systemd/system/$u.service)"; [ -f "$f" ] || continue
+    EX_DATA="$(sed -n 's/^ReadWritePaths=\([^ ]*\)[ ].*/\1/p' "$f" | head -n1)"
+    EX_LOG="$(sed -n 's/^ReadWritePaths=[^ ]*[ ]\([^ ]*\).*/\1/p' "$f" | head -n1)"
+    EX_CONF="$(sed -n 's/^ReadOnlyPaths=\([^ ]*\).*/\1/p' "$f" | head -n1)"
+    x="$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' "$f" | head -n1)"; EX_BIN="${x%/*}"
+    for x in "$EX_DATA" "$EX_LOG" "$EX_CONF" "$EX_BIN"; do valid_home "$x" || { EX_DATA=""; break; }; done
+    [ -n "$EX_DATA" ] && { EX_FOUND=1; return 0; }
+  done
+  # no unit (staging, or units removed): look for configuration / binaries in the usual places
+  if [ -f "$(p /etc/toutwaf/toutwaf-cp.yaml)" ] || [ -f "$(p /etc/toutwaf/toutwaf-dp.yaml)" ] || [ -f "$(p /var/lib/toutwaf/toutwaf.db)" ] \
+     || [ -x "$(p /usr/local/bin/toutwaf-cp)" ] || [ -x "$(p /usr/local/bin/toutwaf-dp)" ]; then
+    EX_FOUND=1; EX_CONF=/etc/toutwaf; EX_DATA=/var/lib/toutwaf; EX_LOG=/var/log/toutwaf; EX_BIN="${TOUTWAF_BIN_DIR:-/usr/local/bin}"; return 0
+  fi
+  if [ -f "$(p /var/toutwaf/conf/toutwaf-cp.yaml)" ] || [ -f "$(p /var/toutwaf/conf/toutwaf-dp.yaml)" ]; then
+    EX_FOUND=1; EX_CONF=/var/toutwaf/conf; EX_DATA=/var/toutwaf/data; EX_LOG=/var/toutwaf/logs; EX_BIN=/var/toutwaf/bin
+  fi
+  return 0
+}
+resolve_layout() {
+  if [ -n "$HOME_DIR" ] && ! valid_home "$HOME_DIR"; then die "$(t home_bad "$HOME_DIR")"; fi
+  detect_existing_layout
+  if [ "$HOME_EXPLICIT" = 1 ]; then
+    apply_home "$HOME_DIR"
+    if [ "$EX_FOUND" = 1 ] && [ "$EX_DATA" != "$DATA_DIR" ]; then LAYOUT_NOTE="$(t home_explicit_legacy "$HOME_DIR" "$EX_DATA")"; else LAYOUT_NOTE="$(t home_fresh "$HOME_DIR")"; fi
+  elif [ "$EX_FOUND" = 1 ]; then
+    LAYOUT=existing
+    [ "$BIN_EXPLICIT" = 1 ] || BIN_DIR="$EX_BIN"
+    CONF_DIR="$EX_CONF"; DATA_DIR="$EX_DATA"; LOG_DIR="$EX_LOG"; set_layout_vars
+    if [ -n "$EX_HOME" ]; then LAYOUT=home; HOME_DIR="$EX_HOME"; elif [ "$EX_CONF" = /var/toutwaf/conf ]; then LAYOUT=home; HOME_DIR=/var/toutwaf; else LAYOUT_NOTE="$(t home_legacy "$BIN_DIR" "$CONF_DIR" "$DATA_DIR")"; fi
+  else
+    apply_home /var/toutwaf; LAYOUT_NOTE="$(t home_fresh "$HOME_DIR")"
+  fi
+  return 0
+}
+resolve_layout
+conf_get() { [ -r "$INSTALLER_CONF" ] && sed -n "s/^$1=//p" "$INSTALLER_CONF" | head -n1 || true; }
+# precedence: --channel / TOUTWAF_CHANNEL > a non-stable DEFAULT_CHANNEL baked into this copy > remembered installer.conf > stable
+decide_channel() {
+  [ -n "$CHANNEL" ] && return 0
+  if [ "$DEFAULT_CHANNEL" != stable ]; then CHANNEL="$DEFAULT_CHANNEL"; return 0; fi
+  CHANNEL="$(conf_get CHANNEL)"; case "$CHANNEL" in stable|dev) ;; *) CHANNEL=stable;; esac
+}
+channel_branch() { if [ "$CHANNEL" = dev ]; then echo dev; else echo main; fi; }
+repo_base() { printf '%s' "${BASE_URL:-${SRC_ROOT:-$SRC_PRIMARY}/$(channel_branch)}"; }
+write_installer_conf() {
+  if [ "$STAGING" = 1 ] || [ "$DRY_RUN" = 1 ]; then return 0; fi
+  [ -d "$(dirname "$INSTALLER_CONF")" ] || return 0
+  local _rv _rb; _rv="$(conf_get INSTALLED_VERSION)"; _rb="$(conf_get INSTALLED_BUILD)"
+  # CHANNEL: used by --update and by the control plane's "update available" check; BASE_URL only when a mirror was given
+  { printf '# written by install.sh: release channel used by --update and by the console "update available" check (stable = branch main, dev = branch dev)\nCHANNEL=%s\n' "$CHANNEL"
+    case "$BASE_URL" in http://*|https://*) printf 'BASE_URL=%s\n' "$BASE_URL";; esac
+    [ "$SKIP_OS_CHECK" = 0 ] || printf '# the installation was made with --skip-os-check (unsupported system): updates keep skipping the compatibility check\nSKIP_OS_CHECK=1\n'
+    # what this installation runs (see record_installed): kept as it was until the new binaries are in service
+    [ -z "$_rv" ] || printf '# version and build the installer put in service (read by the console when a binary cannot name its own build)\nINSTALLED_VERSION=%s\nINSTALLED_BUILD=%s\n' "$_rv" "${_rb:-unknown}"; } >"$INSTALLER_CONF" && chmod 0644 "$INSTALLER_CONF"
+  return 0
+}
+# record_installed VERSION BUILD: remember what is now in service, next to CHANNEL in installer.conf. Installations made before builds existed have
+# no such lines: their build reads as unknown, which counts as different from any published build.
+record_installed() {
+  [ "$DRY_RUN" = 0 ] || return 0
+  [ -n "${1:-}" ] || return 0
+  [ -d "$(dirname "$INSTALLER_CONF")" ] || return 0
+  local b; b="$(clean_build "${2:-}")"
+  { { [ ! -f "$INSTALLER_CONF" ] || grep -v -e '^INSTALLED_VERSION=' -e '^INSTALLED_BUILD=' -e '^# version and build the installer put in service' "$INSTALLER_CONF" || true; }
+    printf '# version and build the installer put in service (read by the console when a binary cannot name its own build)\nINSTALLED_VERSION=%s\nINSTALLED_BUILD=%s\n' "$1" "${b:-unknown}"; } >"$INSTALLER_CONF.new" \
+    && chmod 0644 "$INSTALLER_CONF.new" && mv -f "$INSTALLER_CONF.new" "$INSTALLER_CONF"
+  return 0
+}
+# --- version rule (begin) ---------------------------------------------------------------------------------------------------------------
+# THE rule of ToutWAF versions in this script (the same in the control plane, the console, the publisher, install.ps1 and the release tools:
+# spec/version-vectors.json is the table they all pass, docs/release/VERSIONS.md explains it).
+#   [v] N.N.N [.N] [-pre-release]   N = 0 or 1-9 digits without leading zero; pre-release = dot-separated identifiers [0-9A-Za-z-] (numeric ones without
+#   leading zero, 41 characters at most); 0.6.1 and 0.6.1.0 are the SAME version (an absent fourth component is 0); a pre-release is below its release;
+#   0.6.1 < 0.6.1.1 < 0.6.2; numeric component by component, never lexical (no `sort -V`: it orders 0.6.1 below 0.6.1.0 and differs between systems).
+# _ver_split V LOOSE: sets _VC (four integers) and _VP (pre-release identifiers); returns 1 when V is not a version. LOOSE=1 also takes what the channel
+# may carry for the older fields ("2" for min_installer, "1.2", build metadata "+x", free-form pre-release text); LOOSE=0 is the strict format above.
+_ver_split() {
+  local LC_ALL=C v="${1-}" core pre="" id i
+  _VC=(0 0 0 0); _VP=()
+  v="${v#v}"
+  if [ "${2:-0}" = 1 ]; then v="${v%%+*}"; fi
+  case "$v" in *-*) core="${v%%-*}"; pre="${v#*-}"; [ -n "$pre" ] || return 1;; *) core="$v";; esac
+  if [ "${2:-0}" = 1 ]; then
+    [[ "$core" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]] || return 1
+    local -a c; IFS=. read -ra c <<<"$core"
+    for i in "${!c[@]}"; do _VC[i]=$((10#${c[i]})); done
+    if [ -n "$pre" ]; then IFS=. read -ra _VP <<<"$pre"; fi
+    return 0
+  fi
+  [[ "$core" =~ ^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})(\.(0|[1-9][0-9]{0,8}))?$ ]] || return 1
+  _VC=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[5]:-0}")
+  if [ -n "$pre" ]; then
+    [ "${#pre}" -le 41 ] || return 1
+    [[ "$pre" =~ ^[0-9A-Za-z][0-9A-Za-z-]*(\.[0-9A-Za-z][0-9A-Za-z-]*)*$ ]] || return 1
+    IFS=. read -ra _VP <<<"$pre"
+    for id in "${_VP[@]}"; do [[ "$id" =~ ^0[0-9]+$ ]] && return 1; done
+  fi
+  return 0
+}
+# ver_valid V: true when V is a ToutWAF version (strict format above; a leading "v" is dropped).
+ver_valid() { _ver_split "${1-}" 0; }
+# ver_canon V: prints the canonical spelling (no "v", no fourth component of 0: 0.6.1.0 -> 0.6.1); false when V is not a version.
+ver_canon() {
+  local out
+  _ver_split "${1-}" 0 || return 1
+  out="${_VC[0]}.${_VC[1]}.${_VC[2]}"; if [ "${_VC[3]}" != 0 ]; then out="$out.${_VC[3]}"; fi
+  if [ "${#_VP[@]}" -gt 0 ]; then local IFS=.; out="$out-${_VP[*]}"; fi
+  printf '%s' "$out"
+}
+# _ver_cmp A B LOOSE: prints -1, 0 or 1; returns 2 (prints nothing) when A or B is not a version.
+_ver_cmp() {
+  local LC_ALL=C i x y nx ny
+  local -a ac ap bc bp
+  _ver_split "${1-}" "${3:-0}" || return 2; ac=("${_VC[@]}"); ap=(${_VP[@]+"${_VP[@]}"})   # (the ${x[@]+...} form: an empty array is not "unbound" for bash < 4.4)
+  _ver_split "${2-}" "${3:-0}" || return 2; bc=("${_VC[@]}"); bp=(${_VP[@]+"${_VP[@]}"})
+  for i in 0 1 2 3; do
+    if [ "$((10#${ac[i]}))" -lt "$((10#${bc[i]}))" ]; then echo -1; return 0; fi
+    if [ "$((10#${ac[i]}))" -gt "$((10#${bc[i]}))" ]; then echo 1; return 0; fi
+  done
+  if [ "${#ap[@]}" = 0 ] && [ "${#bp[@]}" = 0 ]; then echo 0; return 0; fi
+  if [ "${#ap[@]}" = 0 ]; then echo 1; return 0; fi
+  if [ "${#bp[@]}" = 0 ]; then echo -1; return 0; fi
+  for ((i = 0; i < ${#ap[@]} && i < ${#bp[@]}; i++)); do
+    x="${ap[i]}"; y="${bp[i]}"
+    nx=0; ny=0; [[ "$x" =~ ^[0-9]+$ ]] && nx=1; [[ "$y" =~ ^[0-9]+$ ]] && ny=1
+    if [ "$nx$ny" = 11 ]; then   # two numbers: by value (leading zeros dropped, then length, then digits: no overflow)
+      x="${x#"${x%%[!0]*}"}"; y="${y#"${y%%[!0]*}"}"; x="${x:-0}"; y="${y:-0}"
+      if [ "${#x}" -lt "${#y}" ]; then echo -1; return 0; fi
+      if [ "${#x}" -gt "${#y}" ]; then echo 1; return 0; fi
+    elif [ "$nx" = 1 ]; then echo -1; return 0
+    elif [ "$ny" = 1 ]; then echo 1; return 0
+    fi
+    if [[ "$x" < "$y" ]]; then echo -1; return 0; fi
+    if [[ "$x" > "$y" ]]; then echo 1; return 0; fi
+  done
+  if [ "${#ap[@]}" -lt "${#bp[@]}" ]; then echo -1; return 0; fi
+  if [ "${#ap[@]}" -gt "${#bp[@]}" ]; then echo 1; return 0; fi
+  echo 0
+}
+# ver_cmp A B: prints -1, 0 or 1 for two versions of the strict format; returns 2 (and prints nothing) when either is not a version.
+ver_cmp() { _ver_cmp "${1-}" "${2-}" 0; }
+# semver_lt A B: true when A < B (pre-release < release; "-dev.N" compared numerically; 0.6.1 == 0.6.1.0). The loose reading of the fields channel.json carries
+# for older purposes ("2", "1.2", a "+build" suffix); anything that is not a version is never less than anything.
+semver_lt() { local r; r="$(_ver_cmp "${1-}" "${2-}" 1)" || return 1; [ "$r" = -1 ]; }
+# --- version rule (end) ------------------------------------------------------------------------------------------------------------------
+# update_state CUR_VERSION CUR_BUILD NEW_VERSION NEW_BUILD  ->  newer | rebuilt | older | same
+# THE rule (the same in the data plane, the control plane and the console): an update exists when the published version is newer, OR the versions
+# are equal and the published build differs from the installed one. An installed build that is unknown counts as different; a published build the
+# channel does not state cannot differ from anything.
+update_state() {
+  local cb nb; cb="$(clean_build "${2:-}")"; nb="$(clean_build "${4:-}")"
+  if semver_lt "$1" "$3"; then echo newer; return 0; fi
+  if semver_lt "$3" "$1"; then echo older; return 0; fi
+  if [ -n "$nb" ] && [ "$nb" != "$cb" ]; then echo rebuilt; return 0; fi
+  echo same
+}
+# channel.json (flat scalars + one array of flat objects + the "yanked" array); no jq needed
+CH_VERSION=""; CH_BUILD=""; CH_MIN=""; CH_JSON=""; CH_EMPTY=0; CH_QUERY=""
+ch_flat() { printf '%s' "$CH_JSON" | tr -d '\n\r'; }
+# the members of the TOP-LEVEL object only: nested arrays and objects (assets, yanked, a history of "releases" that carry their own "version" and "build") are dropped first
+ch_top() { ch_flat | sed -e 's/^[[:space:]]*{//' -e 's/}[[:space:]]*$//' -e ':a' -e 's/\[[^][{}]*\]//g' -e 's/{[^{}]*}//g' -e 't a'; }
+ch_str() { ch_top | grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n1 | sed 's/^[^:]*:[[:space:]]*"\(.*\)"$/\1/' || true; }   # the string value of a top-level key
+fetch_channel() {   # returns 1 when unreachable / not JSON / without a version (CH_EMPTY=1 then: a valid channel.json saying that nothing is published)
+  CH_EMPTY=0
+  if ! curl_s -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG"; then
+    # the primary source is unreachable: the GitHub copy of the same signed channel (not when a mirror or another repository was chosen)
+    [ -z "$BASE_URL" ] && [ -n "$SRC_FALLBACK" ] && [ "$SRC_ROOT" != "$SRC_FALLBACK" ] || return 1
+    SRC_ROOT="$SRC_FALLBACK"
+    curl_s -fsSL --retry 2 --connect-timeout 10 --max-time 30 -o "$TMP/channel.json" "$(repo_base)/channel.json$CH_QUERY" 2>>"$LOG" || return 1
+  fi
+  CH_JSON="$(cat "$TMP/channel.json")"
+  case "$CH_JSON" in *'{'*) ;; *) return 1;; esac
+  CH_VERSION="$(ch_str version | tr -d '[:space:]')"
+  CH_BUILD="$(clean_build "$(ch_str build)")"
+  CH_MIN="$(ch_flat | sed -n 's/.*"min_installer"[[:space:]]*:[[:space:]]*"\{0,1\}\([0-9.]*\).*/\1/p' | head -n1)"
+  # "version": "" (or no version at all) in a channel.json that names its channel: the channel exists and has nothing published yet (deploy/RELEASE-LAYOUT.md)
+  if [ -z "$CH_VERSION" ] && ch_flat | grep -q '"channel"[[:space:]]*:'; then CH_EMPTY=1; fi
+  [ -n "$CH_VERSION" ]
+}
+ch_yanked() { ch_flat | sed -n 's/.*"yanked"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' | grep -qF "\"${1#v}\""; }
+ch_asset_sha() {   # asset name -> sha256 from channel.json
+  ch_flat | grep -o '{[^{}]*}' | grep -F "\"name\"" | grep -F "\"$1\"" | head -n1 | sed -n 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F]*\)".*/\1/p' | tr 'A-F' 'a-f'
+}
+
+# ------------------------------------------------------------------------------------------------ addresses + panel data
+# urlhost ADDR: an IPv6 literal goes between brackets in a URL (https://[2001:db8::1]:9443/), a name or an IPv4 address does not
+urlhost() { case "$1" in \[*) printf '%s' "$1";; *:*) printf '[%s]' "$1";; *) printf '%s' "$1";; esac; }
+# hostport HOST PORT: host:port for a URL or a bracketed IPv6 literal
+hostport() { printf '%s:%s' "$(urlhost "$1")" "$2"; }
+# has_ipv6: the kernel has IPv6 (not disabled with ipv6.disable=1)
+has_ipv6() { [ -e /proc/net/if_inet6 ]; }
+# any_addr: the address the services listen on: [::] answers IPv6 AND IPv4 (dual stack) when the kernel has IPv6, else 0.0.0.0
+any_addr() { if has_ipv6 && [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 0)" != 1 ]; then printf '[::]'; else printf '0.0.0.0'; fi; }
+# local_ips6: the global IPv6 addresses of the machine (not link-local), without the temporary privacy addresses
+local_ips6() {
+  { if have ip; then ip -6 -o addr show scope global 2>/dev/null | grep -v -E 'temporary|deprecated' | awk '{print $4}' | cut -d/ -f1
+    fi; } | grep -E '^[0-9a-fA-F:]+$' | grep -F ':' | sort -u || true
+}
+# local_ips: IPv6 first, then IPv4
+local_ips() { { local_ips6; local_ips4; } | awk 'NF && !s[$0]++' || true; }
+local_ips4() {
+  { if have ip; then ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+    elif have hostname && hostname -I >/dev/null 2>&1; then hostname -I | tr ' ' '\n'
+    else awk '/32 host/ { print f } {f=$2}' /proc/net/fib_trie 2>/dev/null; fi; } | grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -v '^127\.' | sort -u || true
+}
+PUBLIC_IP=""
+detect_public_ip() {
+  if [ -n "$PUBLIC_HOST" ]; then PUBLIC_IP="$PUBLIC_HOST"; return 0; fi
+  [ "$STAGING" = 1 ] && return 0
+  local u ip
+  # IPv6 first (curl -6), then IPv4 (curl -4)
+  for u in https://api64.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+    ip="$(curl -6 -fsS --max-time 4 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^[0-9a-fA-F:]+$ && "$ip" == *:* ]]; then PUBLIC_IP="$ip"; return 0; fi
+  done
+  for u in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+    ip="$(curl -4 -fsS --max-time 4 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then PUBLIC_IP="$ip"; return 0; fi
+  done
+  return 0
+}
+
+# json_str KEY / json_raw KEY read flat scalars from $JSON
+JSON=""
+json_str() { printf '%s' "$JSON" | tr -d '\n' | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\(\(\\.\|[^"\\]\)*\)".*/\1/p' | head -n1 | sed 's/\\"/"/g; s/\\\\/\\/g'; }
+json_raw() { printf '%s' "$JSON" | tr -d '\n' | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*\([^,}"[:space:]]*\).*/\1/p' | head -n1; }
+BS_PATH=""; BS_USER=""; BS_PASS=""; BS_SETUP_TOKEN=""; BS_SETUP_PATH=""; BS_PORTS=""; BS_LINKS=""; BS_OK=0; BS_CREATED=0
+parse_bootstrap() {   # $JSON -> BS_*   (contract: docs/panel-access.md; secrets stay in shell variables, never in the log)
+  BS_PATH="$(json_str panel_path)"; BS_USER="$(json_str admin_user)"; BS_PASS="$(json_str admin_password)"
+  BS_SETUP_TOKEN="$(json_str setup_token)"; BS_SETUP_PATH="$(json_str setup_path)"
+  [ "$(json_raw created)" = true ] && BS_CREATED=1 || BS_CREATED=0
+  local lp; lp="$(json_raw listen_port)"; if [[ "$lp" =~ ^[0-9]+$ ]]; then CP_PORT="$lp"; fi
+  BS_PORTS="$(printf '%s' "$JSON" | tr -d '\n' | sed -n 's/.*"ports"[[:space:]]*:[[:space:]]*\[\(.*\)\].*/\1/p' | grep -o '{[^{}]*}' | while IFS= read -r o; do
+      pt="$(printf '%s' "$o" | sed -n 's/.*"port"[[:space:]]*:[[:space:]]*"\{0,1\}\([0-9]*\).*/\1/p')"
+      pr="$(printf '%s' "$o" | sed -n 's/.*"proto"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p')"
+      pu="$(printf '%s' "$o" | sed -n 's/.*"purpose"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      [ -n "$pt" ] && printf '%s|%s|%s\n' "$pt" "${pr:-tcp}" "$pu"; done || true)"
+  # --print-links: links[] = {kind: local|public, host, url}
+  BS_LINKS="$(printf '%s' "$JSON" | tr -d '\n' | sed -n 's/.*"links"[[:space:]]*:[[:space:]]*\[\(.*\)\][^]]*$/\1/p' | grep -o '{[^{}]*}' | while IFS= read -r o; do
+      k="$(printf '%s' "$o" | sed -n 's/.*"kind"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p')"
+      u="$(printf '%s' "$o" | sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      [ -n "$k" ] && [ -n "$u" ] && printf '%s|%s\n' "$k" "$u"; done || true)"
+  BS_PATH="${BS_PATH#/}"; BS_PATH="${BS_PATH%/}"
+  if [ -n "$BS_PATH" ]; then BS_OK=1; else BS_OK=0; fi
+  return 0
+}
+# toutwaf-cp offline command (always the real binary unless TOUTWAF_CP_BIN overrides it); never logs stdout (secrets)
+cp_offline() {   # args... ; stdout = the command's output, stderr -> installer log
+  local exe cfgargs=(); exe="$(cp_exe)"
+  [ -f "$(p "$CONF_DIR/toutwaf-cp.yaml")" ] && cfgargs=(--config "$(p "$CONF_DIR/toutwaf-cp.yaml")")
+  "$exe" "$1" "${@:2}" --data "$(p "$DATA_DIR")" "${cfgargs[@]}" 2>>"$LOG" </dev/null
+}
+# Contract (docs/panel-access.md):
+#   toutwaf-cp bootstrap --data DIR [--public-host H] [--private-host H] [--listen-port N] [--keep-token] --json
+#   toutwaf-cp bootstrap --print-links --data DIR [--setup-token T] --json
+# $1 = bootstrap | print-links ; sets JSON and BS_* ; returns 1 when the control plane has no usable `bootstrap` command.
+cp_bootstrap() {
+  local exe out rc=0; exe="$(cp_exe)"; JSON=""; BS_OK=0; BS_PASS=""; BS_SETUP_TOKEN=""; BS_SETUP_PATH=""; BS_CREATED=0
+  [ -x "$exe" ] || return 1
+  if [ "$1" = print-links ]; then out="$(cp_offline bootstrap --print-links --no-lookup --json)" || rc=$?
+  else
+    local args=(--listen-port "$CP_PORT" --json)
+    [ -n "$PUBLIC_HOST" ] && args+=(--public-host "$PUBLIC_HOST")
+    [ -n "$PRIVATE_HOST" ] && args+=(--private-host "$PRIVATE_HOST")
+    [ "$BS_KEEP_TOKEN" = 1 ] && args+=(--keep-token)
+    out="$(cp_offline bootstrap "${args[@]}")" || rc=$?
+  fi
+  if [ $rc -eq 0 ]; then
+    case "$out" in *'{'*) JSON="$out"; parse_bootstrap; [ "$STAGING" = 0 ] && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null; JSON=""; [ "$BS_OK" = 1 ] && return 0;; esac
+  fi
+  JSON=""
+  return 1
+}
+BS_KEEP_TOKEN=0
+# Is the data directory already bootstrapped (path + owner)? Read-only probe, so a re-run never mints a second account.
+cp_is_bootstrapped() { local o; o="$(cp_offline bootstrap --print-links --no-lookup --json)" && case "$o" in *'"panel_path"'*) true;; *) false;; esac; }
+# On a re-run / update the account and the path exist: keep a still-valid setup token, and never show a setup link for an
+# account that was not created now (the link would reopen the web setup of a configured installation).
+prepare_panel_run() {
+  PANEL_RAN=1; BS_KEEP_TOKEN=0
+  if cp_is_bootstrapped; then BS_KEEP_TOKEN=1; fi
+  cp_bootstrap bootstrap || { BS_OK=0; return 0; }
+  if [ "$BS_KEEP_TOKEN" = 1 ] && [ -n "$BS_SETUP_TOKEN" ] && [ -z "$BS_PASS" ]; then
+    cp_offline setup-link --revoke --json >/dev/null 2>&1 || true
+    BS_SETUP_TOKEN=""; BS_SETUP_PATH=""
+  fi
+  # the control plane's own list of console URLs (every up non-loopback IPv4 + the public host), secrets kept aside
+  local sp="$BS_PASS" st="$BS_SETUP_TOKEN" spp="$BS_SETUP_PATH" su="$BS_USER" scr="$BS_CREATED" sports="$BS_PORTS"
+  if cp_bootstrap print-links; then :; fi
+  BS_PASS="$sp"; BS_SETUP_TOKEN="$st"; BS_SETUP_PATH="$spp"; BS_USER="$su"; BS_CREATED="$scr"; BS_PORTS="$sports"; BS_OK=1
+  return 0
+}
+# --links / re-run without bootstrap: panel path + the real links; the user name comes from the account list
+cp_links() {
+  cp_bootstrap print-links || { BS_OK=0; return 0; }
+  BS_USER="$(cp_offline admin list --json | tr -d '\n' | sed -n 's/.*"username"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ all-in-one: link the local data plane
+# `all` = control plane + data plane on one machine, so nothing may be left to the administrator. The control plane (offline, on its own
+# database) mints a one-time enrolment token and writes THE single `control_plane:` block of toutwaf-dp.yaml: idempotent (an already linked
+# node is not touched, a duplicated block is merged, a stale token is replaced), validated by `toutwaf-dp check-config` before the file is
+# swapped, previous file kept when the new one is refused. Runs on install AND on update, which repairs installations made before this
+# existed (data plane left standalone: policy v1, sites answering HTTP 421). The token is never printed or logged.
+DP_LINK=""; DP_CFG_CHANGED=0
+link_local_dp() {
+  { [ "$COMPONENT" = all ] && [ -z "$CP_URL" ] && [ "$DRY_RUN" = 0 ]; } || return 0
+  local exe errf out rc=0 act chg blocks msg cfgargs=()
+  exe="$(cp_exe)"
+  if [ ! -x "$exe" ]; then DP_LINK=failed; warn "$(t dp_link_fail "$exe")"; warn "$(t dp_link_fail_hint)"; return 0; fi
+  [ -f "$(p "$CONF_DIR/toutwaf-cp.yaml")" ] && cfgargs=(--config "$(p "$CONF_DIR/toutwaf-cp.yaml")")
+  errf="$(mktemp 2>/dev/null || true)"; [ -n "$errf" ] || errf=/dev/null
+  [ "$STAGING" = 0 ] || cfgargs+=(--ca-file "$DATA_DIR/tls/console.crt")     # staged: the configuration keeps the logical (unprefixed) paths
+  # enroll-local opens the database (a write: it mints the enrolment token) while the running control plane may hold it: a log of gigabytes left
+  # by an earlier run is being merged, or an index is being built, and SQLite answers "database is locked (5) (SQLITE_BUSY)" after its 10 s of
+  # patience. That is a busy database, not a broken link: try again a few times (TOUTWAF_LINK_TRIES, TOUTWAF_LINK_PAUSE), only for that error;
+  # any other error, and the last busy one, are reported as before (never hidden).
+  local tries="${TOUTWAF_LINK_TRIES:-6}" pause="${TOUTWAF_LINK_PAUSE:-10}" attempt=1
+  while :; do
+    rc=0
+    out="$("$exe" enroll-local --dp-config "$(p "$CONF_DIR/toutwaf-dp.yaml")" --dp-bin "$(p "$BIN_DIR/toutwaf-dp")" --update-hook "$BIN_DIR/toutwaf-upgrade" \
+      --data "$(p "$DATA_DIR")" --dp-data-dir "$(p "$DATA_DIR")" ${cfgargs[@]+"${cfgargs[@]}"} --json 2>"$errf" </dev/null)" || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$attempt" -lt "$tries" ] && [ "$errf" != /dev/null ] && grep -qiE 'database is locked|SQLITE_BUSY' "$errf" 2>/dev/null; then
+      log "data plane link: the database is busy (attempt $attempt of $tries; the running control plane holds it), trying again in ${pause}s: $(tr '\n\t' '  ' <"$errf" | cut -c1-200)"
+      attempt=$((attempt + 1)); sleep "$pause"; continue
+    fi
+    break
+  done
+  [ "$attempt" -le 1 ] || log "data plane link: $attempt attempt(s), last status $rc"
+  if [ "$STAGING" = 0 ]; then chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; fi   # the offline run may have created database files as root
+  if [ "$STAGING" = 0 ] && have restorecon; then restorecon -RF "$CONF_DIR" >/dev/null 2>&1 || true; fi   # the new file gets the context of the directory (SELinux)
+  if [ "$errf" != /dev/null ]; then cat "$errf" >>"$LOG" 2>/dev/null; fi
+  if [ "$rc" -ne 0 ]; then
+    msg="$(tr '\n\t' '  ' <"$errf" 2>/dev/null | cut -c1-500)"; [ "$errf" = /dev/null ] || rm -f "$errf"
+    DP_LINK=failed; warn "$(t dp_link_fail "${msg:-toutwaf-cp enroll-local rc=$rc}")"; warn "$(t dp_link_fail_hint)"
+    if [ "$ACTION" = update ] && grep -q '^control_plane:' "$(p "$CONF_DIR/toutwaf-dp.yaml")" 2>/dev/null; then
+      info "the data plane was already linked to the console: its link is kept as it is, the update goes on"
+    fi
+    return 0
+  fi
+  [ "$errf" = /dev/null ] || rm -f "$errf"
+  JSON="$out"; act="$(json_str action)"; chg="$(json_raw changed)"; blocks="$(json_raw blocks_before)"; JSON=""
+  case "$act" in added|refreshed) DP_LINK=linked;; repaired) DP_LINK=repaired;; remote) DP_LINK=remote;; *) DP_LINK=same;; esac
+  if [[ "${blocks:-0}" =~ ^[0-9]+$ ]] && [ "${blocks:-0}" -gt 1 ] && [ "$chg" = true ]; then DP_LINK=repaired; fi   # duplicated blocks merged (whatever else changed)
+  [ "$chg" = true ] && DP_CFG_CHANGED=1      # a new control_plane block needs a restart of the data plane, not a reload
+  info "data plane link: $act (changed=$chg)"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ optional firewall module
+# "Also let ToutWAF manage this machine's firewall": switches the Firewall module on (setting modules.firewall.enabled) and nothing else. No rule
+# is loaded: the first change the administrator makes in the console goes through the trial (countdown, automatic rollback, anti-lockout guard).
+# Never blocking: a failure is a warning and the module can be switched on later in Settings > Modules.
+FW_MODULE_RESULT=""
+enable_firewall_module() {
+  [ "$FW_MODULE" = 1 ] || return 0
+  want_cp || return 0
+  [ "$DRY_RUN" = 0 ] || return 0      # (the step line already says what would be done)
+  local exe errf out msg rc=0 cfgargs=()
+  exe="$(cp_exe)"
+  if [ ! -x "$exe" ]; then FW_MODULE_RESULT=failed; warn "$(t fwmod_fail "$exe")"; return 0; fi
+  [ -f "$(p "$CONF_DIR/toutwaf-cp.yaml")" ] && cfgargs=(--config "$(p "$CONF_DIR/toutwaf-cp.yaml")")
+  errf="$(mktemp 2>/dev/null || true)"; [ -n "$errf" ] || errf=/dev/null
+  out="$("$exe" module enable firewall --data "$(p "$DATA_DIR")" ${cfgargs[@]+"${cfgargs[@]}"} --json 2>"$errf" </dev/null)" || rc=$?
+  if [ "$STAGING" = 0 ]; then chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; fi   # the offline run may have created database files as root
+  if [ "$errf" != /dev/null ]; then cat "$errf" >>"$LOG" 2>/dev/null; fi
+  if [ "$rc" -ne 0 ]; then
+    msg="$(tr '\n\t' '  ' <"$errf" 2>/dev/null | cut -c1-300)"; [ "$errf" = /dev/null ] || rm -f "$errf"
+    FW_MODULE_RESULT=failed; warn "$(t fwmod_fail "${msg:-toutwaf-cp module rc=$rc}")"
+    return 0
+  fi
+  [ "$errf" = /dev/null ] || rm -f "$errf"
+  FW_MODULE_RESULT=on; info "firewall module: enabled ($out)"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ optional ToutWAF Backup client
+# ed25519_check PEM MESSAGE SIGNATURE_B64_FILE: true when the signature (base64 of the raw 64 bytes) is valid for the message under that Ed25519 key.
+# openssl when it can verify Ed25519 (>= 3.0), else the embedded pure-Python verifier of the release check; neither: false (fail closed).
+ed25519_check() {
+  local pem="$1" msg="$2" sigb64="$3" py ok=1
+  tr -d '[:space:]' <"$sigb64" | base64 -d >"$TMP/bk-sig.bin" 2>/dev/null || return 1
+  if openssl_ed25519_ok; then
+    openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in "$msg" -sigfile "$TMP/bk-sig.bin" >>"$LOG" 2>&1 && ok=0
+    return "$ok"
+  fi
+  py="$(python3_bin)"
+  [ -n "$py" ] || return 1
+  ed25519_py "$TMP/bk-ed25519.py"
+  "$py" "$TMP/bk-ed25519.py" "$(pubkey_raw "$pem")" "$TMP/bk-sig.bin" "$msg" >>"$LOG" 2>&1 && ok=0
+  return "$ok"
+}
+# backup_client_pem: prints the path of the PEM public key to check the ToutWAF Backup release with, nothing when there is none
+backup_client_pem() {
+  local k="$BACKUP_CLIENT_PUBKEY" raw pem="$TMP/backup-release-pub.pem"
+  if [ -z "$k" ] && [ -r "$(p "$CONF_DIR/backup-release.pub")" ]; then k="$(p "$CONF_DIR/backup-release.pub")"; fi
+  [ -n "$k" ] || return 0
+  if [ -f "$k" ]; then raw="$(cat "$k")"; else raw="$k"; fi
+  case "$raw" in
+    *"BEGIN PUBLIC KEY"*) printf '%s\n' "$raw" >"$pem";;
+    *) printf '%s' "$raw" | tr -d '[:space:]' | grep -Eq '^[A-Za-z0-9+/]{43}=$' || return 0
+       { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$raw" | tr -d '[:space:]' | base64 -d; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$pem";;
+  esac
+  [ "$(pubkey_raw "$pem" | base64 -d 2>/dev/null | wc -c)" = 32 ] || return 0
+  printf '%s' "$pem"
+}
+# install_backup_client: never blocking (a warning, and the client can be installed later), never installs anything that did not verify.
+install_backup_client() {
+  [ "$BACKUP_CLIENT" = 1 ] || return 0
+  want_cp || return 0
+  [ "$DRY_RUN" = 0 ] || return 0
+  local base="${BACKUP_CLIENT_BASE%/}" pem want rel asset got ver cur yanked tag x
+  case "$base" in https://*|file://*|http://127.0.0.1*|http://localhost*) ;; *) BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "--backup-client-base-url must be https://")"; return 0;; esac
+  case "$ARCH" in amd64|arm64) ;; *) BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "no ToutWAF Backup client for $ARCH")"; return 0;; esac
+  pem="$(backup_client_pem)"
+  if [ -z "$pem" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_nokey)"; return 0; fi
+  mkdir -p "$TMP/bkc" || return 0
+  # release 0.2.0 of ToutWAF Backup: one pointer per channel (channels/stable.json); the old channel.json stays for older installers (it points at 0.1.x, signed with the previous key)
+  fetch "$base/channels/stable.json" "$TMP/bkc/channel.json" 2>/dev/null \
+    || fetch "$base/channel.json" "$TMP/bkc/channel.json" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download $base/channels/stable.json or $base/channel.json")"; return 0; }
+  ver="$BACKUP_CLIENT_VERSION"
+  [ -n "$ver" ] || ver="$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]*)".*/\1/p' "$TMP/bkc/channel.json" | head -n1)"
+  if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$'; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "no valid version in the channel")"; return 0; fi
+  yanked="$(sed -nE 's/^[[:space:]]*"yanked":[[:space:]]*\[(.*)\].*/\1/p' "$TMP/bkc/channel.json" | head -n1)"
+  if printf '%s' "$yanked" | grep -q "\"$ver\"" && [ "$FORCE" = 0 ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "version $ver was withdrawn")"; return 0; fi
+  rel="$base/releases/$ver"; asset="toutwaf-backup-linux-$ARCH.tar.gz"
+  fetch "$rel/SHA256SUMS" "$TMP/bkc/SHA256SUMS" && fetch "$rel/SHA256SUMS.sig" "$TMP/bkc/SHA256SUMS.sig" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download the signed list of $ver")"; return 0; }
+  if ! ed25519_check "$pem" "$TMP/bkc/SHA256SUMS" "$TMP/bkc/SHA256SUMS.sig"; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_badsig)"; return 0; fi
+  want="$(awk -v a="$asset" '$2==a || $2=="*"a {print $1; exit}' "$TMP/bkc/SHA256SUMS" | tr 'A-F' 'a-f')"
+  if ! printf '%s' "$want" | grep -Eq '^[0-9a-f]{64}$'; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "$asset is not in the signed list")"; return 0; fi
+  fetch "$rel/$asset" "$TMP/bkc/$asset" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot download $asset")"; return 0; }
+  got="$(sha256sum "$TMP/bkc/$asset" | awk '{print $1}')"
+  if [ "$got" != "$want" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "SHA-256 of $asset does not match the signed list")"; return 0; fi
+  mkdir -p "$TMP/bkc/x" && tar -xzf "$TMP/bkc/$asset" -C "$TMP/bkc/x" --no-same-owner 2>>"$LOG" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "the archive cannot be read")"; return 0; }
+  x="$TMP/bkc/x/toutwaf-backup-linux-$ARCH/toutwaf-backup"
+  if [ ! -f "$x" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "the archive holds no toutwaf-backup")"; return 0; fi
+  chmod 0755 "$x"
+  tag="$("$x" engine describe 2>/dev/null | sed -nE 's/.*"contract":[[:space:]]*"([^"]*)".*/\1/p' | head -n1)"
+  if [ "$tag" != "toutwaf-backup-engine/1" ]; then BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "the client speaks '${tag:-nothing}', this ToutWAF drives toutwaf-backup-engine/1")"; return 0; fi
+  mkdir -p "$(p "$BIN_DIR")"
+  cur="$(p "$BIN_DIR/toutwaf-backup")"
+  if [ -f "$cur" ]; then cp -p "$cur" "$cur.prev" 2>/dev/null || true; fi
+  install -m 0755 "$x" "$cur.new.$$" && mv -f "$cur.new.$$" "$cur" || { BACKUP_CLIENT_RESULT=failed; warn "$(t bkc_fail "cannot write $cur")"; return 0; }
+  BACKUP_CLIENT_RESULT=on; info "ToutWAF Backup client $ver installed in $cur (signature and SHA-256 verified)"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ summary
+SUMMARY_PORTS=""
+build_ports() {   # lines: port|proto|purpose   (deduplicated by port/proto)
+  SUMMARY_PORTS=""
+  if want_cp; then
+    if [ -n "$BS_PORTS" ]; then
+      # the control plane names its ports; our localized purposes win for the well-known ones. 80/443 are the data plane's: added below
+      # from its configured ports when one is installed here (otherwise they belong to the nodes).
+      SUMMARY_PORTS="$(printf '%s\n' "$BS_PORTS" | awk -F'|' -v cp="$CP_PORT" -v pc="$(t p_console)" -v pd="$(t p_dpapi)" 'BEGIN{OFS="|"} ($1==80||$1==443){next} $1==cp{$3=pc} $1==9444{$3=pd} {print}')"$'\n'
+    else SUMMARY_PORTS="$CP_PORT|tcp|$(t p_console)"$'\n'; fi
+    printf '%s' "$SUMMARY_PORTS" | grep -q '^9444|' || SUMMARY_PORTS+="9444|tcp|$(t p_dpapi)"$'\n'
+  fi
+  if want_dp; then SUMMARY_PORTS+="$HTTP_PORT|tcp|$(t p_http)"$'\n'"$HTTPS_PORT|tcp|$(t p_https)"$'\n'; fi
+  if want_dp && [ "$(http3_on)" = 1 ]; then SUMMARY_PORTS+="$HTTPS_PORT|udp|HTTP/3 (QUIC)"$'\n'; fi
+  if want_cp && [ "$(dns_server_on)" = 1 ]; then SUMMARY_PORTS+="53|udp|$(t p_dns)"$'\n'"53|tcp|$(t p_dns)"$'\n'; fi
+  SUMMARY_PORTS="$(printf '%s' "$SUMMARY_PORTS" | awk -F'|' 'NF>2 && !seen[$1 "/" $2]++')"$'\n'
+  return 0
+}
+panel_urls() {   # one "label|url" per line: the control plane's links[] when known, else our own address detection
+  local h k u path="${BS_PATH:+$BS_PATH/}" seen=" "
+  if [ -n "$BS_LINKS" ]; then
+    while IFS='|' read -r k u; do
+      [ -n "$u" ] || continue
+      case "$k" in public) printf '%s|%s\n' "$(t sum_public)" "$u";; *) printf '%s|%s\n' "$(t sum_local)" "$u";; esac
+      seen+="$u "
+    done <<<"$BS_LINKS"
+  else
+    while IFS= read -r h; do if [ -n "$h" ]; then printf '%s|https://%s/%s\n' "$(t sum_local)" "$(hostport "$h" "$CP_PORT")" "$path"; fi; done < <(local_ips)
+  fi
+  if [ -n "$PUBLIC_IP" ]; then
+    u="https://$(hostport "$PUBLIC_IP" "$CP_PORT")/$path"
+    case "$seen" in *" $u "*) ;; *) printf '%s|%s\n' "$(t sum_public)" "$u";; esac
+  fi
+  return 0
+}
+setup_urls() {   # one "label|url" per line: the one-time setup link on every local IPv4 and on the public address
+  [ -n "$BS_SETUP_TOKEN" ] || return 0      # no token = setup already completed, the link would be dead
+  local h sp="$BS_SETUP_PATH"
+  if [ -z "$sp" ]; then sp="/${BS_PATH:+$BS_PATH/}setup"; fi
+  case "$sp" in /*) ;; *) sp="/$sp";; esac
+  if [[ "$sp" != *"$BS_SETUP_TOKEN"* ]]; then case "$sp" in *\?*) sp="$sp&token=$BS_SETUP_TOKEN";; *) sp="$sp?token=$BS_SETUP_TOKEN";; esac; fi
+  while IFS= read -r h; do [ -n "$h" ] && printf '%s|https://%s%s\n' "$(t sum_local)" "$(hostport "$h" "$CP_PORT")" "$sp"; done < <(local_ips)
+  if [ -n "$PUBLIC_IP" ]; then printf '%s|https://%s%s\n' "$(t sum_public)" "$(hostport "$PUBLIC_IP" "$CP_PORT")" "$sp"
+  elif [ -z "$(local_ips)" ]; then printf '%s|https://%s%s\n' "$(t sum_local)" "$(hostport "$(fqdn)" "$CP_PORT")" "$sp"; fi
+  return 0
+}
+setup_url() { setup_urls | head -n1 | cut -d'|' -f2; }
+
+# render_summary tty|plain
+render_summary() {
+  local mode="$1" lab url pt pr pu hb="" he=""
+  if [ "$mode" = tty ]; then hb="$B"; he="$R"; fi
+  hdr() { if [ "$mode" = tty ]; then printf '%s%s%s %s%s%s %s%s\n' "$ACC" "$TL" "$H" "$B" "$1" "$R$ACC" "$(frame_fill "$1")" "$R"; else printf '== %s\n' "$1"; fi; }
+  row() { if [ "$mode" = tty ]; then printf '%s%s%s %s\n' "$ACC" "$V" "$R" "$1"; else printf '   %s\n' "$1"; fi; }
+  endb() { if [ "$mode" = tty ]; then printf '%s%s%s%s\n' "$ACC" "$BL" "$(rule $((FRAME_W - 1)))" "$R"; fi; echo; }
+  echo
+  if want_cp; then
+    hdr "$(t sum_title) - $(t sum_panel)"
+    if [ "$BS_OK" = 0 ]; then row "$(paint "$YLW" "$(t sum_fallback)")"; fi
+    while IFS='|' read -r lab url; do if [ -n "$url" ]; then row "$lab: $hb$url$he"; fi; done < <(panel_urls)
+    if [ -z "$PUBLIC_IP" ]; then row "$(paint "$YLW" "$(t sum_public_unknown)")"; fi
+    row "$D$(t sum_tls_note)$R"
+    endb
+    if [ "$BS_OK" = 1 ]; then
+      hdr "$(t sum_admin)"
+      if [ -n "$BS_USER" ]; then row "$(t sum_user): $hb$BS_USER$he"; fi
+      if [ -n "$BS_PASS" ]; then row "$(t sum_password): $hb$BS_PASS$he   ($(t sum_pw_once))"
+      else row "$(t sum_password): $(t sum_pw_unchanged "${BS_USER:-NAME}")"; fi
+      endb
+      hdr "$(t sum_setup)"
+      local n=0
+      while IFS='|' read -r lab url; do if [ -n "$url" ]; then row "$lab: $hb$url$he"; n=1; fi; done < <(setup_urls)
+      if [ "$n" = 1 ]; then row "$D$(t sum_setup_note)$R"; else row "$(t sum_setup_none)"; fi
+      endb
+    fi
+  fi
+  if [ -n "$COMPAT_LINE" ]; then hdr "$(t sum_compat)"; row "$COMPAT_LINE"; endb; fi
+  if [ -n "$SELINUX_LINE" ]; then hdr "SELinux"; row "$SELINUX_LINE"; endb; fi
+  build_ports
+  hdr "$(t sum_ports)"
+  while IFS='|' read -r pt pr pu; do if [ -n "$pt" ]; then row "$hb$pt/$pr$he  $pu"; fi; done <<<"$SUMMARY_PORTS"
+  row ""
+  row "$(t sum_cmds):"
+  row "  firewalld: $(printf '%s' "$SUMMARY_PORTS" | awk -F'|' '$1!=9444 && NF>2{printf "firewall-cmd --permanent --add-port=%s/%s && ", $1, $2}')firewall-cmd --reload"
+  row "  ufw:       $(printf '%s' "$SUMMARY_PORTS" | awk -F'|' '$1!=9444 && NF>2{printf "ufw allow %s/%s; ", $1, $2}' | sed 's/; $//')"
+  if printf '%s' "$SUMMARY_PORTS" | grep -q '^9444|'; then
+    row "  $(t p_dpapi_only)"
+    row "    firewall-cmd --permanent --add-rich-rule='rule family=\"ipv4\" source address=\"<DP_IP>/32\" port port=\"9444\" protocol=\"tcp\" accept'"
+    row "    ufw allow from <DP_IP> to any port 9444 proto tcp"
+  fi
+  row "$(paint "$YLW" "$(t sum_cloud)")"
+  endb
+  if want_dp && want_cp && [ -z "$CP_URL" ]; then
+    case "$DP_LINK" in
+      linked) say "  $(paint "$GRN" "$OKM") $(t dp_link_ok)"; echo;;
+      repaired) say "  $(paint "$GRN" "$OKM") $(t dp_link_fixed)"; echo;;
+      same) say "  $(paint "$GRN" "$OKM") $(t dp_link_same)"; echo;;
+      remote) say "  $(t dp_link_remote)"; echo;;
+      failed) say "  $(paint "$YLW" "$WRM") $(t dp_link_fail_hint)"; echo;;
+    esac
+  fi
+  return 0
+}
+
+write_summary_file() {
+  [ "$STAGING" = 1 ] && return 0
+  local f; f="$(p "$CONF_DIR/INSTALL-SUMMARY.txt")"
+  [ -d "$(dirname "$f")" ] || return 0
+  ( umask 077; { printf 'ToutWAF %s - %s\n' "$(t sum_title)" "$(date -u +%FT%TZ)"; render_summary plain; } >"$f" ) 2>/dev/null || return 0
+  chmod 0600 "$f"; chown root:root "$f" 2>/dev/null || true
+  say "  $(t sum_file "$f")"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ status / links
+cmd_status() {
+  local rc=0 s u pt code
+  banner; box_top "$(t st_title)"
+  detect_installed; load_existing_ports
+  if [ "$INST_DP$INST_CP" = 00 ]; then box_line "$(t state_none)"; box_bottom; return 1; fi
+  [ "$INST_DP" = 1 ] && box_line "toutwaf-dp $(installed_label "$(p "$BIN_DIR/toutwaf-dp")")"
+  [ "$INST_CP" = 1 ] && box_line "toutwaf-cp $(installed_label "$(p "$BIN_DIR/toutwaf-cp")")"
+  box_line "$(t st_channel "$CHANNEL") ($(channel_branch))"
+  if [ "$INST_CP" = 1 ]; then
+    if ls "$(p "$DATA_DIR")"/agent-dist/toutwaf-agent-windows-*.exe >/dev/null 2>&1 || { [ "$AV_OFFERED" = 1 ] && ls "$(p "$DATA_DIR")"/av-dist/toutwaf-av-* >/dev/null 2>&1; }; then box_line "$(t "$(extras_key st_extras_ok)")"
+    else box_line "$(paint "$YLW" "$WRM $(t "$(extras_key st_extras_none)" "sudo bash install.sh --extras-only")")"; fi
+  fi
+  if [ "$DRY_RUN" = 0 ]; then
+    local frc=0; fetch_channel 2>/dev/null || frc=$?
+    if [ "$frc" = 0 ]; then
+      local cbin curv curb; cbin="$(p "$BIN_DIR/toutwaf-$([ "$INST_DP" = 1 ] && echo dp || echo cp)")"
+      curv="$(installed_version "$cbin")"; curb="$(inst_build "$cbin" "$curv")"
+      case "$([ -n "$curv" ] && update_state "$curv" "$curb" "$CH_VERSION" "$CH_BUILD" || echo same)" in
+        newer) box_line "$(paint "$YLW" "$WRM $(t st_latest "$(ver_label "$CH_VERSION" "$CH_BUILD")")  -  $(t st_newer)")";;
+        rebuilt) box_line "$(paint "$YLW" "$WRM $(t st_latest "$(ver_label "$CH_VERSION" "$CH_BUILD")")  -  $(t st_newbuild "--update")")";;
+        *) box_line "$(t st_latest "$(ver_label "$CH_VERSION" "$CH_BUILD")")";;
+      esac
+    elif [ "$CH_EMPTY" = 1 ]; then
+      box_line "$(t st_nochannel)"
+    fi
+  fi
+  for u in $([ "$INST_DP" = 1 ] && echo toutwaf-dp) $([ "$INST_CP" = 1 ] && echo toutwaf-cp); do
+    if [ "$HAS_SYSTEMD" = 1 ]; then
+      if systemctl is-active --quiet "$u"; then s="$(paint "$GRN" "$OKM $(t st_active)")"; else s="$(paint "$RED" "$ERM $(t st_inactive)")"; rc=1; fi
+      box_line "$u: $s ($(systemctl is-enabled "$u" 2>/dev/null || echo disabled))"
+    fi
+  done
+  if [ "$INST_DP" = 1 ]; then
+    for pt in "$HTTP_PORT" "$HTTPS_PORT" 9101; do
+      if port_listening "$pt"; then box_line "$pt/tcp: $(paint "$GRN" "$OKM $(t st_listening)")"; else box_line "$pt/tcp: $(paint "$RED" "$ERM $(t st_closed)")"; rc=1; fi
+    done
+    if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:9101/healthz 2>/dev/null; then box_line "http://127.0.0.1:9101/healthz: $(paint "$GRN" "$OKM $(t st_healthy)")"
+    else box_line "http://127.0.0.1:9101/healthz: $(paint "$RED" "$ERM $(t st_unhealthy)")"; rc=1; fi
+  fi
+  if [ "$INST_CP" = 1 ]; then
+    for pt in "$CP_PORT" 9444; do
+      if port_listening "$pt"; then box_line "$pt/tcp: $(paint "$GRN" "$OKM $(t st_listening)")"; else box_line "$pt/tcp: $(paint "$RED" "$ERM $(t st_closed)")"; rc=1; fi
+    done
+    # /healthz is a machine endpoint: it needs no panel path and a probe of "/" would count as a guessing attempt (lockout)
+    code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 3 "https://127.0.0.1:$CP_PORT/healthz" 2>/dev/null || true)"
+    if [ "$code" = 200 ]; then box_line "https://127.0.0.1:$CP_PORT/healthz (HTTP $code): $(paint "$GRN" "$OKM $(t st_healthy)")"
+    else box_line "https://127.0.0.1:$CP_PORT/healthz: $(paint "$RED" "$ERM $(t st_unhealthy)")"; rc=1; fi
+  fi
+  box_bottom
+  return $rc
+}
+
+cmd_links() {
+  banner; detect_installed; load_existing_ports
+  if [ "$INST_CP" = 0 ]; then say "  $(t state_none)"; return 1; fi
+  component_from_installed; detect_public_ip
+  cp_links
+  render_summary tty
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ uninstall
+FW_CLOSED=0
+cmd_uninstall() {
+  local a s b l
+  banner; box_top "$(t un_title)"; box_bottom
+  if interactive; then
+    ask_yn a "$(t q_confirm_un)" 0; [ "$a" = 1 ] || { say "  $(t aborted)"; exit 0; }
+    ask_yn PURGE "$(t q_purge)" 0
+  elif [ "$PURGE" = 1 ] && [ "$ASSUME_YES" = 0 ] && [ "$ACCEPT_DEFAULTS" = 0 ] && [ -n "$TTY_DEV" ]; then
+    ask_yn a "$(t q_purge)" 0; [ "$a" = 1 ] || die "$(t aborted)"
+  fi
+  detect_installed; load_existing_ports
+  # the activation of the common licence (key TP-...) is freed at the licence site while the console still runs; best effort, never blocks
+  if [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ] && [ -x "$BIN_DIR/toutwafctl" ]; then timeout 30 "$BIN_DIR/toutwafctl" license deactivate --quiet >>"$LOG" 2>&1 || true; fi
+  # firewall rules added by ToutWAF go first (the helper remembers exactly what it added); then the helper itself
+  if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-blocklist" ]; then run "$BIN_DIR/toutwaf-blocklist" clear >>"$LOG" 2>&1 || true; fi
+  if [ "$STAGING" = 0 ] && [ -x "$BIN_DIR/toutwaf-firewall" ]; then run "$BIN_DIR/toutwaf-firewall" close >>"$LOG" 2>&1 || true; FW_CLOSED=1; fi
+  dns_server_revert quiet   # the stub resolver and the port 53 rules this installer changed for the DNS server of the console
+  for s in toutwaf-upgrade.path toutwaf-upgrade.service toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-firewall.service toutwaf-blocklist.path toutwaf-blocklist.service toutwaf-vpn.path toutwaf-vpn.service toutwaf-fw.path toutwaf-fw.service toutwaf-fw-boot.service toutwaf-netif-boot.service toutwaf-jobs.path toutwaf-jobs.service toutwaf-time.path toutwaf-time.service toutwaf-sysupdate.path toutwaf-sysupdate.service toutwaf-relay.path toutwaf-relay.service toutwaf-cloudlink.service toutwaf-dp.service toutwaf-cp.service; do
+    if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl disable --now "$s" >>"$LOG" 2>&1 || true; fi
+    run rm -f "$(p /etc/systemd/system/$s)"
+  done
+  if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl stop toutwaf-upgrade-rollback.timer toutwaf-upgrade-rollback.service >>"$LOG" 2>&1 || true; fi   # transient units of an update in progress
+  if [ "$HAS_SYSTEMD" = 1 ]; then run systemctl daemon-reload; fi
+  for b in toutwaf-dp toutwaf-cp toutwafctl toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-sysupdate toutwaf-relay toutwaf-cloudlink toutwaf-install; do run rm -f "$(p "$BIN_DIR/$b")" "$(p "$BIN_DIR/$b.prev")"; done
+  run rm -f "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"
+  for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-sysupdate toutwaf-relay; do
+    for d in /usr/local/bin "$(secure_link_dir)"; do
+      [ -n "$d" ] || continue
+      l="$(p "$d/$b")"; if [ -L "$l" ] && [ "$(readlink "$l")" = "$BIN_DIR/$b" ]; then run rm -f "$l"; fi
+    done
+  done
+  run rm -f "$(p "$CONF_DIR/firewall.conf")" "$(p "$CONF_DIR/firewall.managed")"
+  if [ "$STAGING" = 0 ] && [ "${FW_CLOSED:-0}" = 0 ] && firewalld_running; then   # installation without the helper (older versions)
+    run firewall-cmd --permanent --remove-service=toutwaf-dp >/dev/null 2>&1 || true
+    run firewall-cmd --permanent --remove-port="$CP_PORT/tcp" >/dev/null 2>&1 || true
+    run firewall-cmd --reload >/dev/null 2>&1 || true
+  fi
+  selinux_remove
+  if [ "$PURGE" = 1 ]; then
+    run rm -rf "$(p "$CONF_DIR")" "$(p "$DATA_DIR")" "$(p "$LOG_DIR")" "$(p "${DATA_DIR}-upgrade")"   # the last one holds copies of the database kept by the update helper: only --purge removes it
+    if [ "$LAYOUT" = home ]; then rmdir "$(p "$BIN_DIR")" "$(p "$HOME_DIR")" 2>/dev/null || true; fi
+    run rm -f "$LAYOUT_FILE"   # only when empty: the parent directory and foreign content stay
+    if [ "$STAGING" = 0 ] && have userdel; then run userdel "$SVC_USER" >/dev/null 2>&1 || true; fi
+    say "  $(paint "$GRN" "$OKM") $(t un_purged)"
+  else
+    say "  $(paint "$GRN" "$OKM") $(t un_kept "$CONF_DIR" "$DATA_DIR")"
+  fi
+  say "  $(t "done")"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ prerequisites
+# dnf and yum wait for ever for a package manager that holds their lock ("Waiting for process with pid N to finish"): no mirror, no time limit,
+# nothing on the screen of the console that asked for the installation. pkg_lock_holder names the holder (empty when there is none);
+# pkg_wait_lock waits for it, for TOUTWAF_PKG_LOCK_WAIT seconds at most (default 600), says whom it waits for, and fails with a message that
+# tells what to look at instead of leaving the installation (and the root helper that runs it) hanging.
+pkg_lock_holder() {
+  local f pid; local -a locks=(/var/cache/dnf/metadata_lock.pid /var/run/yum.pid /run/yum.pid)   # (an array: the IFS of this script is not blank)
+  [ -z "${TOUTWAF_TEST_PKG_LOCKS:-}" ] || IFS=' ' read -ra locks <<<"$TOUTWAF_TEST_PKG_LOCKS"   # (the variable is a test hook)
+  for f in "${locks[@]}"; do
+    [ -r "$f" ] || continue
+    pid="$(tr -dc '0-9' <"$f" 2>/dev/null | head -c 10)"
+    if [ -n "$pid" ] && [ "$pid" != "$$" ] && [ -d "/proc/$pid" ]; then printf '%s' "$pid"; return 0; fi
+  done
+  return 1
+}
+pkg_wait_lock() {
+  local max="${TOUTWAF_PKG_LOCK_WAIT:-600}" t0="$SECONDS" pid waited=0 said=-1000 who
+  [ "$DRY_RUN" = 0 ] || return 0
+  while pid="$(pkg_lock_holder)"; do
+    waited=$((SECONDS - t0))
+    who="$(ps -o pid=,etime=,args= -p "$pid" 2>/dev/null | head -n1 | sed 's/^ *//')"
+    if [ "$waited" -ge "$max" ]; then
+      warn "the package manager is busy: process $pid has held its lock for more than $waited s (${who:-gone}); wait for it to end, or stop it, then run this again"
+      return 1
+    fi
+    if [ $((waited - said)) -ge 30 ]; then
+      said="$waited"; info "waiting for the package manager lock held by process $pid (${who:-?}); $waited s so far, giving up after $max s"
+    fi
+    sleep "${TOUTWAF_PKG_LOCK_POLL:-3}"
+  done
+  return 0
+}
+
+# pkg_install PM pkg...: non-interactive install with the native package manager (never a partial system upgrade)
+pkg_install() {
+  local pm="$1" out; shift
+  mirror_setup || true   # ToutWAF's mirror first, the distribution's repositories as fallback (once per run)
+  case "$pm" in dnf|yum) pkg_wait_lock || return 1;; esac
+  case "$pm" in
+    dnf) run dnf "${MIRROR_DNF_OPTS[@]+"${MIRROR_DNF_OPTS[@]}"}" install -y "$@";;
+    yum) run yum "${MIRROR_DNF_OPTS[@]+"${MIRROR_DNF_OPTS[@]}"}" install -y "$@";;
+    apt)   # another apt / dpkg (unattended-upgrades, cloud-init) may hold the lock for a while: wait for it, and try once more after a failure
+      local try=1 rc
+      while :; do
+        run apt-get -o DPkg::Lock::Timeout=300 update -qq || true   # a repository that is unhappy is not ours to fix: the install tells
+        rc=0; DEBIAN_FRONTEND=noninteractive run apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends "$@" || rc=$?
+        [ "$rc" = 0 ] && return 0
+        [ "$try" -ge 2 ] && return "$rc"
+        try=$((try + 1)); log "apt-get failed (rc $rc): trying once more"; sleep "${TOUTWAF_PKG_RETRY_DELAY:-15}"
+      done;;
+    zypper) run zypper --non-interactive install --no-recommends "$@";;
+    pacman)
+      # never "pacman -Sy <pkg>": a partial upgrade breaks Arch. The package databases must already be synchronised.
+      if [ "$DRY_RUN" = 1 ]; then run pacman -S --needed --noconfirm "$@"; return 0; fi
+      if out="$(pacman -S --needed --noconfirm "$@" 2>&1 </dev/null)"; then printf '%s\n' "$out"; return 0; fi
+      printf '%s\n' "$out"
+      case "$out" in
+        *[Ll]andlock*|*"restricting filesystem access"*)   # kernel / container without Landlock: pacman 7 cannot sandbox its downloads
+          log "pacman sandbox (Landlock) unavailable here: retrying with --disable-sandbox"; pacman -S --needed --noconfirm --disable-sandbox "$@" </dev/null;;
+        *"target not found"*|*"failed retrieving file"*|*"could not resolve"*) warn "$(t cp_prereq_arch)"; return 1;;
+        *) return 1;;
+      esac;;
+    *) return 1;;
+  esac
+}
+
+install_pkgs() {
+  [ "$STAGING" = 1 ] && return 0
+  local fam="${FAMILY:-${FAMILY_GUESS:-}}" pm="" missing=() optional=() n
+  [ -n "$fam" ] || die "cannot install prerequisites automatically: no known package manager (dnf, yum, apt-get, zypper, pacman); install curl, tar, coreutils and libcap tools, then re-run"
+  need() { n="$(pf_pkg "$fam" "$1")"; if [ -n "$n" ] && [ "$n" != "-" ]; then missing+=("$n"); fi; return 0; }
+  have curl || need curl; have tar || need tar; have gzip || need gzip; have sha256sum || need coreutils; have awk || need awk
+  if [ -z "$TARBALL" ]; then have openssl || need openssl; fi   # release signature (Ed25519)
+  have setcap || need libcap
+  [ -d /etc/ssl/certs ] || [ -d /etc/pki/tls/certs ] || need ca
+  # SELinux python utilities (semanage), only when SELinux is on and the family has them
+  if [ "$NO_SELINUX" = 0 ] && have getenforce && [ "$(getenforce 2>/dev/null)" != "Disabled" ] && ! have semanage; then need selinux; fi
+  # logrotate is optional: without it the log files simply are not rotated
+  if ! have logrotate; then n="$(pf_pkg "$fam" logrotate)"; if [ -n "$n" ] && [ "$n" != "-" ]; then optional+=("$n"); fi; fi
+  [ ${#missing[@]} -gt 0 ] || [ ${#optional[@]} -gt 0 ] || return 0
+  # package manager: the family's, falling back to whatever is installed
+  case "$(pf_fam "$fam" 3)" in
+    dnf) if have dnf; then pm=dnf; elif have yum; then pm=yum; fi;;
+    apt) have apt-get && pm=apt;;
+    zypper) have zypper && pm=zypper;;
+    pacman) have pacman && pm=pacman;;
+  esac
+  if [ -z "$pm" ]; then
+    if have dnf; then pm=dnf; elif have yum; then pm=yum; elif have apt-get; then pm=apt; elif have zypper; then pm=zypper; elif have pacman; then pm=pacman; fi
+  fi
+  if [ ${#missing[@]} -gt 0 ]; then
+    [ -n "$pm" ] || die "cannot install prerequisites automatically ($(jn "${missing[@]}")); install them and re-run"
+    log "Installing prerequisites with $pm: $(jn "${missing[@]}")"
+    pkg_install "$pm" "${missing[@]}" || die "installing the prerequisites failed ($(jn "${missing[@]}")); install them and re-run"
+  fi
+  if [ ${#optional[@]} -gt 0 ] && [ -n "$pm" ]; then
+    log "Installing optional packages with $pm: $(jn "${optional[@]}")"
+    pkg_install "$pm" "${optional[@]}" || warn "optional package(s) not installed ($(jn "${optional[@]}")): log rotation will not run"
+  fi
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ fetch
+# curl_s: curl that keeps a download which started on https on https: a redirect to plain http is refused (curl -L follows it by default)
+curl_s() { local a pr=(); for a in "$@"; do case "$a" in https://*) pr=(--proto-redir "=https"); break;; esac; done; curl "${pr[@]+"${pr[@]}"}" "$@"; }
+fetch() { curl_s -fsSL --retry 3 --connect-timeout 15 -o "$2" "$1"; }
+
+# Release signature trust anchor. It lives HERE (in the installer you run), never in channel.json: the copy of the public key that
+# channel.json advertises is informational and must not be trusted. Overridden by TOUTWAF_RELEASE_PUBKEY, then by $CONF_DIR/release.pub.
+# RELEASE_PUBKEY_ID = first 16 hex chars of sha256(raw public key), same as publisher/internal/sign Fingerprint (checked by a test).
+RELEASE_PUBKEY_DEFAULT='gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0='
+RELEASE_PUBKEY_ID='3fc61b30f128ff14'
+
+# release_pubkey: prints the path of a PEM public key (Ed25519): TOUTWAF_RELEASE_PUBKEY, else $CONF_DIR/release.pub, else the built-in key
+release_pubkey() {
+  local k="${TOUTWAF_RELEASE_PUBKEY:-}" raw pem="$TMP/release-pub.pem"
+  if [ -z "$k" ] && [ -r "$(p "$CONF_DIR/release.pub")" ]; then k="$(p "$CONF_DIR/release.pub")"; fi
+  if [ -z "$k" ]; then k="$RELEASE_PUBKEY_DEFAULT"; fi
+  if [ -f "$k" ]; then raw="$(cat "$k")"; else raw="$k"; fi
+  case "$raw" in
+    *"BEGIN PUBLIC KEY"*) printf '%s\n' "$raw" >"$pem";;
+    *) { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$raw" | tr -d '[:space:]' | base64 -d; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$pem";;
+  esac
+  printf '%s' "$pem"
+}
+# ed25519_py FILE: writes the fallback verifier (pure Python, RFC 8032 section 5.1.7, Python >= 3.6, only hashlib) used when openssl cannot verify
+# Ed25519 (OpenSSL 1.1.1 on RHEL / Alma / Rocky / Oracle 8). Usage: python ed25519.py PUBLIC_KEY_BASE64 SIGNATURE_FILE MESSAGE_FILE
+# Exit 0 = valid, 1 = invalid (also: wrong lengths, S >= L, point not on the curve), 2 = usage / internal error. deploy/tests/compat-test.sh runs
+# this very text against the five RFC 8032 vectors (plus tampered / malformed variants) and a signature made by the Go signer.
+ed25519_py() {
+  cat >"$1" <<'TW_ED25519_PY'
+import sys, hashlib, base64
+P = 2**255 - 19
+L = 2**252 + 27742317777372353535851937790883648493
+D = -121665 * pow(121666, P - 2, P) % P
+SQRT_M1 = pow(2, (P - 1) // 4, P)
+
+def recover_x(y, sign):
+    if y >= P:
+        return None
+    x2 = (y * y - 1) * pow(D * y * y + 1, P - 2, P) % P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (P + 3) // 8, P)
+    if (x * x - x2) % P:
+        x = x * SQRT_M1 % P
+    if (x * x - x2) % P:
+        return None
+    return x if (x & 1) == sign else P - x
+
+def add(p, q):
+    a = (p[1] - p[0]) * (q[1] - q[0]) % P
+    b = (p[1] + p[0]) * (q[1] + q[0]) % P
+    c = 2 * p[3] * q[3] * D % P
+    d = 2 * p[2] * q[2] % P
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return (e * f % P, g * h % P, f * g % P, e * h % P)
+
+def mul(k, p):
+    r = (0, 1, 1, 0)
+    while k:
+        if k & 1:
+            r = add(r, p)
+        p = add(p, p)
+        k >>= 1
+    return r
+
+def decode(b):
+    n = int.from_bytes(b, "little")
+    y = n & ((1 << 255) - 1)
+    x = recover_x(y, n >> 255)
+    return None if x is None else (x, y, 1, x * y % P)
+
+BY = 4 * pow(5, P - 2, P) % P
+BASE = (recover_x(BY, 0), BY, 1, recover_x(BY, 0) * BY % P)
+
+def verify(pub, sig, msg):
+    if len(pub) != 32 or len(sig) != 64:
+        return False
+    s = int.from_bytes(sig[32:], "little")
+    if s >= L:
+        return False
+    a, r = decode(pub), decode(sig[:32])
+    if a is None or r is None:
+        return False
+    h = int.from_bytes(hashlib.sha512(sig[:32] + pub + msg).digest(), "little") % L
+    lhs, rhs = mul(s, BASE), add(r, mul(h, a))
+    return (lhs[0] * rhs[2] - rhs[0] * lhs[2]) % P == 0 and (lhs[1] * rhs[2] - rhs[1] * lhs[2]) % P == 0
+
+try:
+    pub = base64.b64decode(sys.argv[1], validate=True)
+    sig = open(sys.argv[2], "rb").read()
+    msg = open(sys.argv[3], "rb").read()
+except Exception:
+    sys.exit(2)
+sys.exit(0 if verify(pub, sig, msg) else 1)
+TW_ED25519_PY
+}
+# openssl_ed25519_ok: true when this openssl really verifies Ed25519 (probe: RFC 8032 test vector 2, one-byte message: OpenSSL 3.x refuses an empty one with "Could not allocate 0 bytes")
+openssl_ed25519_ok() {
+  have openssl || return 1
+  local pk="3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+  local sg="92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+  hx() { printf "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+  { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; hx "$pk"; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$TMP/probe.pem"
+  hx "$sg" >"$TMP/probe.sig"; printf '\x72' >"$TMP/probe.msg"
+  openssl pkeyutl -verify -pubin -inkey "$TMP/probe.pem" -rawin -in "$TMP/probe.msg" -sigfile "$TMP/probe.sig" >>"$LOG" 2>&1
+}
+# python3_bin: prints a Python 3 interpreter (python3, el8's platform-python, or python when it is version 3), nothing when there is none
+python3_bin() {
+  local c
+  for c in python3 /usr/libexec/platform-python python; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then command -v "$c"; return 0; fi
+  done
+  return 0
+}
+# pubkey_raw PEM: raw 32-byte public key, base64 (the last 32 bytes of the SPKI DER)
+pubkey_raw() { sed '/-----/d' "$1" | tr -d '[:space:]' | base64 -d 2>/dev/null | tail -c 32 | base64 -w0; }
+# pubkey_id PEM: key id (first 16 hex chars of sha256 of the raw 32-byte public key)
+pubkey_id() { pubkey_raw "$1" | base64 -d | sha256sum | cut -c1-16; }
+
+# resolve the release to install: sets RESOLVED_VERSION (and CH_* from channel.json when reachable)
+resolve_release() {
+  # a pinned version is a version (X.Y.Z or X.Y.Z.W, optionally -pre-release) and is used in its canonical spelling: the release directory of 0.6.1.0 is releases/0.6.1
+  if [ "$VERSION" != latest ]; then
+    ver_valid "$VERSION" || die "--version must be latest or a version X.Y.Z or X.Y.Z.W (optionally followed by -pre-release such as -dev), not: $VERSION"
+    VERSION="$(ver_canon "$VERSION")"
+  fi
+  local pinned=0; [ "$VERSION" != latest ] && pinned=1
+  if ! fetch_channel; then
+    if [ "$CH_EMPTY" = 1 ] && [ "$pinned" = 0 ]; then
+      # not a network problem: the channel is reachable and says that no version is published on it. Say that, and what to do.
+      local other=dev; [ "$CHANNEL" != dev ] || other=stable
+      die "$(t e_nover "$CHANNEL" "$other" "$other")"
+    fi
+    [ "$pinned" = 1 ] || die "cannot read $(repo_base)/channel.json (channel $CHANNEL): check the network, use --base-url, --version or --tarball"
+    warn "cannot read channel.json: yanked / minimum-installer checks skipped"
+  fi
+  if [ -n "$CH_MIN" ] && semver_lt "$INSTALLER_VERSION" "$CH_MIN"; then die "$(t e_installer_old "$CH_MIN")"; fi
+  if [ "$pinned" = 1 ]; then RESOLVED_VERSION="${VERSION#v}"; else RESOLVED_VERSION="$CH_VERSION"; fi
+  if [ -n "$CH_JSON" ] && ch_yanked "$RESOLVED_VERSION" && [ "$FORCE" = 0 ]; then die "$(t e_yanked "$RESOLVED_VERSION")"; fi
+  return 0
+}
+
+# verify_signature: SHA256SUMS.sig (base64 of the raw signature over SHA256SUMS) against the trust anchor. Used by the installer and,
+# because toutwaf-upgrade downloads and runs this very script with --update, by the in-console update too.
+# Policy: a bad signature ALWAYS aborts, and so does a missing one (there is no exemption for any version).
+# Engine: openssl when it can verify Ed25519 (>= 3.0), else the embedded pure-Python verifier; neither available: refused (fail closed).
+verify_signature() {   # $1 = base URL of the release directory, $2 = its cache-bypass query ("" or "?b=<build>")
+  local pem code rc=0 kid mode="" py="" okv=0
+  pem="$(release_pubkey)"
+  if [ "$DRY_RUN" = 1 ] && [ -n "${TOUTWAF_TEST_NO_OPENSSL_ED25519:-}" ]; then
+    printf '[test] TOUTWAF_TEST_NO_OPENSSL_ED25519: the Python fallback verifier is forced\n' >&2
+  elif openssl_ed25519_ok; then mode=openssl; fi
+  if [ -z "$mode" ]; then
+    py="$(python3_bin)"
+    [ -n "$py" ] || die "cannot verify the Ed25519 release signature: this system's OpenSSL ($(openssl version 2>/dev/null | awk '{print $2}')) has no Ed25519 verification (OpenSSL >= 3.0 is needed) and no Python 3 was found for the built-in fallback verifier. The installation is refused (fail closed): install OpenSSL 3 or python3, or verify SHA256SUMS(.sig) yourself (see deploy/README.md, Release signature) and install from the archive with --tarball"
+    mode=python
+  fi
+  code="$(curl_s -fsSL --retry 3 --connect-timeout 15 -o "$TMP/SHA256SUMS.sig" -w '%{http_code}' "$1/SHA256SUMS.sig${2:-}" 2>>"$LOG")" || rc=$?
+  if [ "$rc" != 0 ]; then
+    if [ "$code" = 404 ] || [ "$rc" = 37 ]; then   # not published (37: file:// mirror without the file)
+      # No exemption for "old" versions: the version comes from the unsigned channel.json (or --version), so whoever controls the mirror could claim any
+      # version below the first signed release and have an unsigned archive installed on its SHA-256 alone.
+      die "release signature missing ($1/SHA256SUMS.sig): every release is signed, installation refused"
+    fi
+    die "cannot download the release signature ($1/SHA256SUMS.sig)"
+  fi
+  tr -d '[:space:]' <"$TMP/SHA256SUMS.sig" | base64 -d >"$TMP/sums.sig.bin" 2>/dev/null || die "release signature is not valid base64"
+  if [ "$mode" = openssl ]; then
+    openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in "$TMP/SHA256SUMS" -sigfile "$TMP/sums.sig.bin" >>"$LOG" 2>&1 && okv=1
+  else
+    ed25519_py "$TMP/ed25519.py"
+    "$py" "$TMP/ed25519.py" "$(pubkey_raw "$pem")" "$TMP/sums.sig.bin" "$TMP/SHA256SUMS" >>"$LOG" 2>&1 && okv=1
+  fi
+  [ "$okv" = 1 ] || die "release signature verification FAILED"
+  kid="$(pubkey_id "$pem")"
+  if [ -z "${TOUTWAF_RELEASE_PUBKEY:-}" ] && [ ! -r "$(p "$CONF_DIR/release.pub")" ] && [ "$kid" != "$RELEASE_PUBKEY_ID" ]; then
+    die "internal error: the built-in release public key has id ${kid:-?}, expected $RELEASE_PUBKEY_ID"
+  fi
+  info "$(t s_sigok "${kid:-?}")"
+  SIG_OK_FOR="$RESOLVED_VERSION|$(release_build)"
+}
+
+SRC_DIR=""; RESOLVED_VERSION=""
+# The public mirror (raw.githubusercontent.com) caches for a few minutes, and a development version is republished under the SAME path: right after a
+# publication an installer could read the new channel.json with the old SHA256SUMS. Every file of a release directory is therefore asked for with a
+# cache-bypass parameter that belongs to the publication, "?b=<build>" (the build read in channel.json), so that a new build can never be answered with
+# the files cached for the previous one. No build announced (older channel.json, a version pinned that is not the channel's): no parameter. A file
+# mirror (file://) has no cache: no parameter either.
+release_build() { if [ -n "$CH_JSON" ] && [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then printf '%s' "$CH_BUILD"; fi; }
+release_q() {   # BUILD -> "?b=BUILD" for an http(s) mirror, nothing otherwise
+  case "$(repo_base)" in http://*|https://*) [ -z "${1:-}" ] || printf '?b=%s' "$1";; esac
+}
+# One more read of channel.json, with its own cache-bypass parameter "?t=<date>", after the files of a release disagreed with each other.
+refresh_channel() {
+  case "$(repo_base)" in http://*|https://*) CH_QUERY="?t=$(date +%s)";; esac
+  local frc=0; fetch_channel || frc=$?
+  CH_QUERY=""
+  [ "$frc" = 0 ] || return 1
+  if [ "$VERSION" = latest ]; then RESOLVED_VERSION="$CH_VERSION"; fi
+  if [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then NEW_BUILD="$CH_BUILD"; fi
+  return 0
+}
+# installer_self: the path of this very file, or nothing when the installer was started straight from the download (curl | bash, bash <(curl ...)):
+# bash then reads the script from a pipe, there is no file to read back.
+installer_self() { local f="${INSTALLER_SELF:-$0}"; if [ -f "$f" ] && [ -r "$f" ]; then printf '%s' "$f"; fi; return 0; }
+# installer_fingerprint_notice [FILE]: at a terminal, an installation says the SHA-256 of the installer it is (to compare with the one published with
+# the release, on another channel than the download: S-04, docs/securite/installateurs.md), or says why it cannot. Unattended runs add nothing.
+# shellcheck disable=SC2120  # the optional FILE is given by deploy/tests/installer-trust-test.sh, the installation itself passes none
+installer_fingerprint_notice() {
+  local f="${1-$(installer_self)}"
+  interactive || return 0
+  if [ -n "$f" ] && [ -f "$f" ]; then say "  $(t ins_fp "$(sha256sum "$f" | cut -d' ' -f1)" "$(basename "$f")")"
+  else say "  $(t ins_fp_pipe install.sh)"; fi
+  return 0
+}
+# cmd_verify_self (--verify-self): is THIS file the installer that the SIGNED SHA256SUMS of the release lists? The signature is checked with the key of this
+# installation first (verify_signature, as for an archive), then the SHA-256 of this file against the line "install.sh". Nothing is installed or changed.
+# What it proves and what it does not: it detects a copy that is not the published one (a swapped mirror, a modified file); it cannot protect against the
+# publisher's own signing key, nor tell the person where the first copy came from if the key it uses is the one this very file carries
+# (docs/securite/installateurs.md: compare the SHA-256 with another channel too).
+cmd_verify_self() {
+  local self hx rel q listed
+  self="$(installer_self)"
+  if [ -z "$self" ]; then printf '%s\n' "$(t ins_fp_pipe install.sh)" >&2; return 2; fi
+  hx="$(sha256sum "$self" | cut -d' ' -f1)"
+  say "  install.sh SHA-256: $hx"
+  resolve_release
+  rel="$(repo_base)/releases/$RESOLVED_VERSION"; q="$(release_q "$(release_build)")"
+  fetch "$rel/SHA256SUMS$q" "$TMP/SHA256SUMS" || die "cannot download $rel/SHA256SUMS"
+  verify_signature "$rel" "$q"
+  listed="$(sed -n 's/^\([0-9A-Fa-f]\{64\}\)[[:space:]][[:space:]]*\*\{0,1\}install\.sh[[:space:]]*$/\1/p' "$TMP/SHA256SUMS" | tr 'A-F' 'a-f' | tail -n1)"
+  if [ -z "$listed" ]; then printf '%s\n' "$(t ins_vs_nolist "$RESOLVED_VERSION")" >&2; return 1; fi
+  if [ "$listed" != "$hx" ]; then printf '%s\n' "$(t ins_vs_diff "$hx" "$RESOLVED_VERSION" "$listed")" >&2; return 1; fi
+  say "  $(t ins_vs_ok "$RESOLVED_VERSION" "$hx")"
+  return 0
+}
+obtain_binaries() {   # sets SRC_DIR to a directory holding the binaries
+  local tb="$TARBALL"
+  if [ -z "$tb" ]; then
+    local asset="toutwaf-linux-$ARCH.tar.gz" rel q attempt=1 want got chsha which
+    while :; do
+      rel="$(repo_base)/releases/$RESOLVED_VERSION"; q="$(release_q "$(release_build)")"
+      tb="$TMP/$asset"
+      fetch "$rel/$asset$q" "$tb"
+      fetch "$rel/SHA256SUMS$q" "$TMP/SHA256SUMS"
+      chsha=""; which=""
+      want="$(grep " $asset\$" "$TMP/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f')"
+      got="$(sha256sum "$tb" | awk '{print $1}')"
+      if [ -z "$want" ] || [ "$want" != "$got" ]; then which="SHA256SUMS"
+      elif [ -n "$CH_JSON" ] && [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then
+        chsha="$(ch_asset_sha "$asset")"
+        [ -z "$chsha" ] || [ "$chsha" = "$got" ] || which="channel.json"
+      fi
+      [ -n "$which" ] || break
+      # the files do not agree with each other. Once: read channel.json again past the cache, then start over; the second time: stop, saying why and what to do
+      if [ "$attempt" = 1 ] && refresh_channel; then
+        attempt=2; warn "$(t w_mirror "$asset")"; continue
+      fi
+      die "$(t e_mismatch "$asset" "$which")"
+    done
+    info "$(t s_sha)"
+    verify_signature "$rel" "$q"
+  else
+    [ -f "$tb" ] || die "tarball not found: $tb"
+  fi
+  mkdir -p "$TMP/out"; tar -xzf "$tb" -C "$TMP/out"
+  # layout: toutwaf-<version>-linux-<arch>/bin/{toutwaf-dp,toutwaf-cp,toutwafctl}; a flat archive is accepted too
+  if [ -e "$TMP/out/toutwaf-dp" ] || [ -e "$TMP/out/toutwaf-cp" ]; then SRC_DIR="$TMP/out"
+  else
+    # no find/xargs: findutils is not part of minimal images (Rocky/Alma 8 container images)
+    local d="" f
+    for f in "$TMP"/out/*/bin/toutwaf-dp "$TMP"/out/*/bin/toutwaf-cp "$TMP"/out/*/toutwaf-dp "$TMP"/out/*/toutwaf-cp "$TMP"/out/*/*/bin/toutwaf-dp "$TMP"/out/*/*/bin/toutwaf-cp; do
+      if [ -f "$f" ]; then d="$(dirname "$f")"; break; fi
+    done
+    [ -n "$d" ] && SRC_DIR="$d" || die "no binaries in the archive (expected toutwaf-<version>-linux-$ARCH/bin/)"
+  fi
+  read_archive_identity
+  # The signature covers SHA256SUMS, not the version it belongs to: an unsigned channel.json can announce 0.6.2 over the (genuinely signed) files of
+  # 0.6.0. The archive's own VERSION, protected by the signed hash, must be the version we resolved (rollback / downgrade by replay).
+  [ -n "$TARBALL" ] || check_archive_version
+}
+# check_archive_version: refuse an archive whose VERSION is not the release that was resolved (0.6.1 and 0.6.1.0 are the same release)
+check_archive_version() {
+  [ -n "$ARCHIVE_VERSION" ] || return 0   # archives from before the VERSION file
+  local a w; a="$(ver_canon "$ARCHIVE_VERSION" || true)"; w="$(ver_canon "$RESOLVED_VERSION" || true)"
+  [ -n "$a" ] && [ "$a" = "$w" ] && return 0
+  die "$(t e_archive_ver "$ARCHIVE_VERSION" "$RESOLVED_VERSION")"
+}
+# the archive says what it holds: VERSION and BUILD next to bin/ (older archives have no BUILD)
+ARCHIVE_VERSION=""; ARCHIVE_BUILD=""
+read_archive_identity() {
+  local top f
+  ARCHIVE_VERSION=""; ARCHIVE_BUILD=""
+  for top in "$(dirname "$SRC_DIR")" "$SRC_DIR"; do
+    if [ -f "$top/VERSION" ] || [ -f "$top/BUILD" ]; then
+      f="$top/VERSION"; [ ! -f "$f" ] || ARCHIVE_VERSION="$(head -n1 "$f" | tr -d ' \t\r\n')"
+      f="$top/BUILD"; [ ! -f "$f" ] || ARCHIVE_BUILD="$(clean_build "$(head -n1 "$f")")"
+      break
+    fi
+  done
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ extras
+# The second asset of a release: toutwaf-extras.tar.gz, or toutwaf-extras-<n>of<m>.tar.gz when it is cut (every part under 90 MiB). It holds
+# toutwaf-extras-<version>/{agent-dist/toutwaf-agent-windows-*.exe, av-dist/toutwaf-av-*, LICENSE, VERSION, BUILD}. It is listed in the signed SHA256SUMS
+# like the archive, so the one signature check covers it; its SHA-256 is compared with SHA256SUMS (and with channel.json when that is the channel's version).
+# An installation without the extras works: it does not offer Windows nor the antivirus, and says what to do. A problem with the extras is NEVER fatal
+# here (only a bad signature, which verify_signature handles for the whole release).
+extras_names() {   # the extras files SHA256SUMS lists, parts in order; prints nothing when the release carries none
+  [ -f "$TMP/SHA256SUMS" ] || return 0
+  awk '$2 ~ /^toutwaf-extras(-[0-9]+of[0-9]+)?\.tar\.gz$/ {print $2}' "$TMP/SHA256SUMS" | sort -t- -k3,3n
+}
+extras_fail() {   # KEY ARGS...: remember that the extras are not installed, say why and what to do
+  EXTRAS_RESULT=failed; EXTRAS_DIR=""
+  warn "$(t "$@")"
+  return 0
+}
+# extras_wanted PATH: a regular file (not a link) whose place and name are the ones of the contract: agent-dist/toutwaf-agent-windows-{amd64,arm64}.exe, av-dist/toutwaf-av-<system>-<arch>
+extras_wanted() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  case "$(basename "$(dirname "$1")")/$(basename "$1")" in
+    agent-dist/toutwaf-agent-windows-amd64.exe|agent-dist/toutwaf-agent-windows-arm64.exe) return 0;;
+    av-dist/toutwaf-av-linux-amd64|av-dist/toutwaf-av-linux-arm64|av-dist/toutwaf-av-darwin-amd64|av-dist/toutwaf-av-darwin-arm64|av-dist/toutwaf-av-windows-amd64.exe|av-dist/toutwaf-av-windows-arm64.exe) [ "$AV_OFFERED" = 1 ]; return;;
+  esac
+  return 1
+}
+# extras_unpack FILE...: unpack the parts into $TMP/extras/out and check that they are the release's; sets EXTRAS_DIR; prints nothing
+extras_unpack() {
+  local f out="$TMP/extras/out" d top nfiles=0 v b
+  rm -rf "$out"; mkdir -p "$out"
+  for f in "$@"; do
+    if ! tar -xzf "$f" -C "$out" 2>>"$LOG"; then extras_fail w_extras_bad "$(basename "$f")"; return 0; fi
+  done
+  d=""
+  for top in "$out"/toutwaf-extras-*; do [ -d "$top" ] && { d="$top"; break; }; done
+  [ -n "$d" ] || { extras_fail w_extras_bad "$(basename "$1")"; return 0; }
+  v="$(head -n1 "$d/VERSION" 2>/dev/null | tr -d ' \t\r\n')"; b="$(clean_build "$(head -n1 "$d/BUILD" 2>/dev/null)")"
+  # they must belong to the release that was installed (or is being installed): a Windows agent of another version would not match the console
+  if [ -n "$ARCHIVE_VERSION" ] && [ -n "$v" ] && [ "$v" != "$ARCHIVE_VERSION" ]; then extras_fail w_extras_ver "$v" "$ARCHIVE_VERSION"; return 0; fi
+  if [ -n "$ARCHIVE_BUILD" ] && [ -n "$b" ] && [ "$b" != "$ARCHIVE_BUILD" ]; then extras_fail w_extras_ver "$v ($b)" "$ARCHIVE_VERSION ($ARCHIVE_BUILD)"; return 0; fi
+  for f in "$d"/agent-dist/* "$d"/av-dist/*; do extras_wanted "$f" && nfiles=$((nfiles + 1)); done
+  if [ "$nfiles" = 0 ]; then extras_fail w_extras_bad "$(basename "$1")"; return 0; fi
+  EXTRAS_DIR="$d"; EXTRAS_COUNT="$nfiles"; EXTRAS_VERSION="${v:-$ARCHIVE_VERSION}"; EXTRAS_BUILD="${b:-$ARCHIVE_BUILD}"
+  return 0
+}
+# obtain_extras: sets EXTRAS_DIR (unpacked) or EXTRAS_RESULT (none | failed | skipped); never stops the installation
+obtain_extras() {
+  EXTRAS_DIR=""; EXTRAS_RESULT=""
+  if [ "$NO_EXTRAS" = 1 ]; then EXTRAS_RESULT=skipped; return 0; fi
+  want_cp || { EXTRAS_RESULT=skipped; return 0; }
+  mkdir -p "$TMP/extras"
+  local files=() f want got n ch rel q names parts i total=0 attempt
+  # ---- local files (offline)
+  if [ -n "$EXTRAS_LOCAL" ] || { [ -n "$TARBALL" ] && ls "$(dirname "$TARBALL")"/toutwaf-extras*.tar.gz >/dev/null 2>&1; }; then
+    local oldifs="$IFS" list="$EXTRAS_LOCAL"; IFS=:
+    for f in $list; do [ -z "$f" ] || files+=("$f"); done
+    IFS="$oldifs"
+    if [ ${#files[@]} -eq 0 ]; then for f in "$(dirname "$TARBALL")"/toutwaf-extras*.tar.gz; do files+=("$f"); done; fi   # next to the archive: they belong together
+    for f in "${files[@]}"; do [ -f "$f" ] || { extras_fail w_extras_nofile "$f"; return 0; }; done
+    # a SHA256SUMS next to a file is used to check it; without one the file is trusted as the archive given with --tarball is
+    for f in "${files[@]}"; do
+      n="$(basename "$f")"
+      if [ -f "$(dirname "$f")/SHA256SUMS" ]; then
+        want="$(grep " $n\$" "$(dirname "$f")/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"
+        got="$(sha256sum "$f" | awk '{print $1}')"
+        if [ -z "$want" ] || [ "$want" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+      else info "$(t s_extras_unchecked "$n")"; fi
+    done
+    extras_unpack "${files[@]}"
+    return 0
+  fi
+  [ -z "$TARBALL" ] || { EXTRAS_RESULT=none; return 0; }   # an archive given by hand, no extras given with it
+  # ---- download: the signed SHA256SUMS of the release says which files are the extras
+  rel="$(repo_base)/releases/$RESOLVED_VERSION"; q="$(release_q "$(release_build)")"
+  if [ ! -f "$TMP/SHA256SUMS" ] || [ "$SIG_OK_FOR" != "$RESOLVED_VERSION|$(release_build)" ]; then
+    if ! fetch "$rel/SHA256SUMS$q" "$TMP/SHA256SUMS" 2>>"$LOG"; then extras_fail "$(extras_key w_extras_dl)" "SHA256SUMS"; return 0; fi
+    verify_signature "$rel" "$q"      # a bad signature aborts, as for the archive
+  fi
+  names="$(extras_names)"
+  if [ -z "$names" ]; then EXTRAS_RESULT=none; return 0; fi    # a release from before the extras: nothing to install
+  parts=0; for f in $names; do parts=$((parts + 1)); done
+  case "$names" in *of[0-9]*) i="$(printf '%s\n' "$names" | head -n1 | sed -n 's/.*-[0-9]*of\([0-9]*\)\.tar\.gz/\1/p')"; if [ "$i" != "$parts" ]; then extras_fail w_extras_inc "$parts" "$i"; return 0; fi;; esac
+  files=()
+  for n in $names; do
+    f="$TMP/extras/$n"
+    for attempt in 1 2; do
+      if fetch "$rel/$n$q" "$f" 2>>"$LOG"; then break; fi
+      rm -f "$f"
+    done
+    [ -f "$f" ] || { extras_fail "$(extras_key w_extras_dl)" "$n"; return 0; }
+    want="$(grep " $n\$" "$TMP/SHA256SUMS" | awk '{print $1}' | tr 'A-F' 'a-f' | head -n1)"
+    got="$(sha256sum "$f" | awk '{print $1}')"
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+    if [ -n "$CH_JSON" ] && [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then
+      ch="$(ch_asset_sha "$n")"; if [ -n "$ch" ] && [ "$ch" != "$got" ]; then extras_fail w_extras_sum "$n"; return 0; fi
+    fi
+    total=$((total + $(wc -c <"$f")))
+    files+=("$f")
+  done
+  info "$(t s_extras_sha "$parts" "$((total / 1048576))")"
+  extras_unpack "${files[@]}"
+  return 0
+}
+# install_extras: put the unpacked extras next to the data of the control plane and record which release they are of
+install_extras() {
+  [ -n "$EXTRAS_DIR" ] || return 0
+  local f dst own grp n=0 recorded="" sub
+  own="$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")"; grp="$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")"
+  for sub in agent-dist $([ "$AV_OFFERED" = 1 ] && echo av-dist); do
+    run install -d -m 0750 -o "$own" -g "$grp" "$(p "$DATA_DIR/$sub")" || return 0
+  done
+  for f in "$EXTRAS_DIR"/agent-dist/* "$EXTRAS_DIR"/av-dist/*; do
+    extras_wanted "$f" || continue
+    dst="$(p "$DATA_DIR/$(basename "$(dirname "$f")")/$(basename "$f")")"
+    # a copy next to the final name, moved over it: a program being downloaded by a machine is never half replaced
+    if run install -m 0640 -o "$own" -g "$grp" "$f" "$dst.new" && run mv -f "$dst.new" "$dst"; then n=$((n + 1)); recorded="$recorded\"$(basename "$f")\","; else warn "could not install $(basename "$f")"; run rm -f "$dst.new"; fi
+  done
+  if [ "$n" -gt 0 ] && [ "$DRY_RUN" = 0 ]; then
+    local ej; ej="$(p "$DATA_DIR/extras.json")"
+    printf '{"version":"%s","build":"%s","installed_at":"%s","files":[%s]}\n' "$EXTRAS_VERSION" "${EXTRAS_BUILD:-}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${recorded%,}" >"$ej.new" || true
+    chown "$own:$grp" "$ej.new" 2>/dev/null || true; chmod 0644 "$ej.new" 2>/dev/null || true
+    mv -f "$ej.new" "$ej" || warn "could not record the extras in $ej"
+  fi
+  EXTRAS_RESULT=ok; EXTRAS_COUNT="$n"
+  info "$(t s_extras_ok "$n" "$DATA_DIR")"
+  return 0
+}
+# the extras are installed for THIS release: extras.json says the version and the build, and every program it listed is still there
+extras_current() {
+  local j v b
+  j="$(p "$DATA_DIR/extras.json")"
+  [ -f "$j" ] || return 1
+  v="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$j" | head -n1)"; b="$(sed -n 's/.*"build":"\([^"]*\)".*/\1/p' "$j" | head -n1)"
+  [ -n "$v" ] && [ "$v" = "${1:-}" ] || return 1
+  [ -z "${2:-}" ] || [ "$b" = "$2" ] || return 1
+  # every program extras.json lists is still there
+  local f d
+  for f in $(grep -o '"toutwaf-[^"]*"' "$j" | tr -d '"'); do
+    case "$f" in toutwaf-agent-*) d=agent-dist;; *) [ "$AV_OFFERED" = 1 ] || continue; d=av-dist;; esac
+    [ -s "$(p "$DATA_DIR/$d/$f")" ] || return 1
+  done
+  return 0
+}
+extras_step() { obtain_extras; install_extras; return 0; }
+# an update that finds nothing new for the programs still brings the extras when they are missing or of another build (a first install made without network, an older installer)
+extras_maintain() {
+  want_cp && [ "$NO_EXTRAS" = 0 ] || return 0
+  [ "$DRY_RUN" = 0 ] || return 0
+  if extras_current "$1" "${2:-}"; then return 0; fi
+  ARCHIVE_VERSION="$1"; ARCHIVE_BUILD="$(clean_build "${2:-}")"
+  step "$(t "$(extras_key s_extras)")" extras_step
+  extras_report
+  return 0
+}
+# the summary line for the extras (the warning with the cause is already there)
+extras_report() {
+  case "$EXTRAS_RESULT" in
+    ok) say "  $BUL $(t s_extras_ok "$EXTRAS_COUNT" "$DATA_DIR")";;
+    none) say "  $BUL $(t "$(extras_key w_extras_none)")";;
+    failed) say "  $BUL $(t w_extras_todo "sudo bash install.sh --extras-only")";;
+  esac
+  return 0
+}
+# --extras-only: the extras of the installed release, nothing else is touched
+cmd_extras() {
+  banner; detect_installed
+  [ "$INST_CP" = 1 ] || { say "  $(t extras_needs_cp)"; return 1; }
+  component_from_installed; load_existing_ports
+  local cbin curv curb; cbin="$(p "$BIN_DIR/toutwaf-cp")"; curv="$(installed_version "$cbin")"; curb="$(inst_build "$cbin" "$curv")"
+  SRC_DIR=""; ARCHIVE_VERSION="$curv"; ARCHIVE_BUILD="$(clean_build "$curb")"
+  if [ -z "$EXTRAS_LOCAL" ]; then
+    resolve_release
+    if [ "$RESOLVED_VERSION" != "$curv" ] || { [ -n "$CH_BUILD" ] && [ -n "$ARCHIVE_BUILD" ] && [ "$CH_BUILD" != "$ARCHIVE_BUILD" ]; }; then
+      say "  $(paint "$YLW" "$WRM $(t extras_other_release "$(ver_short "$RESOLVED_VERSION" "$CH_BUILD")" "$(ver_short "$curv" "$curb")")")"; return 1
+    fi
+  else RESOLVED_VERSION=local; fi
+  NO_EXTRAS=0
+  step "$(t "$(extras_key s_extras)")" extras_step
+  extras_report
+  [ "$EXTRAS_RESULT" = ok ]
+}
+
+# ------------------------------------------------------------------------------------------------ system setup
+create_user() {
+  [ "$STAGING" = 1 ] && return 0
+  local NOLOGIN; NOLOGIN="$(command -v nologin 2>/dev/null || true)"
+  [ -x "$NOLOGIN" ] || { for NOLOGIN in /usr/sbin/nologin /sbin/nologin /usr/bin/nologin /bin/false; do [ -x "$NOLOGIN" ] && break; done; }
+  # The system group is also what lets `toutwafctl` sign in locally without a password: its members (added by the administrator with
+  # `usermod -aG toutwaf USER`, never by this installer) may open <data>/ctl.sock. Each machine has its own group.
+  getent group "$SVC_USER" >/dev/null || run groupadd --system "$SVC_USER"
+  id "$SVC_USER" >/dev/null 2>&1 || run useradd --system --gid "$SVC_USER" --home-dir "$DATA_DIR" --no-create-home --shell "$NOLOGIN" --comment "ToutWAF service account" "$SVC_USER"
+}
+
+make_dirs() {
+  local d par
+  if [ "$LAYOUT" = home ]; then
+    # the parent of the home (/var by default, or whatever --home names) is created only when absent and never modified when it exists
+    par="${HOME_DIR%/*}"; [ -n "$par" ] || par=/
+    [ -d "$(p "$par")" ] || run install -d -m 0755 "$(p "$par")"
+    if [ ! -d "$(p "$HOME_DIR")" ]; then run install -d -m 0755 "$(p "$HOME_DIR")"; fi
+    run install -d -m 0755 "$(p "$BIN_DIR")"
+    check_noexec "$(p "$BIN_DIR")"
+    write_layout_file
+  fi
+  run install -d -m 0750 -o "$([ "$STAGING" = 1 ] && id -un || echo root)" -g "$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")" "$(p "$CONF_DIR")" "$(p "$CONF_DIR/certs")"
+  for d in "$DATA_DIR" "$LOG_DIR" "$DATA_DIR/certs" "$DATA_DIR/spool" "$DATA_DIR/backup"; do
+    run install -d -m 0750 -o "$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")" -g "$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")" "$(p "$d")"
+  done
+}
+
+# refuse a directory on a noexec mount: the binaries could not start from there
+check_noexec() {
+  [ "$STAGING" = 1 ] && return 0
+  have findmnt || return 0
+  findmnt -no OPTIONS -T "$1" 2>/dev/null | tr ',' '\n' | grep -qx noexec && die "$(t home_noexec "$1")"
+  return 0
+}
+# sudo's secure_path, as the sudoers files set it ("" when none is set: sudo then keeps the PATH of the caller). RHEL, AlmaLinux and Rocky
+# replace PATH by /sbin:/bin:/usr/sbin:/usr/bin, which does not hold /usr/local/bin: `sudo toutwafctl` then fails with "command not found".
+sudo_secure_path() {
+  local f v sp=""
+  for f in "$(p /etc/sudoers)" "$(p /etc/sudoers.d)"/*; do
+    [ -f "$f" ] && [ -r "$f" ] || continue
+    v="$(sed -n 's/^[[:space:]]*Defaults[^#]*secure_path[[:space:]]*=[[:space:]]*"\{0,1\}\([^"#[:space:]]*\).*/\1/p' "$f" 2>/dev/null | tail -n 1)"
+    [ -z "$v" ] || sp="$v"
+  done
+  printf '%s' "$sp"
+}
+# the directory of that secure_path the CLIs are linked into: /usr/local/bin when it is listed, else /usr/bin ("" when sudo has none)
+secure_link_dir() {
+  local sp d; sp="$(sudo_secure_path)"; [ -n "$sp" ] || return 0
+  for d in /usr/local/bin /usr/bin /bin /usr/local/sbin /usr/sbin /sbin; do
+    case ":$sp:" in *":$d:"*) if [ "$d" = /usr/local/bin ] || [ -d "$(p "$d")" ]; then printf '%s' "$d"; return 0; fi;; esac
+  done
+  return 0
+}
+# the CLIs stay on PATH when the binaries live under HOME, and on the PATH sudo uses (secure_path): the commands work with `sudo`
+link_cli() {
+  local IFS=' ' b l d dirs="" sd; sd="$(secure_link_dir)"   # (dirs is a blank separated list)
+  [ "$BIN_DIR" = /usr/local/bin ] || dirs=/usr/local/bin
+  if [ -n "$sd" ] && [ "$sd" != "$BIN_DIR" ] && [ "$sd" != /usr/local/bin ]; then dirs="$dirs $sd"; fi
+  for d in $dirs; do
+    run install -d -m 0755 "$(p "$d")"
+    for b in toutwafctl toutwaf-cp toutwaf-dp toutwaf-upgrade toutwaf-firewall toutwaf-blocklist toutwaf-vpn toutwaf-fw toutwaf-jobs toutwaf-time toutwaf-sysupdate toutwaf-relay; do
+      [ -e "$(p "$BIN_DIR/$b")" ] || continue
+      l="$(p "$d/$b")"
+      if [ -L "$l" ] || [ ! -e "$l" ]; then run ln -sfn "$BIN_DIR/$b" "$l"; fi
+    done
+  done
+  return 0
+}
+install_binary() {    # name ; returns 1 when already up to date
+  local name="$1" src="$SRC_DIR/$1" dst; dst="$(p "$BIN_DIR/$name")"
+  [ -e "$src" ] || { [ "$DRY_RUN" = 1 ] && return 0; die "$name missing from the release"; }
+  if [ -x "$dst" ] && [ "$FORCE" = 0 ] && same_file "$src" "$dst"; then info "$name already up to date"; return 1; fi
+  run install -d -m 0755 "$(p "$BIN_DIR")" || die "cannot create $BIN_DIR"
+  if [ -x "$dst" ]; then run cp -p "$dst" "$dst.prev"; fi            # rollback copy
+  { run install -m 0755 "$src" "$dst.new" && run mv -f "$dst.new" "$dst"; } || die "cannot install $dst"   # atomic replace
+  info "installed $dst"
+  return 0
+}
+
+write_if_absent() {   # dest mode owner:group  (content on stdin)
+  local dest="$1" mode="$2" own="$3"
+  if [ -e "$dest" ]; then cat >"$dest.dist"; chmod "$mode" "$dest.dist"; if [ "$STAGING" = 0 ]; then chown "$own" "$dest.dist"; fi; info "keeping existing $dest (new defaults in $(basename "$dest").dist)"; return 0; fi
+  cat >"$dest"; chmod "$mode" "$dest"; if [ "$STAGING" = 0 ]; then chown "$own" "$dest"; fi
+  return 0
+}
+
+dp_config() {
+  local dest fresh=0; dest="$(p "$CONF_DIR/toutwaf-dp.yaml")"
+  [ "$DRY_RUN" = 1 ] && return 0
+  [ -e "$dest" ] || fresh=1
+  {
+    cat <<EOF
+# ToutWAF data plane - node configuration (full reference: toutwaf-dp print-config)
+group: ${NODE_GROUP:-default}
+data_dir: $DATA_DIR
+certs_dir: $DATA_DIR/certs
+listen:
+  http: ["$(any_addr):$HTTP_PORT"]       # [::] = IPv6 and IPv4 on the same socket (0.0.0.0 on a kernel without IPv6)
+  https: ["$(any_addr):$HTTPS_PORT"]
+EOF
+    # HTTP/3 (QUIC): only when asked for (--http3); UDP stays closed otherwise
+    if [ "$(http3_on)" = 1 ]; then echo "  h3: true               # HTTP/3 (QUIC) on UDP $HTTPS_PORT: the installer opens that UDP port in firewalld / ufw"; fi
+    cat <<EOF
+  # proxy_protocol: optional      # when behind a TCP load balancer sending PROXY protocol ...
+  # proxy_protocol_from: ["203.0.113.10"]   # ... and the address(es) of that load balancer: a PROXY header is believed ONLY from these
+admin:
+  listen: 127.0.0.1:9101          # /healthz /metrics /status /debug/inspect (loopback only; the token is made at the first start: <data_dir>/admin.token)
+tls:
+  profile: intermediate           # modern = TLS 1.3 only
+events:
+  spool_dir: $DATA_DIR/spool
+logging:
+  level: info
+  json: true
+security:
+  no_new_privs: true
+EOF
+    if [ -n "$CP_URL" ]; then
+      echo "control_plane:"; echo "  url: $CP_URL"
+      [ -n "$NODE_TOKEN" ] && echo "  token: $NODE_TOKEN"
+      [ -n "$ENROLL_TOKEN" ] && echo "  enroll_token: $ENROLL_TOKEN"
+      if [ -n "$CP_CA" ]; then echo "  ca_file: $CONF_DIR/certs/cp-ca.pem"
+      elif [[ "$CP_URL" =~ ^https://(127\.0\.0\.1|localhost|\[::1\])[:/] ]]; then echo "  ca_file: $DATA_DIR/tls/console.crt   # the local control plane's own certificate"; fi
+      echo "  update_hook: [\"$BIN_DIR/toutwaf-upgrade\"]"
+    else
+      echo "# Standalone mode: serve the applications described in a local policy file (hot reloaded)."
+      echo "policy_file: $CONF_DIR/policy.yaml"
+    fi
+  } | write_if_absent "$dest" 0640 "root:$SVC_USER"
+  if [ "$fresh" = 0 ]; then apply_http3_config; fi
+  if [ -n "$CP_CA" ] && [ -n "$CP_URL" ]; then
+    case "$CP_CA" in http://*|https://*) fetch "$CP_CA" "$(p "$CONF_DIR/certs/cp-ca.pem")";; *) [ -f "$CP_CA" ] || die "--cp-ca: file not found: $CP_CA"; cp "$CP_CA" "$(p "$CONF_DIR/certs/cp-ca.pem")";; esac
+    chmod 0640 "$(p "$CONF_DIR/certs/cp-ca.pem")"; if [ "$STAGING" = 0 ]; then chown "root:$SVC_USER" "$(p "$CONF_DIR/certs/cp-ca.pem")"; fi
+  fi
+  if [ "$fresh" = 1 ] && [ -z "$CP_URL" ] && [ ! -e "$(p "$CONF_DIR/policy.yaml")" ]; then
+    cat <<'EOF' | write_if_absent "$(p "$CONF_DIR/policy.yaml")" 0640 "root:$SVC_USER"
+# Local policy (standalone mode). Edit and save: the data plane reloads it within 2 seconds, no restart.
+version: 1
+node_group: default
+apps:
+  - id: example
+    name: Example application
+    hostnames: [example.com, www.example.com]
+    origins:
+      - url: http://127.0.0.1:8080
+    mode: detect              # detect first, then block once the false positives are reviewed
+    settings:
+      # No TLS certificate is installed yet (place one under certs_dir or configure ACME / the control plane), so do not
+      # redirect plain HTTP to an HTTPS listener that cannot complete a handshake. Remove these once HTTPS works.
+      REDIRECT_HTTP_TO_HTTPS: false
+      HSTS: false
+EOF
+  fi
+  return 0
+}
+
+cp_config() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  local pubhost="${PUBLIC_HOST:-$(fqdn)}" cpf lic; cpf="$(p "$CONF_DIR/toutwaf-cp.yaml")"; lic="$(licence_yaml)"
+  if [ -n "$lic" ] && [ -e "$cpf" ]; then   # a configuration that exists is kept: the section is added only when it has none
+    if grep -q '^license:' "$cpf"; then warn "$cpf already has a license: section: the licence options are not applied (use: toutwafctl license pin / api-url)"
+    else printf '\n# common licence (added by the installer options --licence-api-url / --licence-pin)\n%s\n' "$lic" >>"$cpf"; info "licence site settings added to $cpf"; fi
+    lic=""
+  fi
+  cat <<EOF | write_if_absent "$cpf" 0640 "root:$SVC_USER"
+# ToutWAF control plane
+data_dir: $DATA_DIR
+public_url: https://$(hostport "$pubhost" "$CP_PORT")
+listen:
+  console: ":$CP_PORT"
+  dp: ":9444"
+# TLS: without tls.cert / tls.key the control plane generates (and renews) a self-signed certificate in
+# $DATA_DIR/tls. To use your own certificate, copy it to $CONF_DIR/certs and uncomment:
+# tls:
+#   cert: $CONF_DIR/certs/console.crt
+#   key: $CONF_DIR/certs/console.key
+$(db_yaml)
+dataplane:
+  inspect_url: http://127.0.0.1:9101/debug/inspect
+  # public ports of the data plane on this machine: what the Docteur ToutWAF and the configuration assistant check
+  http_port: $HTTP_PORT
+  https_port: $HTTPS_PORT
+# Telemetry to the publisher space (app.toutwaf.com): the attacks ToutWAF blocked and aggregate figures, never the content of requests nor
+# legitimate visitors. OPT-IN: without "enabled: true" NOTHING is sent until an administrator accepts it in the console (first-run wizard, or
+# Settings > Privacy and telemetry); "enabled: false" is zero telemetry. Once an administrator saved the choice in the console, the console
+# wins over this file. Details: docs/confidentialite-telemetrie.md
+telemetry:
+$(if [ "$NO_TELEMETRY" = 1 ]; then echo "  enabled: false"; elif [ "${TELEMETRY_OPTIN:-0}" = 1 ]; then echo "  enabled: true"; else echo "  # enabled: (not set: the administrator is asked in the console)"; fi)
+${lic:+# common licence of ToutPanel and ToutWAF (installer options --licence-api-url / --licence-pin)
+$lic}
+EOF
+  [ -z "$lic" ] || [ -z "$LICENCE_PINNED" ] || info "licence site key(s) pinned, fingerprint: $(printf '%s' "$LICENCE_PINNED" | cut -d' ' -f1 | paste -sd, -)"
+  cat <<EOF | write_if_absent "$(p "$CONF_DIR/cp.env")" 0640 "root:$SVC_USER"
+# Extra command-line arguments and environment for toutwaf-cp (see https://github.com/$REPO)
+TOUTWAF_CP_ARGS=--config $CONF_DIR/toutwaf-cp.yaml
+EOF
+  return 0
+}
+
+# systemd ignores (with a warning) directives it does not know; older releases (RHEL 8 / Rocky 8 / Alma 8: 239) lack the newer
+# sandboxing options. sd_opt MINVER LINE prints the line only when the running systemd is at least MINVER (or its version is unknown).
+SD_VER=""
+sd_opt() {
+  if [ -z "$SD_VER" ]; then SD_VER="$(systemctl --version 2>/dev/null | awk 'NR==1{print $2}')"; [[ "$SD_VER" =~ ^[0-9]+$ ]] || SD_VER=999; fi
+  if [ "$SD_VER" -ge "$1" ]; then printf '%s\n' "$2"; else printf '# %s (needs systemd >= %s, running %s)\n' "$2" "$1" "$SD_VER"; fi
+}
+# Sandbox of the root helpers (audit S-10: toutwaf-jobs/fw/relay/time/sysupdate/vpn/upgrade scored 8.9 to 9.4 "exposed" in
+# `systemd-analyze security`). Each helper runs a short fixed list of actions as root; what is added is only what the helper provably does not
+# use (deploy/tests/helper-sandbox-test.sh pins these choices, runs the helper tests under the capability set and checks the scores):
+#   basic   jobs, sysupdate, upgrade: they run the package manager or the installer (setuid files, services, kernel modules, sysctl,
+#           namespaces, the clock of a tzdata or chrony script...): only realtime scheduling is denied. RestrictSUIDSGID, ProtectSystem,
+#           ProtectKernel*, a capability set or a syscall filter would stop a package from installing.
+#   net     fw, vpn: files, systemctl, and nft / ip / wg over netlink: + native syscalls only, the @system-service filter (the syscalls the
+#           helpers use, measured with strace over their tests, are all in it), no change of personality, kernel log and cgroups read-only.
+#           (the vpn helper writes a sysctl file and applies it: no ProtectKernelTunables; both load rules: no capability set.)
+#   small   relay, time: files, systemctl / timedatectl over the system bus: + kernel tunables and modules, hostname, namespaces,
+#           devices, only local sockets, and the capabilities of a root that rewrites files of another owner. The clock helper keeps the
+#           clock syscalls and CAP_SYS_TIME (timedatectl set-time); the relay helper writes the configuration of the data plane and
+#           restarts it: no ProtectSystem.
+sd_helper_sandbox() {
+  local kind="$1" clock="${2:-protect}"
+  sd_opt 231 RestrictRealtime=yes
+  [ "$kind" = basic ] && return 0
+  sd_opt 235 LockPersonality=yes
+  sd_opt 209 SystemCallArchitectures=native
+  if [ "$clock" = keep ]; then sd_opt 211 "SystemCallFilter=@system-service @clock"; else sd_opt 211 SystemCallFilter=@system-service; fi
+  sd_opt 209 SystemCallErrorNumber=EPERM
+  sd_opt 244 ProtectKernelLogs=yes
+  sd_opt 232 ProtectControlGroups=yes
+  [ "$kind" = net ] && return 0
+  sd_opt 232 ProtectKernelTunables=yes
+  sd_opt 232 ProtectKernelModules=yes
+  sd_opt 242 ProtectHostname=yes
+  sd_opt 233 RestrictNamespaces=yes
+  printf 'PrivateDevices=yes\nRestrictAddressFamilies=AF_UNIX\n'
+  if [ "$clock" = keep ]; then
+    printf 'CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_SYS_TIME\n'
+  else
+    printf 'CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID\n'
+    sd_opt 245 ProtectClock=yes
+  fi
+  return 0
+}
+# StateDirectory= / LogsDirectory= make systemd create /var/lib/toutwaf and /var/log/toutwaf: only wanted for the legacy locations
+state_dir_lines() {
+  if [ "$DATA_DIR" = /var/lib/toutwaf ]; then printf 'StateDirectory=toutwaf\nStateDirectoryMode=0750\n'; fi
+  if [ "$LOG_DIR" = /var/log/toutwaf ]; then printf 'LogsDirectory=toutwaf\nLogsDirectoryMode=0750\n'; fi
+}
+write_units() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  local sd; sd="$(p /etc/systemd/system)"; mkdir -p "$sd"
+  if want_dp; then
+    cat >"$sd/toutwaf-dp.service" <<EOF
+[Unit]
+Description=ToutWAF data plane (reverse proxy / WAAP)
+Documentation=https://github.com/$REPO
+After=network-online.target$(if want_cp || [ "${INST_CP:-0}" = 1 ]; then printf ' toutwaf-cp.service'; fi)
+Wants=network-online.target
+# A crash loop must never end the service for good: without this systemd gives up after 5 starts in 10 s (start-limit-hit) and the unit stays stopped.
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=$SVC_USER
+Group=$SVC_USER
+ExecStartPre=$BIN_DIR/toutwaf-dp --config $CONF_DIR/toutwaf-dp.yaml check-config
+ExecStart=$BIN_DIR/toutwaf-dp --config $CONF_DIR/toutwaf-dp.yaml run
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=always
+RestartSec=1s
+# the data plane serves the traffic: the OOM killer spares it (the console is taken first); throttled before it takes the whole machine
+OOMScoreAdjust=-500
+$(sd_opt 240 MemoryHigh=85%)
+TimeoutStopSec=40s
+WatchdogSec=60s
+LimitNOFILE=1048576
+TasksMax=infinity
+Environment=RUST_BACKTRACE=1
+# --- sandboxing -----------------------------------------------------------------------------
+NoNewPrivileges=yes
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+$(sd_opt 244 ProtectKernelLogs=yes)
+ProtectControlGroups=yes
+$(sd_opt 245 ProtectClock=yes)
+$(sd_opt 242 ProtectHostname=yes)
+$(sd_opt 247 ProtectProc=invisible)
+$(sd_opt 247 ProcSubset=pid)
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @swap @reboot @raw-io @obsolete @debug @cpu-emulation @clock
+UMask=0027
+ReadWritePaths=$DATA_DIR $LOG_DIR
+ReadOnlyPaths=$CONF_DIR
+$(state_dir_lines)
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  fi
+  if want_cp; then
+    cat >"$sd/toutwaf-cp.service" <<EOF
+[Unit]
+Description=ToutWAF control plane (API, console, policy distribution)
+Documentation=https://github.com/$REPO
+After=network-online.target
+Wants=network-online.target
+# A crash loop must never end the service for good: without this systemd gives up after 5 starts in 10 s (start-limit-hit) and the unit stays stopped.
+StartLimitIntervalSec=0
+
+[Service]
+# Type=notify: READY=1 when the listeners are open, WATCHDOG=1 only while the console answers its own /healthz (a stuck console is restarted after WatchdogSec)
+Type=notify
+NotifyAccess=main
+User=$SVC_USER
+Group=$SVC_USER
+EnvironmentFile=-$CONF_DIR/cp.env
+ExecStart=$BIN_DIR/toutwaf-cp \$TOUTWAF_CP_ARGS
+Restart=always
+RestartSec=2s
+WatchdogSec=60s
+# memory: the runtime keeps its heap under 70 % by itself (GOMEMLIMIT set at start); the OOM killer takes the console before the data plane
+OOMScoreAdjust=300
+$(sd_opt 240 MemoryHigh=75%)
+$(sd_opt 240 MemoryMax=90%)
+TimeoutStopSec=30s
+LimitNOFILE=262144
+NoNewPrivileges=yes
+$(dns_caps_lines)
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+$(sd_opt 244 ProtectKernelLogs=yes)
+ProtectControlGroups=yes
+$(sd_opt 245 ProtectClock=yes)
+$(sd_opt 242 ProtectHostname=yes)
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+# AF_NETLINK: Go lists the network interfaces through netlink. Without it the console cannot list the addresses of this machine (only the
+# public link is shown), the Doctor cannot tell which addresses are this machine's, and the certificate of the console misses its IP address.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @swap @reboot @raw-io @obsolete @debug @cpu-emulation @clock
+# A call the filter refuses fails with EPERM instead of killing the process (the default is SIGSYS): the terminal of the console starts a shell, which inherits this filter, and
+# ncurses, chown, cp -a... make calls from the groups above; killed by SIGSYS the shell ended at once and the terminal "opened no session".
+SystemCallErrorNumber=EPERM
+UMask=0027
+ReadWritePaths=$DATA_DIR $LOG_DIR
+ReadOnlyPaths=$CONF_DIR
+$(state_dir_lines)
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  fi
+  mkdir -p "$(p /usr/lib/sysusers.d)" "$(p /usr/lib/tmpfiles.d)" "$(p /etc/logrotate.d)"
+  printf 'u toutwaf - "ToutWAF service account" %s /usr/sbin/nologin\n' "$DATA_DIR" >"$(p /usr/lib/sysusers.d/toutwaf.conf)"
+  printf 'd %s 0750 toutwaf toutwaf -\nd %s 0750 toutwaf toutwaf -\n' "$DATA_DIR" "$LOG_DIR" >"$(p /usr/lib/tmpfiles.d/toutwaf.conf)"
+  cat >"$(p /etc/logrotate.d/toutwaf)" <<EOF
+$LOG_DIR/*.log $LOG_DIR/*.ndjson {
+    daily
+    rotate 14
+    maxsize 500M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su $SVC_USER $SVC_USER
+    create 0640 $SVC_USER $SVC_USER
+}
+EOF
+  if want_dp || want_cp; then write_helpers "$sd"; fi
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ root helpers
+# toutwaf-cp and toutwaf-dp run as the unprivileged `toutwaf` user in a read-only sandbox, so they cannot upgrade anything or touch
+# the firewall. Each action goes through a small root helper that is started by a systemd path unit when the service account drops
+# a request file into $DATA_DIR, validates every value again, does the work and writes a status file the control plane reads back:
+#   toutwaf-upgrade   download + verify + install a release, health check, automatic rollback  (console: Updates; DP: update_engine)
+#   toutwaf-firewall  open the ports ToutWAF needs in firewalld / ufw                            (console: Settings > Firewall; this installer)
+#   toutwaf-blocklist put the large blocklists into the kernel (nftables, one table of its own)  (console: Lists > Kernel blocking)
+#   toutwaf-vpn       put the files of the VPN module on the machine, start / stop the tunnels, read their state (console: VPN)
+#   toutwaf-fw        load the nftables rules of the Firewall module with a root rollback timer, read them back (console: Firewall)
+#   toutwaf-jobs      run the privileged jobs of the scheduled tasks: a FIXED list (log rotation, journal vacuum; the power menu and self-repair verbs), no command from the request (console: Scheduled tasks, power menu)
+#   toutwaf-relay     rewrite control_plane.relay of toutwaf-dp.yaml (atomic, checked, rolled back on failure) for the console: Nodes > Relays
+#   toutwaf-time      show and change the clock of the machine: time zone, NTP on/off, NTP servers, the date and time themselves; five fixed actions, every value checked again (console: Settings > Date, time and time zone)
+# The scripts carry a "toutwaf-<name>-proto: N" marker that the control plane checks before offering the button.
+emit_helper() {   # NAME  (template on stdin)
+  local dst tmp; dst="$(p "$BIN_DIR/$1")"; tmp="$dst.new"
+  sed -e "s#@DATA_DIR@#$DATA_DIR#g" -e "s#@CONF_DIR@#$CONF_DIR#g" -e "s#@BIN_DIR@#$BIN_DIR#g" -e "s#@REPO@#$REPO#g" -e "s#@SVC_USER@#$SVC_USER#g" -e "s#@RELEASE_PUBKEY@#$RELEASE_PUBKEY_DEFAULT#g" >"$tmp"
+  chmod 0755 "$tmp"; mv -f "$tmp" "$dst"   # new inode: a helper that is running right now (it is updating us) keeps reading its old copy
+}
+write_helpers() {
+  local sd="$1"
+  emit_helper toutwaf-upgrade <<'TW_UPGRADE_TPL'
+#!/usr/bin/env bash
+# toutwaf-upgrade-proto: 2
+#
+# toutwaf-upgrade request   (called by toutwaf-dp with TW_DESIRED_ENGINE_VERSION) record a data-plane upgrade request
+# toutwaf-upgrade apply     (root; called by toutwaf-upgrade.service) perform the pending request
+# toutwaf-upgrade recover   (root; called by toutwaf-upgrade-guard.service at boot) finish or undo an update that was interrupted
+#
+# The control plane (user toutwaf, read-only sandbox) and the data plane cannot upgrade anything themselves: they only write
+# @DATA_DIR@/upgrade-request (KEY=VALUE). toutwaf-upgrade.path notices it and starts toutwaf-upgrade.service, which runs
+# this script as root. Everything in the request file is untrusted input here and is validated again, key by key.
+# Progress and the outcome are written to @DATA_DIR@/upgrade-status (STATE=queued|running|succeeded|failed|rolled_back)
+# and @DATA_DIR@/upgrade.log, which the control plane reads back (also after its own restart).
+#
+# `apply` hands the update to `toutwafctl upgrade-host apply` (docs/design/update-resilience.md): that program copies itself to a
+# root-only versioned directory and runs from the copy, downloads and verifies everything (Ed25519 signature, SHA-256, disk space,
+# compatibility, the new programs start, the database migration works on a copy) BEFORE it stops or replaces anything, saves the
+# current version, arms a transient systemd timer that rolls back by itself, runs the installer, watches the health for a
+# configurable window (5 minutes) and rolls back when it fails. This script is only the entry point and, for an installation whose
+# toutwafctl predates `upgrade-host` (the first update after the feature arrives), the fallback below: the former behaviour, but with
+# bounded steps, a heartbeat, the sources of install.sh (GitLab first, GitHub next, the direct address of upgrade.conf last) and a
+# status that can never be left at "running".
+set -uo pipefail
+# `set -u` makes an unbound variable fatal, and a helper that dies of it, silently, leaves the console waiting for an update that never
+# runs (the incident that led to this block). So: every variable this script reads is given a value right here, before anything else; the
+# exit trap (on_exit) turns ANY exit that comes without an outcome into a "failed" status with the reason, and jlog writes one line to the
+# journal for every failure. deploy/tests/upgrade-helper-test.sh runs the fallback with a fake environment and with a variable made unbound.
+exec 3>&2   # the journal: the standard error the service was started with, kept apart from the one captured below
+DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; BIN_DIR='@BIN_DIR@'; REPO='@REPO@'; SVC_USER='@SVC_USER@'
+comp=""; chan=""; ver=""; xonly=""; dg=0; job=""; trc=0; rc=0; got=0; base=""; direct=""; br=main; tmp=""; v=""; l=""; msg=""
+args=(); to=(); trees=(); VWHY=""; vrefused=0; VREF=0; SVER=""
+RELEASE_KEY_DEFAULT='@RELEASE_PUBKEY@'   # the built-in trust anchor, the one of install.sh (TOUTWAF_RELEASE_PUBKEY, then $CONF_DIR/release.pub, take precedence)
+errf=""; TOOK=0; LAST_ERR=""
+STATE_DIR="${DATA_DIR}-upgrade"
+REQ="$DATA_DIR/upgrade-request"; STATUS="$DATA_DIR/upgrade-status"; LOGF="$DATA_DIR/upgrade.log"; INSTLOG="$DATA_DIR/upgrade-installer.log"
+CTL="$BIN_DIR/toutwafctl"
+# the download sources, as in install.sh
+SRC_PRIMARY="${TOUTWAF_SRC_PRIMARY:-https://repo.qu3ntin.com/toutwaf/toutwaf/-/raw}"; SRC_FALLBACK="https://raw.githubusercontent.com/$REPO"
+if [ -n "${TOUTWAF_REPO:-}" ]; then SRC_PRIMARY="$SRC_FALLBACK"; SRC_FALLBACK=""; fi
+# the service account owns $DATA_DIR and can swap any name in it at any moment: root reads its request and writes its answers only through these
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
+# >>> relverify: the Ed25519 signature of a release's SHA256SUMS, checked by a root helper (deploy/helpers/relverify.sh; deploy/tests/upgrade-helper-test.sh checks the copies) >>>
+# The root update helper runs the installer of a release as root: it first checks that the installer is the one the SIGNED SHA256SUMS lists.
+# Engine: openssl when it really verifies Ed25519 (OpenSSL >= 3.0), else the pure-Python verifier below (the same text as ed25519_py of
+# install.sh, RFC 8032 section 5.1.7, only hashlib), else no engine: refused (fail closed).
+#   rv_pem KEY OUT        KEY: a PEM file or text, a file holding the raw 32-byte key in base64, or that base64: OUT becomes a PEM (SPKI)
+#   rv_verify KEY SUMS SIG TMPDIR   0: valid   1: invalid   2: no engine to verify with. SIG: the file of SHA256SUMS.sig (base64 of the raw signature)
+rv_pem() {
+  local k="$1" out="$2" raw
+  if [ -f "$k" ]; then raw="$(cat "$k")"; else raw="$k"; fi
+  case "$raw" in
+    *"BEGIN PUBLIC KEY"*) printf '%s\n' "$raw" >"$out";;
+    *) { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$raw" | tr -d '[:space:]' | base64 -d; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$out";;
+  esac
+}
+# rv_openssl_ok TMPDIR: true when this openssl verifies Ed25519 (probe: RFC 8032 test vector 2, a one-byte message)
+rv_openssl_ok() {
+  command -v openssl >/dev/null 2>&1 || return 1
+  local w="$1" pk="3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+  local sg="92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+  rv_hx() { printf "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+  { printf -- '-----BEGIN PUBLIC KEY-----\n'; { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; rv_hx "$pk"; } | base64 -w64; printf -- '-----END PUBLIC KEY-----\n'; } >"$w/rv-probe.pem"
+  rv_hx "$sg" >"$w/rv-probe.sig"; printf '\x72' >"$w/rv-probe.msg"
+  openssl pkeyutl -verify -pubin -inkey "$w/rv-probe.pem" -rawin -in "$w/rv-probe.msg" -sigfile "$w/rv-probe.sig" >/dev/null 2>&1
+}
+rv_python3() {
+  local c
+  for c in python3 /usr/libexec/platform-python python; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then command -v "$c"; return 0; fi
+  done
+  return 0
+}
+rv_py() {   # FILE: the verifier. Usage: python FILE PUBLIC_KEY_BASE64 SIGNATURE_FILE MESSAGE_FILE; exit 0 valid, 1 invalid, 2 usage
+  cat >"$1" <<'TW_ED25519_PY'
+import sys, hashlib, base64
+P = 2**255 - 19
+L = 2**252 + 27742317777372353535851937790883648493
+D = -121665 * pow(121666, P - 2, P) % P
+SQRT_M1 = pow(2, (P - 1) // 4, P)
+
+def recover_x(y, sign):
+    if y >= P:
+        return None
+    x2 = (y * y - 1) * pow(D * y * y + 1, P - 2, P) % P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (P + 3) // 8, P)
+    if (x * x - x2) % P:
+        x = x * SQRT_M1 % P
+    if (x * x - x2) % P:
+        return None
+    return x if (x & 1) == sign else P - x
+
+def add(p, q):
+    a = (p[1] - p[0]) * (q[1] - q[0]) % P
+    b = (p[1] + p[0]) * (q[1] + q[0]) % P
+    c = 2 * p[3] * q[3] * D % P
+    d = 2 * p[2] * q[2] % P
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return (e * f % P, g * h % P, f * g % P, e * h % P)
+
+def mul(k, p):
+    r = (0, 1, 1, 0)
+    while k:
+        if k & 1:
+            r = add(r, p)
+        p = add(p, p)
+        k >>= 1
+    return r
+
+def decode(b):
+    n = int.from_bytes(b, "little")
+    y = n & ((1 << 255) - 1)
+    x = recover_x(y, n >> 255)
+    return None if x is None else (x, y, 1, x * y % P)
+
+BY = 4 * pow(5, P - 2, P) % P
+BASE = (recover_x(BY, 0), BY, 1, recover_x(BY, 0) * BY % P)
+
+def verify(pub, sig, msg):
+    if len(pub) != 32 or len(sig) != 64:
+        return False
+    s = int.from_bytes(sig[32:], "little")
+    if s >= L:
+        return False
+    a, r = decode(pub), decode(sig[:32])
+    if a is None or r is None:
+        return False
+    h = int.from_bytes(hashlib.sha512(sig[:32] + pub + msg).digest(), "little") % L
+    lhs, rhs = mul(s, BASE), add(r, mul(h, a))
+    return (lhs[0] * rhs[2] - rhs[0] * lhs[2]) % P == 0 and (lhs[1] * rhs[2] - rhs[1] * lhs[2]) % P == 0
+
+try:
+    pub = base64.b64decode(sys.argv[1], validate=True)
+    sig = open(sys.argv[2], "rb").read()
+    msg = open(sys.argv[3], "rb").read()
+except Exception:
+    sys.exit(2)
+sys.exit(0 if verify(pub, sig, msg) else 1)
+TW_ED25519_PY
+}
+rv_verify() {
+  local key="$1" sums="$2" sigf="$3" w="$4" pem="$4/rv-key.pem" bin="$4/rv-sig.bin" py
+  rv_pem "$key" "$pem" || return 1
+  tr -d '[:space:]' <"$sigf" | base64 -d >"$bin" 2>/dev/null || return 1
+  [ "$(wc -c <"$bin" | tr -d ' ')" = 64 ] || return 1
+  if rv_openssl_ok "$w"; then
+    openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in "$sums" -sigfile "$bin" >/dev/null 2>&1 && return 0
+    return 1
+  fi
+  py="$(rv_python3)"; [ -n "$py" ] || return 2
+  rv_py "$w/rv-ed25519.py"
+  "$py" "$w/rv-ed25519.py" "$(sed '/-----/d' "$pem" | tr -d '[:space:]' | base64 -d | tail -c 32 | base64 -w0)" "$bin" "$sums"
+}
+# <<< relverify <<<
+
+# a version the request may name: "latest", X.Y.Z or X.Y.Z.W (components 0 or 1-9 digits without leading zero), optionally -pre-release (dot-separated
+# identifiers of [0-9A-Za-z-], a numeric one without leading zero). The same format as the other readers (spec/version-vectors.json); a leading "v" is not accepted.
+valid_version() {
+  local v="${1:-}" pre id
+  [[ "$v" == latest ]] && return 0
+  [[ "$v" =~ ^(0|[1-9][0-9]{0,8})(\.(0|[1-9][0-9]{0,8})){2,3}(-([0-9A-Za-z][0-9A-Za-z-]*(\.[0-9A-Za-z][0-9A-Za-z-]*)*))?$ ]] || return 1
+  pre="${BASH_REMATCH[5]:-}"
+  [ "${#pre}" -le 41 ] || return 1
+  local IFS=.
+  for id in $pre; do [[ "$id" =~ ^0[0-9]+$ ]] && return 1; done
+  return 0
+}
+valid_channel() { [[ "${1:-}" == stable || "${1:-}" == dev ]]; }
+valid_comp()    { [[ "${1:-}" == all || "${1:-}" == cp || "${1:-}" == dp ]]; }
+valid_job()     { [[ -z "${1:-}" || "${1:-}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
+req_get() { sed -n "s/^${1:-}=//p" "${priv:-/dev/null}" 2>/dev/null | tail -n1 | tr -d '\r'; }
+conf_get() { sed -n "s/^${1:-}=//p" "$CONF_DIR/installer.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
+uconf_get() { sed -n "s/^${1:-}=//p" "$CONF_DIR/upgrade.conf" 2>/dev/null | head -n1 | tr -d '\r"'"'"; }
+# jlog MESSAGE: one line in the journal for every failure (the service's standard error goes there; a run by hand gets syslog)
+jlog() {
+  printf 'toutwaf-upgrade: %s\n' "$*" >&3 2>/dev/null || printf 'toutwaf-upgrade: %s\n' "$*"
+  if [ -z "${JOURNAL_STREAM:-}" ] && command -v logger >/dev/null 2>&1; then logger -t toutwaf-upgrade -p daemon.err -- "$*" 2>/dev/null || true; fi
+}
+# the resilient implementation is there when the installed toutwafctl answers its self-test
+have_host() { [ -x "$CTL" ] && "$CTL" upgrade-host selftest 2>/dev/null | grep -qx 'toutwaf-upgrade-host 1'; }
+
+S_STATE=""; S_PHASE=""; S_CHANNEL=""; S_FROM=""; S_TO=""; S_FROM_BUILD=""; S_TO_BUILD=""; S_JOB=""; S_MSG=""; S_STARTED=""; S_FINISHED=""
+FINAL=0; BEAT_PID=""; inst=""; out=""; priv=""; plogf=""; pinst=""
+# the status is a new file of root's renamed over the old name (put_file): a link left there by the service account is replaced, never followed
+write_status() {
+  { printf 'STATE=%s\nPHASE=%s\nCHANNEL=%s\nFROM=%s\nTO=%s\nFROM_BUILD=%s\nTO_BUILD=%s\nJOB=%s\nSTARTED=%s\nFINISHED=%s\nHEARTBEAT=%s\n' "$S_STATE" "$S_PHASE" "$S_CHANNEL" "$S_FROM" "$S_TO" "$S_FROM_BUILD" "$S_TO_BUILD" "$S_JOB" "$S_STARTED" "$S_FINISHED" "$(date +%s)"
+    printf 'MESSAGE=%s\n' "$(printf '%s' "$S_MSG" | tr -d '\000-\037' | cut -c1-300)"; } | put_file "$STATUS" || true
+}
+# the log is kept in a private file of root's and published (a new file renamed over $LOGF) after every line: nothing is appended through a name of the account
+plog() { [ -n "$plogf" ] || return 0; printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>"$plogf"; put_file "$LOGF" <"$plogf" 2>/dev/null || true; }
+cur_version() {
+  local v=""
+  if [ -x "$BIN_DIR/toutwaf-cp" ]; then v="$("$BIN_DIR/toutwaf-cp" version 2>/dev/null | awk 'NR==1{print $2}')"; fi
+  if [ -z "$v" ] && [ -x "$BIN_DIR/toutwaf-dp" ]; then v="$("$BIN_DIR/toutwaf-dp" --version 2>/dev/null | awk 'NR==1{print $2}')"; fi
+  printf '%s' "$v"
+}
+# the build of what is installed ("unknown" when the binaries name none): the version keeps one name between two publications of the dev channel
+cur_build() {
+  local b=""
+  if [ -x "$BIN_DIR/toutwaf-cp" ]; then b="$("$BIN_DIR/toutwaf-cp" version 2>/dev/null | sed -n 's/.*(build \([^) ]*\)).*/\1/p' | head -n1)"; fi
+  if [ -z "$b" ] && [ -x "$BIN_DIR/toutwaf-dp" ]; then b="$("$BIN_DIR/toutwaf-dp" --version 2>/dev/null | sed -n 's/.*(build \([^) ]*\)).*/\1/p' | head -n1)"; fi
+  printf '%s' "${b:-unknown}"
+}
+fail() {   # message
+  S_STATE=failed; S_PHASE=Failed; S_MSG="${1:-the update failed}"; S_FINISHED="$(date +%s)"; FINAL=1; write_status; plog "ERROR $S_MSG"; jlog "ERROR $S_MSG"; exit 1
+}
+# whatever happens, the update never ends without an outcome: once the request is taken, ANY exit that comes before the final status (a signal, an
+# unbound variable, a command that failed in a way nobody foresaw) writes "failed" with the reason, in the status the console reads and in the
+# journal. A SIGKILL is covered by the heartbeat: the console treats a status that stops beating as dead after a few minutes.
+on_exit() {
+  local rc=$?
+  trap - EXIT
+  [ -z "${BEAT_PID:-}" ] || kill "$BEAT_PID" 2>/dev/null
+  if [ "$FINAL" = 0 ] && [ "$TOOK" = 1 ]; then
+    if [ -n "$errf" ] && [ -s "$errf" ]; then LAST_ERR="$(tail -n 1 "$errf" 2>/dev/null | tr -d '\000-\037' | cut -c1-200)"; fi
+    S_STATE=failed; S_PHASE=Failed; S_FINISHED="$(date +%s)"
+    [ -n "$S_MSG" ] || S_MSG="the update helper stopped unexpectedly (exit $rc${LAST_ERR:+: $LAST_ERR}): see 'journalctl -u toutwaf-upgrade'"
+    write_status; plog "ERROR $S_MSG"; jlog "ERROR $S_MSG"
+  fi
+  if [ -n "$errf" ]; then   # what the script itself printed to its standard error goes to the journal now
+    if [ -s "$errf" ]; then cat "$errf" >&3 2>/dev/null; fi
+    rm -f "$errf"
+  fi
+  [ -z "$inst" ] || rm -f "$inst"
+  [ -z "$out" ] || rm -f "$out"
+  [ -z "$priv" ] || rm -f "$priv"
+  [ -z "$plogf" ] || rm -f "$plogf"
+  [ -z "$pinst" ] || rm -f "$pinst"
+}
+# curl_s: curl that keeps a download which started on https on https: a redirect to plain http is refused (curl -L follows it by default)
+curl_s() { local a pr=(); for a in "$@"; do case "$a" in https://*) pr=(--proto-redir "=https"); break;; esac; done; curl "${pr[@]+"${pr[@]}"}" "$@"; }
+# downgrade_grant VERSION: ALLOW_DOWNGRADE=1 in the request (a file the service account writes) is not enough to go back: root must have created the flag
+# $CONF_DIR/allow-downgrade (toutwafctl upgrade-host allow-downgrade --version X): a plain file of root's that nobody else can write, naming THIS version, that
+# expires (a day at most). It is consumed by the update that uses it. 0: allowed (the flag is removed); 1: refused, VWHY says why. (S-04; the same rules as
+# controlplane/internal/upgradehost/downgrade.go)
+downgrade_grant() {
+  local want="$1" f="$CONF_DIR/allow-downgrade" st uid mode size gv exp now
+  VWHY=""
+  if [ -L "$f" ] || [ ! -f "$f" ]; then VWHY="root has not allowed it ($f is missing)"; return 1; fi
+  st="$(LC_ALL=C stat -c '%u|%a|%s' -- "$f" 2>/dev/null)" || { VWHY="$f cannot be read"; return 1; }
+  IFS='|' read -r uid mode size <<<"$st"
+  [ "$uid" = 0 ] || { VWHY="$f is owned by user $uid, not by root"; return 1; }
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || { VWHY="$f can be written by someone else than root"; return 1; }
+  [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le 512 ] || { VWHY="$f is too large to be a flag"; return 1; }
+  gv="$(sed -n 's/^VERSION=//p' "$f" | head -n1 | tr -d '\r')"; exp="$(sed -n 's/^EXPIRES=//p' "$f" | head -n1 | tr -d '\r')"
+  { valid_version "$gv" && [ "$gv" != latest ]; } || { VWHY="$f names no valid version"; return 1; }
+  [[ "$exp" =~ ^[0-9]{1,12}$ ]] || { VWHY="$f has no expiry"; return 1; }
+  now="$(date +%s)"
+  [ "$exp" -gt "$now" ] || { VWHY="the flag $f expired"; return 1; }
+  [ $(( exp - now )) -le 86460 ] || { VWHY="$f expires in more than a day: a flag lives a day at most"; return 1; }
+  [ "$gv" = "$want" ] || { VWHY="root allowed a downgrade to $gv, not to $want"; return 1; }
+  rm -f -- "$f"
+  return 0
+}
+# fetch_installer TREE VERSION OUT: the installer that is about to run as root must be the one that the SIGNED SHA256SUMS of the release lists
+# (S-04: the mutable copy of the branch used to be run as it came, trusted as far as the HTTPS connection). TREE is the root of a release tree
+# (channel.json, releases/<version>/...). The signature is checked with the key of this installation (TOUTWAF_RELEASE_PUBKEY, $CONF_DIR/release.pub,
+# else the built-in one), then the installer of releases/<version>/ (the immutable copy; else the one of the branch) must have the listed SHA-256.
+# 0: OUT holds the verified installer. 1: refused or not reachable, VWHY says why and vrefused=1 when something was there but not verified.
+fetch_installer() {
+  local t="$1" want="$2" out="$3" d ch build="" q="" k listed got rc
+  VWHY=""
+  d="$(mktemp -d)" || { VWHY="no temporary directory"; return 1; }
+  if [ "$want" = latest ] || [ -z "$want" ]; then
+    curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 60 -o "$d/channel.json" "$t/channel.json" 2>>"$plogf" || { VWHY="channel.json cannot be read"; rm -rf "$d"; return 1; }
+    ch="$(tr -d '\r' <"$d/channel.json")"
+    want="$(printf '%s\n' "$ch" | sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' | head -n1)"
+    valid_version "$want" && [ "$want" != latest ] || { VWHY="channel.json names no valid version"; rm -rf "$d"; return 1; }
+    build="$(printf '%s\n' "$ch" | sed -n 's/^[[:space:]]*"build"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{12\}\)".*$/\1/p' | head -n1)"
+  fi
+  # a mirror that caches (raw.githubusercontent.com) is asked past its cache for the build that was announced
+  case "$t" in http://*|https://*) [ -z "$build" ] || q="?b=$build";; esac
+  curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 60 -o "$d/SHA256SUMS" "$t/releases/$want/SHA256SUMS$q" 2>>"$plogf" || { VWHY="SHA256SUMS of $want cannot be read"; rm -rf "$d"; return 1; }
+  vrefused=1; VREF=1   # from here on a source answered: whatever is wrong is a refusal, not a network problem
+  if ! curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 60 -o "$d/SHA256SUMS.sig" "$t/releases/$want/SHA256SUMS.sig$q" 2>>"$plogf"; then
+    VWHY="the release $want carries no signature (SHA256SUMS.sig)"; rm -rf "$d"; return 1
+  fi
+  k="${TOUTWAF_RELEASE_PUBKEY:-}"
+  if [ -z "$k" ] && [ -r "$CONF_DIR/release.pub" ]; then k="$CONF_DIR/release.pub"; fi
+  [ -n "$k" ] || k="$RELEASE_KEY_DEFAULT"
+  rv_verify "$k" "$d/SHA256SUMS" "$d/SHA256SUMS.sig" "$d"; rc=$?
+  case "$rc" in
+    0) ;;
+    2) VWHY="no way to verify the Ed25519 signature here (OpenSSL 3 or python3 is needed)"; rm -rf "$d"; return 1;;
+    *) VWHY="the signature of SHA256SUMS of $want is not valid"; rm -rf "$d"; return 1;;
+  esac
+  listed="$(sed -n 's/^\([0-9A-Fa-f]\{64\}\)[[:space:]][[:space:]]*\*\{0,1\}install\.sh[[:space:]]*$/\1/p' "$d/SHA256SUMS" | tr 'A-F' 'a-f' | tail -n1)"
+  [ -n "$listed" ] || { VWHY="the signed SHA256SUMS of $want does not list install.sh, which would run as root"; rm -rf "$d"; return 1; }
+  # the immutable copy of the release first, then (releases published before the copies were kept there) the one of the branch
+  if ! curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$out" "$t/releases/$want/install.sh$q" 2>>"$plogf" || ! head -c2 "$out" | grep -q '^#!'; then
+    curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$out" "$t/install.sh" 2>>"$plogf" || { VWHY="install.sh cannot be downloaded"; rm -rf "$d"; return 1; }
+  fi
+  head -c2 "$out" | grep -q '^#!' || { VWHY="install.sh is not a script"; rm -rf "$d"; return 1; }
+  got="$(sha256sum "$out" | cut -d' ' -f1)"
+  [ "$got" = "$listed" ] || { VWHY="install.sh does not match the signed SHA256SUMS of $want (listed ${listed:0:12}, downloaded ${got:0:12})"; rm -rf "$d"; return 1; }
+  SVER="$want"
+  rm -rf "$d"
+  return 0
+}
+trap on_exit EXIT
+
+case "${1:-request}" in
+  request)
+    v="${TW_DESIRED_ENGINE_VERSION:-latest}"; [ -n "$v" ] || v=latest
+    valid_version "$v" || { jlog "ERROR request refused: invalid version '$v'"; echo "toutwaf-upgrade: invalid version '$v'" >&2; exit 1; }
+    tmp="$(mktemp "$REQ.XXXXXX")" || { jlog "ERROR request not recorded: cannot create a file next to $REQ"; exit 1; }
+    printf 'PROTO=2\nCOMPONENT=dp\nCHANNEL=%s\nVERSION=%s\nALLOW_DOWNGRADE=0\nJOB=\n' "$(conf_get CHANNEL | grep -x -e stable -e dev || echo stable)" "$v" >"$tmp"
+    mv -f "$tmp" "$REQ" || { jlog "ERROR request not recorded: cannot move $tmp to $REQ"; rm -f "$tmp"; exit 1; }
+    echo "toutwaf-upgrade: upgrade to $v requested (applied by toutwaf-upgrade.service)";;
+  recover)
+    [ "$(id -u)" -eq 0 ] || { jlog "ERROR recover refused: must run as root"; echo "toutwaf-upgrade recover must run as root" >&2; exit 1; }
+    have_host || exit 0
+    exec "$CTL" upgrade-host recover --data-dir "$DATA_DIR" --conf-dir "$CONF_DIR" --bin-dir "$BIN_DIR" --state-dir "$STATE_DIR" --svc-user "$SVC_USER";;
+  apply)
+    [ "$(id -u)" -eq 0 ] || { jlog "ERROR apply refused: must run as root"; echo "toutwaf-upgrade apply must run as root" >&2; exit 1; }
+    [ -e "$REQ" ] || [ -L "$REQ" ] || exit 0
+    # the resilient path: the request file is read (and consumed) by the Go program, from its staged copy
+    if have_host; then
+      exec "$CTL" upgrade-host apply --data-dir "$DATA_DIR" --conf-dir "$CONF_DIR" --bin-dir "$BIN_DIR" --state-dir "$STATE_DIR" --svc-user "$SVC_USER"
+    fi
+    # ---- the fallback: this installation's toutwafctl does not know `upgrade-host` yet
+    errf="$(mktemp)" && exec 2>>"$errf"   # from here the shell's own complaints (an unbound variable...) are kept and reach the journal and the status
+    priv="$(mktemp)"; plogf="$(mktemp)"; pinst="$(mktemp)"
+    if [ -z "$priv" ] || [ -z "$plogf" ] || [ -z "$pinst" ]; then jlog "ERROR cannot create temporary files (disk full?)"; exit 1; fi
+    # the request is copied by copy_safe (a regular file of the account, one name, nobody else can write it, at most 4 KiB, no link, no FIFO) and removed
+    take_request "$REQ" "$priv" 4096; trc=$?
+    [ "$trc" -ne 1 ] || exit 0
+    # from here on the console is waiting for an outcome: whatever stops this script, on_exit writes it
+    TOOK=1; S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"
+    if [ "$trc" -eq 0 ]; then S_JOB="$(req_get JOB)"; valid_job "$S_JOB" || S_JOB=""; fi
+    if [ "$trc" -ne 0 ]; then S_JOB=""; fail "invalid update request: the file was refused (it must be a plain file owned by the owner of the data directory, not writable by anyone else, 4 KiB at most)"; fi
+    # legacy request (protocol 1): one line holding the version
+    if grep -q '=' "$priv"; then
+      comp="$(req_get COMPONENT)"; chan="$(req_get CHANNEL)"; ver="$(req_get VERSION)"; dg="$(req_get ALLOW_DOWNGRADE)"; job="$(req_get JOB)"
+    else
+      ver="$(head -n1 "$priv" | tr -d '\r')"; comp=dp; chan="$(conf_get CHANNEL)"; dg=0; job=""
+    fi
+    : >"$plogf"; : >"$pinst"; put_file "$LOGF" </dev/null; put_file "$INSTLOG" </dev/null
+    S_JOB="$job"; S_CHANNEL="$chan"; S_TO="$ver"; S_FROM="$(cur_version)"; S_FROM_BUILD="$(cur_build)"; S_STARTED="$(date +%s)"; S_STATE=running; S_PHASE="Checking the request"
+    if ! { valid_comp "$comp" && valid_channel "$chan" && valid_version "$ver" && valid_job "$job"; }; then S_JOB=""; fail "invalid update request"; fi
+    [ "$dg" = 1 ] || dg=0
+    write_status
+    # a heartbeat for as long as this helper lives, whatever the installer is doing
+    ( while sleep 10; do touch -h "$STATUS" 2>/dev/null; [ -s "$pinst" ] && put_file "$INSTLOG" <"$pinst" 2>/dev/null; done ) & BEAT_PID=$!
+    plog "update requested: component=$comp channel=$chan version=$ver downgrade_allowed=$dg (fallback helper: this toutwafctl has no upgrade-host)"
+    br=main; [ "$chan" = dev ] && br=dev
+    base="$(conf_get BASE_URL)"; case "$base" in http://*|https://*) ;; *) base="";; esac
+    # the installer comes from the first source that answers AND whose release is signed with the key of this installation: a mirror, or GitLab,
+    # then GitHub, then the direct address of upgrade.conf. An installer that the signed SHA256SUMS does not describe is never run (S-04).
+    trees=()
+    if [ -n "${TOUTWAF_INSTALLER_URL:-}" ]; then :   # the operator's own installer (below): never the signed one
+    elif [ -n "$base" ]; then trees+=("$base")
+    else
+      trees+=("$SRC_PRIMARY/$br"); [ -z "$SRC_FALLBACK" ] || trees+=("$SRC_FALLBACK/$br")
+    fi
+    direct="$(uconf_get DIRECT_URL)"; case "$direct" in http://*|https://*) trees+=("${direct%/}");; esac
+    inst="$(mktemp)"
+    S_PHASE="Downloading the installer"; write_status
+    got=0
+    if [ -n "${TOUTWAF_INSTALLER_URL:-}" ]; then
+      # an installer named by upgrade.env is not the signed one: it runs as root only when the operator says it twice
+      [ "${TOUTWAF_ALLOW_UNSIGNED_INSTALLER:-}" = 1 ] || fail "the installer refused: TOUTWAF_INSTALLER_URL names an installer that the signed SHA256SUMS does not cover; set TOUTWAF_ALLOW_UNSIGNED_INSTALLER=1 in $CONF_DIR/upgrade.env to run it anyway. Nothing was changed"
+      plog "WARNING the installer comes from TOUTWAF_INSTALLER_URL, not from the signed release (TOUTWAF_ALLOW_UNSIGNED_INSTALLER=1)"
+      plog "$S_PHASE ($TOUTWAF_INSTALLER_URL)"
+      if curl_s -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o "$inst" "$TOUTWAF_INSTALLER_URL" 2>>"$plogf" && head -c2 "$inst" | grep -q '^#!'; then got=1; fi
+    else
+      for tree in "${trees[@]+"${trees[@]}"}"; do
+        plog "$S_PHASE ($tree)"
+        VREF=0
+        if fetch_installer "$tree" "$ver" "$inst"; then got=1; plog "the installer of release $SVER matches the signed SHA256SUMS"; break; fi
+        plog "this source is not usable: $VWHY; trying the next one"
+        [ "$VREF" = 0 ] || msg="$VWHY"
+      done
+    fi
+    if [ "$got" != 1 ]; then
+      if [ "$vrefused" = 1 ]; then fail "the installer was refused: $msg. Nothing was changed"; fi
+      fail "cannot download the installer from any source (${trees[*]+${trees[*]}}${TOUTWAF_INSTALLER_URL:-}). Nothing was changed; check the network of this server or set DIRECT_URL in $CONF_DIR/upgrade.conf"
+    fi
+    # a downgrade (or a withdrawn release) needs more than the request: the flag of root, for this very version, consumed here (S-04)
+    if [ "$dg" = 1 ]; then
+      [ -n "${TOUTWAF_INSTALLER_URL:-}" ] && SVER="$ver"
+      downgrade_grant "$SVER" || fail "ALLOW_DOWNGRADE needs the flag of root, and $VWHY. As root: toutwafctl upgrade-host allow-downgrade --version ${SVER:-X}. Nothing was changed"
+      plog "downgrade allowed by $CONF_DIR/allow-downgrade for $SVER (consumed by this update)"
+    fi
+    # EXTRAS_ONLY=1: only the extras of the installed release (the Windows agents, the antivirus programs) are installed, nothing is replaced or restarted;
+    # the installer downloads them, checks them against the signed SHA256SUMS like the archive, and installs them (install.sh --extras-only)
+    xonly="$(req_get EXTRAS_ONLY)"
+    if [ "$xonly" = 1 ]; then args=(--extras-only --component "$comp" --channel "$chan" --yes --no-color --quiet)
+    else args=(--update --component "$comp" --channel "$chan" --yes --no-color --quiet); fi
+    [ "$ver" = latest ] || args+=(--version "$ver")
+    [ -z "$base" ] || args+=(--base-url "$base")
+    [ "$dg" = 1 ] && args+=(--force)
+    S_PHASE="Running the installer"; write_status
+    out="$(mktemp)"
+    to=(); command -v timeout >/dev/null 2>&1 && to=(timeout 1200)
+    TOUTWAF_PROGRESS_FILE="$pinst" "${to[@]+"${to[@]}"}" bash "$inst" "${args[@]}" >"$out" 2>&1 </dev/null; rc=$?
+    # the installer's own messages (errors, rollback notices) go to the log too
+    sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -v '^[[:space:]]*$' | tail -n 40 | while IFS= read -r l; do plog "$l"; printf '%s\n' "$l" >>"$pinst"; done
+    put_file "$INSTLOG" <"$pinst" 2>/dev/null || true
+    # what the installer corrected by itself ("[autofix] Problem detected: ...; correction applied: ...; new attempt: ..."): said in the log of the update
+    # and, for a success, in its message: an update that had to correct something is never silent about it
+    afl="$(sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$pinst" "$out" 2>/dev/null | grep -F '[autofix] ' | sed 's/^[^[]*\[autofix\] /[autofix] /' | awk '!s[$0]++' | tail -n 20 || true)"
+    [ -z "$afl" ] || while IFS= read -r l; do plog "installer: $l"; done <<<"$afl"
+    S_TO="$(cur_version)"; [ -n "$S_TO" ] || S_TO="$ver"
+    S_TO_BUILD="$(cur_build)"
+    S_FINISHED="$(date +%s)"
+    FINAL=1
+    if [ "$rc" -eq 0 ]; then
+      S_STATE=succeeded; S_PHASE="Done"; S_MSG=""; plog "update finished: now running ${S_TO} (build ${S_TO_BUILD})"
+      [ -z "$afl" ] || S_MSG="the installer corrected $(printf '%s\n' "$afl" | grep -c .) problem(s) by itself (see the log of the update)"
+    else
+      msg="$(sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' "$out" | grep -iE 'error|fail|did not|refus|downgrad|checksum|signature|withdrawn|yanked' | tail -n1 | sed 's/^[^[:alnum:]]*//')"
+      [ "$rc" -ne 124 ] || msg="the installer did not finish within 20 minutes"
+      S_MSG="${msg:-installer exited with status $rc}"
+      if grep -qi 'rolled back to the previous version' "$out" "$plogf" 2>/dev/null; then S_STATE=rolled_back; else S_STATE=failed; fi
+      S_PHASE="Failed"; plog "ERROR update failed (rc=$rc): $S_MSG"; jlog "ERROR update failed (rc=$rc): $S_MSG"
+    fi
+    write_status
+    exit "$rc";;
+  *) jlog "ERROR unknown command '${1:-}'"; echo "usage: toutwaf-upgrade [request|apply|recover]" >&2; exit 2;;
+esac
+TW_UPGRADE_TPL
+  emit_helper toutwaf-firewall <<'TW_FIREWALL_TPL'
+#!/usr/bin/env bash
+# toutwaf-firewall-proto: 1
+#
+# toutwaf-firewall status                       scan the host firewall and write @DATA_DIR@/firewall-status
+# toutwaf-firewall open [--dp 80,443] [--dp-udp 443|none] [--console PORT [--console-from CIDR]] [--agent PORT --agent-from CIDR]
+#                                               open ports (installer, root). --dp-udp is HTTP/3 (QUIC): the UDP port of the HTTPS listener, only
+#                                               when firewall.conf records it (DP_UDP_PORTS, written only when HTTP/3 is on); `none` closes the
+#                                               UDP rules this helper added
+# toutwaf-firewall apply                        (root; toutwaf-firewall.service) perform @DATA_DIR@/firewall-request (ACTION open, status or
+#                                               revoke: take back one data-plane API rule this helper added, from one source)
+# toutwaf-firewall close                        remove every rule this helper added (uninstall)
+# toutwaf-firewall print                        print the exact commands for this host
+#
+# Drives firewalld and ufw only. nftables-only and iptables-only hosts are never modified: the exact commands are printed and
+# reported (RESULT=unmanaged). Only ports recorded by the installer in @CONF_DIR@/firewall.conf (root-owned) can be opened,
+# only tcp (and, for the data plane when HTTP/3 is on, the one udp port DP_UDP_PORTS), and only with a validated source network. The data-plane API port is never opened to everyone.
+# Rules added here are remembered in @CONF_DIR@/firewall.managed so that `close` removes exactly those and nothing else.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; SVC_USER='@SVC_USER@'
+REQ="$DATA_DIR/firewall-request"; STATUS="$DATA_DIR/firewall-status"; CONF="$CONF_DIR/firewall.conf"; MANAGED="$CONF_DIR/firewall.managed"
+have() { command -v "$1" >/dev/null 2>&1; }
+# firewalld_running: true only when the daemon is really up. "firewall-cmd --state" alone is not a safe probe: with firewalld installed but stopped it
+# triggers D-Bus activation (starts the daemon as a side effect, or blocks ~50 s when it cannot start, e.g. in a container)
+firewalld_running() {
+  have firewall-cmd || return 1
+  if [ -d /run/systemd/system ] && have systemctl; then systemctl is-active --quiet firewalld 2>/dev/null || return 1
+  elif have pgrep; then pgrep -x firewalld >/dev/null 2>&1 || return 1; fi
+  if have timeout; then timeout 20 firewall-cmd --state >/dev/null 2>&1; else firewall-cmd --state >/dev/null 2>&1; fi
+}
+
+# ---- validation (the request file is writable by the service account: never trust it) ------------------------------------
+valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+valid_job()  { [[ -z "$1" || "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
+# a source is an IPv4/IPv6 address or CIDR, nothing else (no spaces, quotes, newlines: it ends up in a firewall rule)
+valid_src()  {
+  [[ "$1" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || return 1
+  case "$1" in */0) return 1;; esac
+  if [[ "$1" == *:* ]]; then [[ "$1" =~ ^[0-9a-fA-F:.]+(/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))?$ ]] && [[ "$1" == *:*:* || "$1" == ::* ]]
+  else [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[12][0-9]|3[0-2]))?$ ]] && ! [[ "$1" =~ (^|\.)(25[6-9]|2[6-9][0-9]|[3-9][0-9][0-9])(\.|/|$) ]]; fi
+}
+fam() { [[ "$1" == *:* ]] && echo ipv6 || echo ipv4; }
+conf_get() { sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -n1 | tr -d '\r"'"'"; }
+in_list() { local x="$1"; shift; local i; for i in "$@"; do [ "$i" = "$x" ] && return 0; done; return 1; }
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
+
+CONF_DP=""; CONF_DP_UDP=""; CONF_CONSOLE=""; CONF_AGENT=""
+load_conf() {
+  CONF_DP="$(conf_get DP_PORTS | tr ',' ' ')"; CONF_CONSOLE="$(conf_get CONSOLE_PORT)"; CONF_AGENT="$(conf_get AGENT_PORT)"
+  CONF_DP_UDP="$(conf_get DP_UDP_PORTS | tr ',' ' ')"   # HTTP/3 (QUIC): empty unless HTTP/3 is on for this node
+}
+
+# ---- backend detection ------------------------------------------------------------------------------------------------------
+BACKEND=none; ACTIVE=0; TOOLS=""
+detect() {
+  BACKEND=none; ACTIVE=0; TOOLS=""
+  have firewall-cmd && TOOLS="$TOOLS,firewall-cmd"; have ufw && TOOLS="$TOOLS,ufw"; have nft && TOOLS="$TOOLS,nft"; have iptables && TOOLS="$TOOLS,iptables"
+  TOOLS="${TOOLS#,}"
+  if firewalld_running; then BACKEND=firewalld; ACTIVE=1
+  elif have ufw && grep -q '^Status: active' <<<"$(ufw status 2>/dev/null)"; then BACKEND=ufw; ACTIVE=1
+  elif have nft && nft list ruleset 2>/dev/null | awk '/hook input/{h=1} h && (/policy drop/ || /(^|[ \t])(drop|reject)($|[ \t])/){f=1} END{exit !f}'; then BACKEND=nftables; ACTIVE=1
+  elif have iptables && grep -qE '^-P INPUT (DROP|REJECT)|^-A INPUT .*-j (DROP|REJECT)' <<<"$(iptables -S INPUT 2>/dev/null)"; then BACKEND=iptables; ACTIVE=1
+  fi
+}
+
+# ---- what is open (only the ports ToutWAF cares about) -----------------------------------------------------------------------
+all_ports() { echo $CONF_DP $CONF_CONSOLE $CONF_AGENT; }
+OPEN=""
+add_open() { OPEN="${OPEN:+$OPEN,}tcp:$1${2:+@$2}"; }
+add_open_udp() { OPEN="${OPEN:+$OPEN,}udp:$1"; }
+scan_open() {
+  OPEN=""
+  local p src ports spec
+  case "$BACKEND" in
+    firewalld)
+      local lp svcs s
+      lp=" $(firewall-cmd --list-ports 2>/dev/null | tr '\n' ' ') "
+      svcs="$(firewall-cmd --list-services 2>/dev/null)"
+      for s in $svcs; do lp="$lp $(firewall-cmd --permanent --service="$s" --get-ports 2>/dev/null | tr '\n' ' ') "; done
+      for p in $(all_ports); do case "$lp" in *" $p/tcp "*) add_open "$p";; esac; done
+      for p in $CONF_DP_UDP; do case "$lp" in *" $p/udp "*) add_open_udp "$p";; esac; done
+      firewall-cmd --list-rich-rules 2>/dev/null | while IFS= read -r l; do
+        src="$(printf '%s' "$l" | sed -n 's/.*source address="\([^"]*\)".*/\1/p')"; p="$(printf '%s' "$l" | sed -n 's/.* port="\([0-9]*\)".*/\1/p')"
+        case "$l" in *'protocol="tcp"'*accept*) ;; *) continue;; esac
+        [ -n "$src" ] && [ -n "$p" ] && valid_src "$src" && in_list "$p" $(all_ports) && echo "tcp:$p@$src"
+      done >"$TMPOPEN"
+      while IFS= read -r l; do OPEN="${OPEN:+$OPEN,}$l"; done <"$TMPOPEN";;
+    ufw)
+      ufw status 2>/dev/null | awk '$1 ~ /^[0-9]+(\/tcp)?$/ && $2 == "ALLOW" {print $1, $3}' >"$TMPOPEN"
+      while read -r spec src; do
+        p="${spec%/tcp}"; valid_port "$p" || continue; in_list "$p" $(all_ports) || continue
+        case "$src" in Anywhere) add_open "$p";; *) valid_src "$src" && add_open "$p" "$src";; esac
+      done <"$TMPOPEN"
+      ufw status 2>/dev/null | awk '$1 ~ /^[0-9]+\/udp$/ && $2 == "ALLOW" {print $1}' >"$TMPOPEN"
+      while read -r spec; do p="${spec%/udp}"; valid_port "$p" && in_list "$p" $CONF_DP_UDP && add_open_udp "$p"; done <"$TMPOPEN";;
+  esac
+}
+
+JOB=""
+write_status() {   # RESULT MESSAGE
+  { printf 'BACKEND=%s\nACTIVE=%s\nOPEN=%s\nTOOLS=%s\nCHECKED=%s\nRESULT=%s\nJOB=%s\n' "$BACKEND" "$ACTIVE" "$OPEN" "$TOOLS" "$(date +%s)" "$1" "$JOB"
+    printf 'MESSAGE=%s\n' "$(printf '%s' "$2" | tr -d '\000-\037' | cut -c1-300)"; } | put_file "$STATUS"
+}
+
+# ---- commands (printed for hosts we do not drive, and by `print`) -----------------------------------------------------------
+PRINT_UDP=""   # udp ports (HTTP/3) to print commands for
+print_commands() {   # backend  dp-ports  console  console-from  agent  agent-from
+  local b="$1" dp="$2" con="$3" cfrom="$4" ag="$5" afrom="$6" p
+  for p in $dp; do
+    case "$b" in
+      firewalld) echo "firewall-cmd --permanent --add-port=$p/tcp";; ufw) echo "ufw allow $p/tcp";;
+      nftables) echo "nft add rule inet filter input tcp dport $p accept";; iptables) echo "iptables -I INPUT -p tcp --dport $p -j ACCEPT";;
+    esac
+  done
+  for p in $PRINT_UDP; do
+    case "$b" in
+      firewalld) echo "firewall-cmd --permanent --add-port=$p/udp";; ufw) echo "ufw allow $p/udp";;
+      nftables) echo "nft add rule inet filter input udp dport $p accept";; iptables) echo "iptables -I INPUT -p udp --dport $p -j ACCEPT";;
+    esac
+  done
+  rule_cmd() {   # port from
+    local port="$1" from="$2"
+    case "$b" in
+      firewalld) if [ -n "$from" ]; then echo "firewall-cmd --permanent --add-rich-rule='rule family=\"$(fam "$from")\" source address=\"$from\" port port=\"$port\" protocol=\"tcp\" accept'"; else echo "firewall-cmd --permanent --add-port=$port/tcp"; fi;;
+      ufw) if [ -n "$from" ]; then echo "ufw allow proto tcp from $from to any port $port"; else echo "ufw allow $port/tcp"; fi;;
+      nftables) if [ -n "$from" ]; then echo "nft add rule inet filter input $([[ "$from" == *:* ]] && echo ip6 || echo ip) saddr $from tcp dport $port accept"; else echo "nft add rule inet filter input tcp dport $port accept"; fi;;
+      iptables) if [ -n "$from" ]; then echo "iptables -I INPUT -p tcp -s $from --dport $port -j ACCEPT"; else echo "iptables -I INPUT -p tcp --dport $port -j ACCEPT"; fi;;
+    esac
+  }
+  [ -n "$con" ] && rule_cmd "$con" "$cfrom"
+  [ -n "$ag" ] && rule_cmd "$ag" "${afrom:-<DATA_PLANE_IP>}"
+  case "$b" in firewalld) echo "firewall-cmd --reload";;
+    nftables) echo "# then make it permanent in /etc/nftables.conf";; iptables) echo "# then make it permanent (iptables-save / netfilter-persistent)";; esac
+  return 0
+}
+
+# ---- managed list ------------------------------------------------------------------------------------------------------------
+managed_has() { grep -qxF -- "$1" "$MANAGED" 2>/dev/null; }
+managed_add() { managed_has "$1" || printf '%s\n' "$1" >>"$MANAGED"; chmod 0644 "$MANAGED" 2>/dev/null || true; }
+managed_del() { [ -f "$MANAGED" ] || return 0; local t; t="$(mktemp)"; grep -vxF -- "$1" "$MANAGED" >"$t"; cat "$t" >"$MANAGED"; rm -f "$t"; }
+
+# ---- opening ----------------------------------------------------------------------------------------------------------------
+fwd_rich() { printf 'rule family="%s" source address="%s" port port="%s" protocol="tcp" accept' "$(fam "$2")" "$2" "$1"; }
+open_firewalld() {   # dp-ports console cfrom agent afrom dp-udp-ports
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" dpu="${6:-}" p rule
+  if [ -n "$dp" ]; then
+    local xml=/etc/firewalld/services/toutwaf-dp.xml tmpx desc="ToutWAF reverse proxy: HTTP and HTTPS (UDP stays closed: HTTP/3 is off)"
+    [ -z "$dpu" ] || desc="ToutWAF reverse proxy: HTTP and HTTPS, plus UDP for HTTP/3 (QUIC)"
+    tmpx="$(mktemp)"; {
+      printf '<?xml version="1.0" encoding="utf-8"?>\n<service>\n  <short>ToutWAF data plane</short>\n  <description>%s</description>\n' "$desc"
+      for p in $dp; do printf '  <port protocol="tcp" port="%s"/>\n' "$p"; done
+      for p in $dpu; do printf '  <port protocol="udp" port="%s"/>\n' "$p"; done; printf '</service>\n'; } >"$tmpx"
+    if [ "$(cat "$xml" 2>/dev/null)" != "$(cat "$tmpx")" ]; then install -m 0644 "$tmpx" "$xml"; firewall-cmd --reload >/dev/null 2>&1 || true; fi
+    rm -f "$tmpx"
+    if ! firewall-cmd --permanent --query-service=toutwaf-dp >/dev/null 2>&1; then firewall-cmd --permanent --add-service=toutwaf-dp >/dev/null || return 1; fi
+    managed_add "firewalld service toutwaf-dp"
+  fi
+  # HTTP/3 without the data-plane service in the same request (an update that only changes it): the plain udp port, tracked on its own
+  if [ -z "$dp" ] && [ -n "$dpu" ]; then
+    for p in $dpu; do
+      firewall-cmd --permanent --query-port="$p/udp" >/dev/null 2>&1 || { firewall-cmd --permanent --add-port="$p/udp" >/dev/null || return 1; managed_add "firewalld port $p/udp"; }
+    done
+  fi
+  # and the plain udp ports this helper added that are no longer wanted
+  if [ -f "$MANAGED" ]; then
+    while IFS= read -r l; do
+      case "$l" in "firewalld port "*/udp) pt="${l#firewalld port }"; [[ "$pt" =~ ^[0-9]{1,5}/udp$ ]] || continue
+        in_list "${pt%/udp}" $dpu || { firewall-cmd --permanent --remove-port="$pt" >/dev/null 2>&1; managed_del "$l"; };; esac
+    done <"$MANAGED"
+  fi
+  if [ -n "$con" ]; then
+    if [ -n "$cfrom" ]; then rule="$(fwd_rich "$con" "$cfrom")"
+      firewall-cmd --permanent --query-rich-rule="$rule" >/dev/null 2>&1 || firewall-cmd --permanent --add-rich-rule="$rule" >/dev/null || return 1
+      managed_add "firewalld rich $rule"
+    else
+      firewall-cmd --permanent --query-port="$con/tcp" >/dev/null 2>&1 || { firewall-cmd --permanent --add-port="$con/tcp" >/dev/null || return 1; managed_add "firewalld port $con/tcp"; }
+    fi
+  fi
+  if [ -n "$ag" ]; then
+    rule="$(fwd_rich "$ag" "$afrom")"
+    firewall-cmd --permanent --query-rich-rule="$rule" >/dev/null 2>&1 || firewall-cmd --permanent --add-rich-rule="$rule" >/dev/null || return 1
+    managed_add "firewalld rich $rule"
+  fi
+  firewall-cmd --reload >/dev/null || return 1
+}
+open_ufw() {
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" dpu="${6:-}" p out l
+  ufw_allow() {   # key  args...
+    local key="$1"; shift
+    out="$(ufw "$@" 2>&1)" || return 1
+    case "$out" in *Skipping*) ;; *) managed_add "ufw $key";; esac
+  }
+  for p in $dp; do ufw_allow "allow $p/tcp" allow "$p/tcp" comment ToutWAF || return 1; done
+  for p in $dpu; do ufw_allow "allow $p/udp" allow "$p/udp" comment ToutWAF || return 1; done
+  # the udp rules this helper added that are no longer wanted (HTTP/3 turned off)
+  if [ -f "$MANAGED" ]; then
+    while IFS= read -r l; do
+      case "$l" in "ufw allow "*/udp) p="${l#ufw allow }"; p="${p%/udp}"; [[ "$p" =~ ^[0-9]{1,5}$ ]] || continue
+        in_list "$p" $dpu || { ufw --force delete allow "$p/udp" >/dev/null 2>&1; managed_del "$l"; };; esac
+    done <"$MANAGED"
+  fi
+  if [ -n "$con" ]; then
+    if [ -n "$cfrom" ]; then ufw_allow "allow proto tcp from $cfrom to any port $con" allow proto tcp from "$cfrom" to any port "$con" comment ToutWAF || return 1
+    else ufw_allow "allow $con/tcp" allow "$con/tcp" comment ToutWAF || return 1; fi
+  fi
+  if [ -n "$ag" ]; then ufw_allow "allow proto tcp from $afrom to any port $ag" allow proto tcp from "$afrom" to any port "$ag" comment ToutWAF || return 1; fi
+  return 0
+}
+
+do_open() {   # dp-ports console cfrom agent afrom dp-udp-ports   (already syntactically valid; dp-udp-ports "none" = close the udp rules)
+  local dp="$1" con="$2" cfrom="$3" ag="$4" afrom="$5" dpu="${6:-}" p
+  load_conf
+  [ "$dpu" != none ] || dpu=""
+  # only what the installer recorded for this host
+  for p in $dp; do in_list "$p" $CONF_DP || { write_status error "port $p is not a data-plane port recorded in firewall.conf"; return 1; }; done
+  for p in $dpu; do in_list "$p" $CONF_DP_UDP || { write_status error "udp port $p is not recorded in firewall.conf (HTTP/3 is not on for this node)"; return 1; }; done
+  PRINT_UDP="$dpu"
+  if [ -n "$con" ] && [ "$con" != "$CONF_CONSOLE" ]; then write_status error "port $con is not the console port recorded in firewall.conf"; return 1; fi
+  if [ -n "$ag" ]; then
+    [ "$ag" = "$CONF_AGENT" ] || { write_status error "port $ag is not the data-plane API port recorded in firewall.conf"; return 1; }
+    [ -n "$afrom" ] || { write_status error "the data-plane API port is never opened to everyone: a source network is required"; return 1; }
+  fi
+  detect
+  case "$BACKEND" in
+    firewalld) open_firewalld "$dp" "$con" "$cfrom" "$ag" "$afrom" "$dpu" || { scan_open; write_status error "firewalld refused the rules (see: journalctl -u toutwaf-firewall)"; return 1; };;
+    ufw) open_ufw "$dp" "$con" "$cfrom" "$ag" "$afrom" "$dpu" || { scan_open; write_status error "ufw refused the rules (see: journalctl -u toutwaf-firewall)"; return 1; };;
+    nftables|iptables)
+      scan_open
+      echo "toutwaf-firewall: $BACKEND is not managed automatically. Run these commands yourself:" >&2
+      print_commands "$BACKEND" "$dp" "$con" "$cfrom" "$ag" "$afrom" >&2
+      write_status unmanaged "$BACKEND is not managed by ToutWAF: run the commands shown in the console (Settings > Firewall) or in the installer output"; return 2;;
+    *)
+      scan_open
+      write_status ok "no active host firewall (firewalld / ufw / nftables / iptables) was found: nothing filters the traffic, nothing to open"; return 0;;
+  esac
+  scan_open
+  write_status ok "ports opened"
+  return 0
+}
+
+do_status() { detect; scan_open; write_status ok "${1:-scan}"; }
+
+# revoke: take back ONE rule this helper added (data-plane API port, one source), the console's "remove" of a server opened automatically.
+# Only a rule remembered in $MANAGED is removed: a rule the owner added by hand is never touched.
+do_revoke() {   # agent afrom
+  local ag="$1" afrom="$2" rule key
+  load_conf
+  [ -n "$ag" ] && [ "$ag" = "$CONF_AGENT" ] || { write_status error "port $ag is not the data-plane API port recorded in firewall.conf"; return 1; }
+  [ -n "$afrom" ] || { write_status error "a source network is required"; return 1; }
+  detect
+  case "$BACKEND" in
+    firewalld)
+      rule="$(fwd_rich "$ag" "$afrom")"
+      if managed_has "firewalld rich $rule"; then
+        firewall-cmd --permanent --remove-rich-rule="$rule" >/dev/null 2>&1
+        firewall-cmd --reload >/dev/null || { scan_open; write_status error "firewalld refused to reload"; return 1; }
+        managed_del "firewalld rich $rule"
+      fi;;
+    ufw)
+      key="allow proto tcp from $afrom to any port $ag"
+      if managed_has "ufw $key"; then ufw --force delete allow proto tcp from "$afrom" to any port "$ag" >/dev/null 2>&1; managed_del "ufw $key"; fi;;
+    nftables|iptables) scan_open; write_status unmanaged "$BACKEND is not managed by ToutWAF: remove the rule by hand"; return 2;;
+  esac
+  scan_open
+  write_status ok "rule removed"
+}
+
+parse_open_args() {   # sets A_DP A_DPU A_CON A_CFROM A_AG A_AFROM from "$@"; returns 1 on invalid input
+  A_DP=""; A_DPU=""; A_CON=""; A_CFROM=""; A_AG=""; A_AFROM=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dp) A_DP="$(printf '%s' "$2" | tr ',' ' ')"; shift 2;;
+      --dp-udp) A_DPU="$(printf '%s' "$2" | tr ',' ' ')"; shift 2;;
+      --console) A_CON="$2"; shift 2;;
+      --console-from) A_CFROM="$2"; shift 2;;
+      --agent) A_AG="$2"; shift 2;;
+      --agent-from) A_AFROM="$2"; shift 2;;
+      *) echo "toutwaf-firewall: unknown option $1" >&2; return 1;;
+    esac
+  done
+  local p n=0
+  for p in $A_DP; do valid_port "$p" || return 1; n=$((n + 1)); done; [ "$n" -le 8 ] || return 1
+  if [ "$A_DPU" != none ]; then n=0; for p in $A_DPU; do valid_port "$p" || return 1; n=$((n + 1)); done; [ "$n" -le 2 ] || return 1; fi
+  [ -z "$A_CON" ] || valid_port "$A_CON" || return 1
+  [ -z "$A_AG" ] || valid_port "$A_AG" || return 1
+  [ -z "$A_CFROM" ] || valid_src "$A_CFROM" || return 1
+  [ -z "$A_AFROM" ] || valid_src "$A_AFROM" || return 1
+  [ -n "$A_DP$A_DPU$A_CON$A_AG" ] || return 1
+  return 0
+}
+
+TMPOPEN="$(mktemp)"; trap 'rm -f "$TMPOPEN"' EXIT
+case "${1:-}" in
+  status) [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }; load_conf; do_status; cat "$STATUS" 2>/dev/null | sed -n '1,3p';;
+  open)
+    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
+    shift; parse_open_args "$@" || { echo "toutwaf-firewall: invalid arguments" >&2; exit 2; }
+    do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM" "$A_DPU"; exit $?;;
+  apply)
+    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
+    # a private copy first (the service account can rewrite the file while we read it, or put a link or a FIFO in its place)
+    trap 'rm -f "$TMPOPEN" "$TMPOPEN.req"' EXIT
+    take_request "$REQ" "$TMPOPEN.req" 4096; rc=$?
+    [ "$rc" -ne 1 ] || exit 0
+    [ "$rc" -eq 0 ] || { detect; scan_open; write_status error "the request file is not a regular file of the service account"; exit 1; }
+    rq() { sed -n "s/^$1=//p" "$TMPOPEN.req" | tail -n1 | tr -d '\r'; }
+    JOB="$(rq JOB)"; valid_job "$JOB" || JOB=""
+    load_conf; detect
+    act="$(rq ACTION)"
+    case "$act" in
+      status) do_status "scan requested from the console"; exit 0;;
+      open)
+        dp="$(rq DP_PORTS | tr ',' ' ')"; con="$(rq CONSOLE_PORT)"; cf="$(rq CONSOLE_FROM)"; ag="$(rq AGENT_PORT)"; af="$(rq AGENT_FROM)"
+        dpu="$(rq DP_UDP_PORTS | tr ',' ' ')"
+        args=(); [ -z "$dp" ] || args+=(--dp "$(printf '%s' "$dp" | tr ' ' ',')");
+        # a request for the data-plane ports that names no udp port means "HTTP/3 off": the udp rules this helper added are closed
+        if [ -n "$dpu" ]; then args+=(--dp-udp "$(printf '%s' "$dpu" | tr ' ' ',')"); elif [ -n "$dp" ]; then args+=(--dp-udp none); fi
+ [ -z "$con" ] || args+=(--console "$con"); [ -z "$cf" ] || args+=(--console-from "$cf")
+        [ -z "$ag" ] || args+=(--agent "$ag"); [ -z "$af" ] || args+=(--agent-from "$af")
+        if ! parse_open_args "${args[@]}"; then detect; scan_open; write_status error "invalid firewall request"; exit 1; fi
+        do_open "$A_DP" "$A_CON" "$A_CFROM" "$A_AG" "$A_AFROM" "$A_DPU"; rc=$?; [ "$rc" -eq 2 ] && rc=0; exit "$rc";;
+      revoke)
+        ag="$(rq AGENT_PORT)"; af="$(rq AGENT_FROM)"
+        { valid_port "$ag" && valid_src "$af"; } || { scan_open; write_status error "invalid firewall request"; exit 1; }
+        do_revoke "$ag" "$af"; rc=$?; [ "$rc" -eq 2 ] && rc=0; exit "$rc";;
+      *) detect; scan_open; write_status error "unknown action"; exit 1;;
+    esac;;
+  close)
+    [ "$(id -u)" -eq 0 ] || { echo "toutwaf-firewall must run as root" >&2; exit 1; }
+    detect; load_conf
+    if [ -f "$MANAGED" ]; then
+      while IFS= read -r l; do
+        case "$l" in
+          "firewalld service toutwaf-dp") [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-service=toutwaf-dp >/dev/null 2>&1;;
+          "firewalld port "*) pt="${l#firewalld port }"; [[ "$pt" =~ ^[0-9]{1,5}/(tcp|udp)$ ]] && [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-port="$pt" >/dev/null 2>&1;;
+          "firewalld rich "*) r="${l#firewalld rich }"
+            [[ "$r" =~ ^rule\ family=\"ipv[46]\"\ source\ address=\"[0-9a-fA-F:./]+\"\ port\ port=\"[0-9]{1,5}\"\ protocol=\"tcp\"\ accept$ ]] && [ "$BACKEND" = firewalld ] && firewall-cmd --permanent --remove-rich-rule="$r" >/dev/null 2>&1;;
+          "ufw allow "*)
+            r="${l#ufw }"
+            if [[ "$r" =~ ^allow\ [0-9]{1,5}/(tcp|udp)$ ]]; then [ "$BACKEND" = ufw ] && ufw --force delete $r >/dev/null 2>&1
+            elif [[ "$r" =~ ^allow\ proto\ tcp\ from\ [0-9a-fA-F:./]+\ to\ any\ port\ [0-9]{1,5}$ ]]; then [ "$BACKEND" = ufw ] && ufw --force delete $r >/dev/null 2>&1; fi;;
+        esac
+      done <"$MANAGED"
+      [ "$BACKEND" = firewalld ] && firewall-cmd --reload >/dev/null 2>&1
+      rm -f "$MANAGED"
+    elif [ "$BACKEND" = firewalld ]; then
+      # installation made before rules were tracked: it only ever added the toutwaf-dp service (and the console port)
+      firewall-cmd --permanent --remove-service=toutwaf-dp >/dev/null 2>&1
+      [ -n "$CONF_CONSOLE" ] && firewall-cmd --permanent --remove-port="$CONF_CONSOLE/tcp" >/dev/null 2>&1
+      firewall-cmd --reload >/dev/null 2>&1
+    fi
+    rm -f /etc/firewalld/services/toutwaf-dp.xml "$STATUS"
+    exit 0;;
+  print)
+    load_conf; detect
+    b="$BACKEND"; [ "$b" != none ] || b=firewalld
+    PRINT_UDP="$CONF_DP_UDP"
+    print_commands "$b" "$CONF_DP" "$CONF_CONSOLE" "" "$CONF_AGENT" ""; exit 0;;
+  *) echo "usage: toutwaf-firewall status|open ...|apply|close|print" >&2; exit 2;;
+esac
+TW_FIREWALL_TPL
+  emit_helper toutwaf-blocklist <<'TW_BLOCKLIST_TPL'
+#!/usr/bin/env bash
+# toutwaf-blocklist-proto: 1
+#
+# toutwaf-blocklist apply     (root; toutwaf-blocklist.service) perform @DATA_DIR@/blocklist-request
+# toutwaf-blocklist status    write @DATA_DIR@/blocklist-status (is the table in the kernel, how many entries, how many packets dropped)
+# toutwaf-blocklist clear     remove the table (uninstall, or the console switch turned off)
+#
+# Puts the large blocklists of ToutWAF into the kernel (nftables) so that the packets of a listed address are dropped before the
+# proxy ever sees them. The request file and the lists are written by the control plane (the unprivileged service account), so
+# for root they are untrusted input:
+#   * the request carries nothing but ACTION and JOB; the lists are read from two fixed files and copied first (a symbolic link or
+#     anything but a regular file is refused);
+#   * every line is checked as an address or a network of the public Internet (IPv4: a.b.c.d[/8..32], not private, loopback,
+#     link-local, shared, documentation or multicast space; IPv6: inside 2000::/3, /16..128, not the documentation prefix); a line
+#     that is not exactly that is dropped and counted, so nothing can reach the nftables file but addresses (no space, brace, comma,
+#     semicolon or newline can survive the check);
+#   * only ONE table is ever touched, "inet toutwaf_block" (replaced atomically in one transaction), only the TCP ports of the data
+#     plane recorded by the installer in @CONF_DIR@/firewall.conf are filtered, and an "allow" set (the addresses the owner trusts)
+#     is accepted before anything is dropped;
+#   * no shell is started from the data: the only programs run are nft, awk, sed, sha256sum, dd, cat, stat, mktemp and mv; the files of the
+#     service account are opened without following a link or waiting for a writer, and the answers are new files renamed in place (hostio).
+# The table lives in the kernel only: it is gone after a reboot, and the control plane asks for it again when it starts. The
+# data plane enforces the same lists itself, so a missing table loses speed, never protection.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; SVC_USER='@SVC_USER@'
+REQ="$DATA_DIR/blocklist-request"; STATUS="$DATA_DIR/blocklist-status"; LISTDIR="$DATA_DIR/kernel-blocklist"; CONF="$CONF_DIR/firewall.conf"
+RUNDIR=/run/toutwaf-blocklist; STATE="$RUNDIR/state"
+TABLE=toutwaf_block; MAX_BLOCK=3000000; MAX_ALLOW=4096; MAX_BYTES=134217728
+have() { command -v "$1" >/dev/null 2>&1; }
+valid_job() { [[ -z "$1" || "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
+conf_get() { sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -n1 | tr -d '\r"'"'"; }
+
+JOB=""; TMP=""
+cleanup() { [ -z "$TMP" ] || rm -rf "$TMP"; }
+trap cleanup EXIT
+
+# state of the table as the last successful apply left it (a file in /run: it disappears with the table, at reboot)
+S_APPLIED=0; S_B4=0; S_B6=0; S_A4=0; S_A6=0; S_REJ=0; S_PORTS=""; S_SRC=""
+load_state() {
+  S_APPLIED=0; S_B4=0; S_B6=0; S_A4=0; S_A6=0; S_REJ=0; S_PORTS=""; S_SRC=""
+  [ -f "$STATE" ] && [ ! -L "$STATE" ] || return 0
+  local k v
+  while IFS='=' read -r k v; do
+    case "$k" in
+      B4) [[ "$v" =~ ^[0-9]{1,9}$ ]] && S_B4="$v";; B6) [[ "$v" =~ ^[0-9]{1,9}$ ]] && S_B6="$v";;
+      A4) [[ "$v" =~ ^[0-9]{1,9}$ ]] && S_A4="$v";; A6) [[ "$v" =~ ^[0-9]{1,9}$ ]] && S_A6="$v";;
+      REJ) [[ "$v" =~ ^[0-9]{1,9}$ ]] && S_REJ="$v";; PORTS) [[ "$v" =~ ^[0-9,]{1,64}$ ]] && S_PORTS="$v";;
+      SRC) [[ "$v" =~ ^[0-9a-f]{64}$ ]] && S_SRC="$v";;
+    esac
+  done <"$STATE"
+}
+# the chain, not the table: listing a table prints every element of its sets (many seconds for a million networks)
+CHAIN=""
+table_present() { CHAIN="$(nft list chain inet "$TABLE" prerouting 2>/dev/null)"; [ -n "$CHAIN" ]; }
+# packets dropped so far by the rules of the table (sum of the two counters; after table_present)
+dropped() { printf '%s\n' "$CHAIN" | sed -n 's/.*counter packets \([0-9][0-9]*\) bytes [0-9]* drop.*/\1/p' | awk '{s += $1} END {print s + 0}'; }
+
+write_status() {   # RESULT MESSAGE
+  local present=0 pk=0 res="$1"
+  if have nft && table_present; then present=1; pk="$(dropped)"; load_state; else S_B4=0; S_B6=0; S_A4=0; S_A6=0; S_REJ=0; S_PORTS=""; S_SRC=""; fi
+  { printf 'BACKEND=nftables\nAPPLIED=%s\nBLOCK4=%s\nBLOCK6=%s\nALLOW4=%s\nALLOW6=%s\nREJECTED=%s\nPORTS=%s\nSRC=%s\nDROPPED=%s\nCHECKED=%s\nRESULT=%s\nJOB=%s\n' \
+      "$present" "$S_B4" "$S_B6" "$S_A4" "$S_A6" "$S_REJ" "$S_PORTS" "$S_SRC" "$pk" "$(date +%s)" "$res" "$JOB"
+    printf 'MESSAGE=%s\n' "$(printf '%s' "$2" | tr -d '\000-\037' | cut -c1-300)"; } | put_file "$STATUS"
+}
+
+# ---- the check of every line -----------------------------------------------------------------------------------------------------
+# prints the accepted networks to OUT4 / OUT6 and "ok4 ok6 bad reserved" on stdout. Reserved space is the same list as the control plane's.
+FILTER='
+function hexval(s,   i, c, v) { v = 0; for (i = 1; i <= length(s); i++) { c = index("0123456789abcdef", substr(s, i, 1)); if (c == 0) return -1; v = v * 16 + c - 1 } return v }
+function dotted(x) { return int(x / 16777216) "." int((x % 16777216) / 65536) "." int((x % 65536) / 256) "." (x % 256) }
+BEGIN {
+  n = split("0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/3", R, " ")
+  for (i = 1; i <= n; i++) { split(R[i], p, "/"); split(p[1], o, "."); lo[i] = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]; hi[i] = lo[i] + 2 ^ (32 - p[2]) - 1 }
+  nres = n; ok4 = 0; ok6 = 0; bad = 0; res = 0
+}
+{
+  line = tolower($0); gsub(/[ \t\r]/, "", line)
+  if (line == "" || substr(line, 1, 1) == "#") next
+  if (ok4 + ok6 >= max) { bad++; next }
+  if (line !~ /^[0-9a-f:.\/]+$/) { bad++; next }
+  ip = line; len = -1
+  if (index(line, "/") > 0) { if (split(line, q, "/") != 2 || q[2] !~ /^[0-9][0-9]?[0-9]?$/) { bad++; next } ip = q[1]; len = q[2] + 0 }
+  if (index(ip, ":") == 0) {
+    if (len < 0) len = 32
+    if (ip !~ /^(0|[1-9][0-9]?[0-9]?)\.(0|[1-9][0-9]?[0-9]?)\.(0|[1-9][0-9]?[0-9]?)\.(0|[1-9][0-9]?[0-9]?)$/) { bad++; next }
+    split(ip, o, ".")
+    if (o[1] > 255 || o[2] > 255 || o[3] > 255 || o[4] > 255 || len < 8 || len > 32) { bad++; next }
+    v = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]; size = 2 ^ (32 - len); base = v - (v % size); top = base + size - 1
+    r = 0; for (i = 1; i <= nres; i++) if (base <= hi[i] && top >= lo[i]) { r = 1; break }
+    if (r) { res++; next }
+    print dotted(base) "/" len > out4; ok4++
+  } else {
+    if (len < 0) len = 128
+    if (ip !~ /^[0-9a-f:]+$/ || len < 16 || len > 128) { bad++; next }
+    c = split(ip, g, ":"); dbl = 0; t = ip; while ((k = index(t, "::")) > 0) { dbl++; t = substr(t, k + 2) }
+    if (dbl > 1 || ip ~ /:::/ || ip == "" || substr(ip, 1, 1) == ":" ) { bad++; next }
+    if ((dbl == 0 && c != 8) || (dbl == 1 && c > 8)) { bad++; next }
+    okg = 1; for (i = 1; i <= c; i++) if (length(g[i]) > 4 || (dbl == 0 && g[i] == "")) okg = 0
+    if (!okg) { bad++; next }
+    f = hexval(g[1])
+    if (f < 8192 || f > 16383) { res++; next }
+    if (g[1] == "2001" && g[2] == "db8") { res++; next }
+    print ip "/" len > out6; ok6++
+  }
+}
+END { printf "%d %d %d %d\n", ok4, ok6, bad, res }
+'
+
+# copy_list SRC DST: a regular file of a reasonable size, copied as it is now (the service account can rewrite it any time, or put a
+# link or a FIFO in its place); no list is an empty list
+copy_list() {
+  local src="$1" dst="$2" rc
+  [ -d "$LISTDIR" ] && [ ! -L "$LISTDIR" ] || return 1
+  copy_safe "$src" "$dst" "$MAX_BYTES"; rc=$?
+  case "$rc" in 0) return 0;; 1) : >"$dst"; return 0;; *) return 1;; esac
+}
+
+emit_set() {   # NAME TYPE FILE
+  printf '\tset %s {\n\t\ttype %s\n\t\tflags interval\n\t\tauto-merge\n' "$1" "$2"
+  if [ -s "$3" ]; then
+    printf '\t\telements = {\n'
+    sed -e '$!s/$/,/' -e 's/^/\t\t\t/' "$3"
+    printf '\t\t}\n'
+  fi
+  printf '\t}\n'
+}
+
+do_apply() {
+  have nft || { write_status unavailable "the nft command (package nftables) is not installed on this host: ToutWAF keeps blocking in the data plane only"; return 1; }
+  local ports="" p n=0
+  for p in $(conf_get DP_PORTS | tr ',' ' '); do
+    [[ "$p" =~ ^[0-9]{1,5}$ ]] && [ "$p" -ge 1 ] && [ "$p" -le 65535 ] || continue
+    ports="${ports:+$ports, }$p"; n=$((n + 1)); [ "$n" -le 8 ] || break
+  done
+  if [ -z "$ports" ]; then write_status unavailable "no data-plane port is recorded in $CONF on this host (the data plane runs elsewhere, or run the installer once more): nothing to filter here"; return 1; fi
+  local rc
+  copy_list "$LISTDIR/block.txt" "$TMP/block.in"; rc=$?
+  [ "$rc" -eq 0 ] || { write_status error "the block list is not a regular file of a reasonable size (at most $((MAX_BYTES / 1048576)) MB)"; return 1; }
+  copy_list "$LISTDIR/allow.txt" "$TMP/allow.in"; rc=$?
+  [ "$rc" -eq 0 ] || { write_status error "the allow list is not a regular file of a reasonable size"; return 1; }
+  local src stats b4 b6 a4 a6 bad1 bad2 res1 res2
+  src="$(cat "$TMP/block.in" "$TMP/allow.in" | sha256sum | cut -d' ' -f1)"
+  stats="$(awk -v max="$MAX_BLOCK" -v out4="$TMP/block4" -v out6="$TMP/block6" "$FILTER" "$TMP/block.in")" || { write_status error "the block list could not be read"; return 1; }
+  read -r b4 b6 bad1 res1 <<<"$stats"
+  stats="$(awk -v max="$MAX_ALLOW" -v out4="$TMP/allow4" -v out6="$TMP/allow6" "$FILTER" "$TMP/allow.in")" || { write_status error "the allow list could not be read"; return 1; }
+  read -r a4 a6 bad2 res2 <<<"$stats"
+  local rej=$((bad1 + res1 + bad2 + res2))
+  for f in block4 block6 allow4 allow6; do [ -e "$TMP/$f" ] || : >"$TMP/$f"; done
+  if [ "$((b4 + b6))" -eq 0 ]; then
+    # an empty list is not a table full of nothing: remove ours so that no rule stays behind
+    nft delete table inet "$TABLE" >/dev/null 2>&1 || true
+    rm -f "$STATE"; write_status cleared "the block list is empty: no kernel rule"; return 0
+  fi
+  {
+    printf 'add table inet %s\ndelete table inet %s\ntable inet %s {\n' "$TABLE" "$TABLE" "$TABLE"
+    emit_set block4 ipv4_addr "$TMP/block4"; emit_set block6 ipv6_addr "$TMP/block6"
+    emit_set allow4 ipv4_addr "$TMP/allow4"; emit_set allow6 ipv6_addr "$TMP/allow6"
+    printf '\tchain prerouting {\n\t\ttype filter hook prerouting priority -300; policy accept;\n'
+    printf '\t\tip saddr @allow4 accept\n\t\tip6 saddr @allow6 accept\n'
+    printf '\t\ttcp dport { %s } ip saddr @block4 counter drop\n\t\ttcp dport { %s } ip6 saddr @block6 counter drop\n\t}\n}\n' "$ports" "$ports"
+  } >"$TMP/rules.nft"
+  local out
+  if ! out="$(nft -f "$TMP/rules.nft" 2>&1)"; then
+    # one transaction: the table that was in place (if any) is untouched
+    write_status error "nftables refused the list: $(printf '%s' "$out" | head -n1)"; return 1
+  fi
+  mkdir -p "$RUNDIR" && chmod 0755 "$RUNDIR"
+  printf 'B4=%s\nB6=%s\nA4=%s\nA6=%s\nREJ=%s\nPORTS=%s\nSRC=%s\n' "$b4" "$b6" "$a4" "$a6" "$rej" "$(printf '%s' "$ports" | tr -d ' ')" "$src" >"$STATE"
+  write_status ok "$((b4 + b6)) networks are dropped by the kernel on port(s) $ports before the data plane sees them"
+  return 0
+}
+
+do_clear() {
+  if have nft; then nft delete table inet "$TABLE" >/dev/null 2>&1 || true; fi
+  rm -f "$STATE"
+  write_status cleared "the kernel rules of ToutWAF were removed"
+}
+
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-blocklist must run as root" >&2; exit 1; }
+TMP="$(mktemp -d)" || { echo "toutwaf-blocklist: no temporary directory" >&2; exit 1; }
+chmod 0700 "$TMP"
+case "${1:-}" in
+  status) write_status ok "scan";;
+  clear) do_clear;;
+  apply)
+    # a private copy first (in a directory only root can write): the service account can rewrite the file while we read it, or put a
+    # link or a FIFO in its place
+    take_request "$REQ" "$TMP/request" 4096; rc=$?
+    [ "$rc" -ne 1 ] || exit 0
+    [ "$rc" -eq 0 ] || exit 1
+    [ -f "$TMP/request" ] && [ ! -L "$TMP/request" ] && [ "$(stat -c %s "$TMP/request")" -le 4096 ] || exit 1
+    rq() { sed -n "s/^$1=//p" "$TMP/request" | tail -n1 | tr -d '\r'; }
+    JOB="$(rq JOB)"; valid_job "$JOB" || JOB=""
+    act="$(rq ACTION)"
+    case "$act" in
+      apply) do_apply; exit $?;;
+      clear) do_clear;;
+      status) write_status ok "scan requested from the console";;
+      *) write_status error "unknown action"; exit 1;;
+    esac;;
+  *) echo "usage: toutwaf-blocklist status|apply|clear" >&2; exit 2;;
+esac
+TW_BLOCKLIST_TPL
+  emit_helper toutwaf-vpn <<'TW_VPN_TPL'
+#!/usr/bin/env bash
+# toutwaf-vpn-proto: 1
+#
+# toutwaf-vpn apply              (root; toutwaf-vpn.service) perform the pending @DATA_DIR@/vpn-request
+# toutwaf-vpn rollback RECORD    put back a change whose trial ran out (a transient systemd timer started by "apply" runs it)
+#
+# The VPN module of the console generates WireGuard / OpenVPN / strongSwan files; this helper puts them on the machine
+# (/etc/wireguard, /etc/openvpn, /etc/swanctl/conf.d), enables or disables the systemd unit and reads the state of the tunnels
+# (@DATA_DIR@/vpn-status.json, without any key). The request and the files in it are written by the unprivileged service account,
+# so for root they are untrusted input. All the work is done by `toutwafctl vpn-host`, which checks them again:
+#   * the destinations are fixed and derived from the validated record id and interface name, never taken from the request;
+#   * every configuration file is read against an allow list of directives: nothing that runs a program (PostUp, up, plugin,
+#     script-security above 1, updown...) or reads another file can get through; a symbolic link is refused;
+#   * a file that ToutWAF did not write is renamed (*.toutwaf-save) before it is replaced, nothing is ever deleted;
+#   * the route to the address of the administrator is checked before and after the start and the change is undone at once when
+#     it moved; a change of the default route stays on trial and a timer undoes it unless the console confirms it.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; BIN_DIR='@BIN_DIR@'
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-vpn must run as root" >&2; exit 1; }
+CTL="$BIN_DIR/toutwafctl"
+[ -x "$CTL" ] || { echo "toutwaf-vpn: $CTL is missing" >&2; exit 1; }
+case "${1:-}" in
+  apply) exec "$CTL" vpn-host apply --data-dir "$DATA_DIR";;
+  rollback)
+    [[ "${2:-}" =~ ^vp[su]_[0-9a-f]{16}$ ]] || { echo "toutwaf-vpn: invalid record" >&2; exit 2; }
+    exec "$CTL" vpn-host rollback --id "$2";;
+  *) echo "usage: toutwaf-vpn apply|rollback RECORD" >&2; exit 2;;
+esac
+TW_VPN_TPL
+  emit_helper toutwaf-fw <<'TW_FW_TPL'
+#!/usr/bin/env bash
+# toutwaf-fw-proto: 1
+#
+# toutwaf-fw apply              (root; toutwaf-fw.service) perform the pending @DATA_DIR@/fw-request
+# toutwaf-fw rollback TRIAL     put back the rules of a trial that was not confirmed (a transient systemd timer started by "apply" runs it)
+# toutwaf-fw boot               (root; toutwaf-fw-boot.service) load the rules the console confirmed, at boot
+#
+# The Firewall module of the console builds an nftables ruleset in ONE table of its own (inet toutwaf_fw); the control plane runs
+# without any privilege, so this helper loads it. The request and the files in it are written by the unprivileged service
+# account, so for root they are untrusted input. All the work is done by `toutwafctl fw-host`, which checks them again:
+#   * the request carries a configuration, never a script: root renders the ruleset itself (validation, strict template, lint) and
+#     refuses anything that is not exactly what the renderer writes; only our table can be touched, no other nft command exists;
+#   * the lock-out guard runs again on the root side (SSH 22, console 443/9443, agent 9444, the peers and the address of the
+#     administrator who asked): a change that would cut access is refused before anything is loaded;
+#   * `nft -c` first; then the new rules stay on trial and a transient systemd timer owned by root puts the previous ones back
+#     unless the console confirms in time, whether or not the control plane is still alive;
+#   * the rules put back are the ones root saved itself, never a copy from the request.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; BIN_DIR='@BIN_DIR@'
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-fw must run as root" >&2; exit 1; }
+CTL="$BIN_DIR/toutwafctl"
+[ -x "$CTL" ] || { echo "toutwaf-fw: $CTL is missing" >&2; exit 1; }
+case "${1:-}" in
+  apply) exec "$CTL" fw-host apply --data-dir "$DATA_DIR";;
+  rollback)
+    [[ "${2:-}" =~ ^[0-9a-f]{32}$ ]] || { echo "toutwaf-fw: invalid trial" >&2; exit 2; }
+    exec "$CTL" fw-host rollback --id "$2";;
+  boot) exec "$CTL" fw-host boot --data-dir "$DATA_DIR";;
+  *) echo "usage: toutwaf-fw apply|rollback TRIAL|boot" >&2; exit 2;;
+esac
+TW_FW_TPL
+  emit_helper toutwaf-jobs <<'TW_JOBS_TPL'
+#!/usr/bin/env bash
+# toutwaf-jobs-proto: 1
+#
+# toutwaf-jobs apply            (root; toutwaf-jobs.service) run the pending @DATA_DIR@/jobs-request
+#
+# The scheduled tasks of the console can ask for a privileged job. The control plane runs without any privilege, so it leaves a small
+# request file (JOB, VERB, DAYS) and this helper runs it. The request is written by the unprivileged service account, so for root it
+# is untrusted input. All the work is done by `toutwafctl jobs-host`, which checks it again:
+#   * the verb must be one of a FIXED list written in the program (logrotate, journal_vacuum, and the power_* verbs of the console's power menu
+#     and of the self-repair: restart the data plane, restart ToutWAF, stop the control plane, restart the machine); the command line of each
+#     verb is written there too: a request cannot name a program, a path, an option, a unit or a shell;
+#   * the only numbers (days of the journal to keep; seconds to wait before a power verb, at most 120) are checked against their bounds;
+#   * the answer (exit code, clipped output) goes back in @DATA_DIR@/jobs/<job>.res.json.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; BIN_DIR='@BIN_DIR@'
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-jobs must run as root" >&2; exit 1; }
+CTL="$BIN_DIR/toutwafctl"
+[ -x "$CTL" ] || { echo "toutwaf-jobs: $CTL is missing" >&2; exit 1; }
+case "${1:-}" in
+  apply) exec "$CTL" jobs-host apply --data-dir "$DATA_DIR";;
+  *) echo "usage: toutwaf-jobs apply" >&2; exit 2;;
+esac
+TW_JOBS_TPL
+  emit_helper toutwaf-time <<'TW_TIME_TPL'
+#!/usr/bin/env bash
+# toutwaf-time-proto: 1
+#
+# toutwaf-time apply                      (root; toutwaf-time.service) perform the pending @DATA_DIR@/time-request, answer in @DATA_DIR@/time-result.json
+# toutwaf-time status                     print the clock of the machine as KEY=VALUE lines (reads only)
+# toutwaf-time set-timezone ZONE          IANA name of the zoneinfo database (Europe/Paris)
+# toutwaf-time set-ntp on|off             switch the NTP client on or off (timedatectl set-ntp)
+# toutwaf-time set-ntp-servers [HOST...]  1 to 8 host names or addresses for the NTP client (chrony or systemd-timesyncd); none = the servers of the distribution
+# toutwaf-time set-time RFC3339           set the clock (refused while NTP is on, or outside 2026-01-01 .. 2100-01-01)
+#
+# The console of ToutWAF can show and change the clock of the machine (Settings > Date, time and time zone). The control plane runs without any
+# privilege, so it leaves a small request file and this helper does the work. The request is written by the unprivileged service account, so for
+# root it is untrusted input and is checked again here, value by value:
+#   * the ACTION is one of the five above; there is no other word and no command line in a request;
+#   * a zone must be an IANA name (letters, digits, "_", "+", "-", at most three components, none starting with "-" or ".") that is a TZif file of the
+#     zoneinfo directory; a server is a host name or an IPv4 / IPv6 address, never a path, an option or a space; a time is RFC 3339 and a plausible one;
+#   * nothing is passed through a shell or "eval": every value is a quoted argument of timedatectl / systemctl, the drop-in files are written by this
+#     script with a fixed shape in a directory that belongs to root (no link of the service account is ever followed);
+#   * the clock is set only when NTP is off, as timedatectl itself insists.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'
+ETC="${TOUTWAF_ETC:-/etc}"; ZONEINFO="${TOUTWAF_ZONEINFO:-/usr/share/zoneinfo}"
+REQ="$DATA_DIR/time-request"; RES="$DATA_DIR/time-result.json"
+MIN_EPOCH=1767225600; MAX_EPOCH=4102444800   # 2026-01-01 .. 2100-01-01 (UTC): the machine that runs this version is never before the first and not after the second
+MAX_SERVERS=8
+have() { command -v "$1" >/dev/null 2>&1; }
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
+
+# ---- validation (never trust a request) --------------------------------------------------------------------------------------
+valid_zone() {
+  local z="$1" real root
+  [ "${#z}" -ge 1 ] && [ "${#z}" -le 64 ] || return 1
+  [[ "$z" =~ ^[A-Za-z0-9][A-Za-z0-9_+-]*(/[A-Za-z0-9][A-Za-z0-9_+-]*){0,2}$ ]] || return 1
+  case "${z,,}" in local|posixrules|localtime|factory|posix/*|right/*) return 1;; esac   # files of the tree that are not zones of the database
+  [ -f "$ZONEINFO/$z" ] || return 1
+  real="$(readlink -f -- "$ZONEINFO/$z" 2>/dev/null)" && root="$(readlink -f -- "$ZONEINFO" 2>/dev/null)" || return 1
+  case "$real" in "$root"/*) ;; *) return 1;; esac   # a link that leaves the zoneinfo tree is refused
+  [ "$(head -c4 -- "$real" 2>/dev/null)" = TZif ]
+}
+valid_ipv4() { local IFS=. o; local -a a; read -ra a <<<"$1"; [ "${#a[@]}" = 4 ] || return 1; for o in "${a[@]}"; do [[ "$o" =~ ^[0-9]{1,3}$ ]] && [ "$((10#$o))" -le 255 ] || return 1; done; }
+valid_ipv6() { [[ "$1" =~ ^[0-9A-Fa-f:]{2,45}$ ]] && [[ "$1" == *:*:* ]] && [[ "$1" != *:::* ]] && [[ "$1" != *::*::* ]]; }
+valid_host() {
+  local h="$1"
+  [ "${#h}" -ge 1 ] && [ "${#h}" -le 253 ] || return 1
+  if [[ "$h" =~ ^[0-9.]+$ ]]; then valid_ipv4 "$h"; return; fi
+  if [[ "$h" == *:* ]]; then valid_ipv6 "$h"; return; fi
+  [[ "$h" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]
+}
+valid_time() {   # RFC 3339 with a zone; the result is the epoch in EPOCH
+  local t="$1"
+  [[ "$t" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$ ]] || return 1
+  EPOCH="$(date -u -d "$t" +%s 2>/dev/null)" || return 1
+  [[ "$EPOCH" =~ ^[0-9]+$ ]] && [ "$EPOCH" -ge "$MIN_EPOCH" ] && [ "$EPOCH" -le "$MAX_EPOCH" ]
+}
+EPOCH=0
+
+# ---- the NTP client --------------------------------------------------------------------------------------------------------
+NTP_BACKEND=none; NTP_UNIT=""
+unit_exists() { have systemctl && grep -q "^$1" <<<"$(systemctl list-unit-files "$1" 2>/dev/null)"; }
+unit_active() { have systemctl && systemctl is-active --quiet "$1" 2>/dev/null; }
+detect_ntp() {
+  NTP_BACKEND=none; NTP_UNIT=""
+  local u
+  for u in chronyd.service chrony.service; do if unit_active "$u"; then NTP_BACKEND=chrony; NTP_UNIT="$u"; return 0; fi; done
+  if unit_active systemd-timesyncd.service; then NTP_BACKEND=timesyncd; NTP_UNIT=systemd-timesyncd.service; return 0; fi
+  for u in chronyd.service chrony.service; do if unit_exists "$u"; then NTP_BACKEND=chrony; NTP_UNIT="$u"; return 0; fi; done
+  if unit_exists systemd-timesyncd.service; then NTP_BACKEND=timesyncd; NTP_UNIT=systemd-timesyncd.service; return 0; fi
+  return 1
+}
+chrony_main() { local f; for f in "$ETC/chrony/chrony.conf" "$ETC/chrony.conf"; do [ -f "$f" ] && { printf '%s' "$f"; return 0; }; done; return 1; }
+# the directory chrony reads extra sources from, under $ETC only (a /run directory does not survive a reboot): a "sourcedir" first, else a "confdir"
+chrony_dropin() {   # prints "sources|FILE" or "conf|FILE"
+  local main dir
+  main="$(chrony_main)" || return 1
+  dir="$(sed -n 's/^[[:space:]]*sourcedir[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' "$main" | while IFS= read -r d; do case "$d" in "$ETC"/*) printf '%s' "$d"; break;; esac; done)"
+  if [ -n "$dir" ]; then printf 'sources|%s/toutwaf.sources' "$dir"; return 0; fi
+  dir="$(sed -n 's/^[[:space:]]*confdir[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' "$main" | while IFS= read -r d; do case "$d" in "$ETC"/*) printf '%s' "$d"; break;; esac; done)"
+  if [ -n "$dir" ]; then printf 'conf|%s/toutwaf-ntp.conf' "$dir"; return 0; fi
+  return 1
+}
+timesyncd_file() { printf '%s/systemd/timesyncd.conf.d/toutwaf.conf' "$ETC"; }
+current_servers() {   # the servers this helper wrote, one line
+  local f kind
+  detect_ntp || return 0
+  case "$NTP_BACKEND" in
+    chrony) f="$(chrony_dropin)" || return 0; kind="${f%%|*}"; f="${f#*|}"
+            [ -f "$f" ] && sed -n 's/^server[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' "$f" | paste -sd, -;;
+    timesyncd) f="$(timesyncd_file)"; [ -f "$f" ] && sed -n 's/^NTP=//p' "$f" | tr ' ' ',' | head -n1;;
+  esac
+  return 0
+}
+
+# ---- the five actions ------------------------------------------------------------------------------------------------------
+need_tool() { have timedatectl || { echo "timedatectl is not installed on this machine" >&2; return 1; }; }
+cmd_status() {
+  need_tool || return 1
+
+  v() { timedatectl show -p "$1" --value 2>/dev/null | head -n1 | tr -d '\000-\037'; }
+  printf 'timezone=%s\n' "$(v Timezone)"
+  printf 'ntp=%s\n' "$(v NTP)"
+  printf 'ntp_synchronized=%s\n' "$(v NTPSynchronized)"
+  printf 'can_ntp=%s\n' "$(v CanNTP)"
+  printf 'rtc_in_local_tz=%s\n' "$(v LocalRTC)"
+  printf 'utc_time=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  detect_ntp
+  printf 'ntp_backend=%s\n' "$NTP_BACKEND"
+  printf 'ntp_servers=%s\n' "$(current_servers)"
+}
+cmd_set_timezone() {
+  need_tool || return 1
+  valid_zone "${1:-}" || { echo "refused: not a time zone of the zoneinfo database" >&2; return 2; }
+  timedatectl set-timezone "$1"
+}
+cmd_set_ntp() {
+  need_tool || return 1
+  case "${1:-}" in
+    on) timedatectl set-ntp true;;
+    off) timedatectl set-ntp false;;
+    *) echo "refused: on or off" >&2; return 2;;
+  esac
+}
+cmd_set_ntp_servers() {
+  local s n=0 f kind body main
+  for s in "$@"; do
+    valid_host "$s" || { echo "refused: '$(printf '%s' "$s" | tr -cd 'A-Za-z0-9.:_-' | cut -c1-60)' is not a host name or an address" >&2; return 2; }
+    n=$((n+1))
+  done
+  [ "$n" -le "$MAX_SERVERS" ] || { echo "refused: at most $MAX_SERVERS servers" >&2; return 2; }
+  detect_ntp || { echo "no NTP client (chrony or systemd-timesyncd) on this machine" >&2; return 1; }
+  case "$NTP_BACKEND" in
+    chrony)
+      f="$(chrony_dropin)" || { echo "chrony does not read a drop-in directory (no sourcedir or confdir under $ETC in its configuration)" >&2; return 1; }
+      kind="${f%%|*}"; f="${f#*|}"
+      if [ "$n" = 0 ]; then rm -f -- "$f"
+      else
+        mkdir -p -- "$(dirname -- "$f")" || return 1
+        body="# written by toutwaf-time: the NTP servers chosen in the console (Settings > Date, time and time zone)"$'\n'
+        for s in "$@"; do body="$body"$'server '"$s"$' iburst\n'; done
+        printf '%s' "$body" | put_file "$f" || { echo "could not write $f" >&2; return 1; }
+        main="$(chrony_main)"
+        if have chronyd && ! chronyd -p -f "$main" >/dev/null 2>&1; then rm -f -- "$f"; echo "chrony refused the new configuration: put back" >&2; return 1; fi
+      fi;;
+    timesyncd)
+      f="$(timesyncd_file)"
+      if [ "$n" = 0 ]; then rm -f -- "$f"
+      else
+        mkdir -p -- "$(dirname -- "$f")" || return 1
+        printf '# written by toutwaf-time\n[Time]\nNTP=%s\n' "$*" | put_file "$f" || { echo "could not write $f" >&2; return 1; }
+      fi;;
+  esac
+  have systemctl || return 0
+  systemctl restart "$NTP_UNIT"
+}
+cmd_set_time() {
+  need_tool || return 1
+  valid_time "${1:-}" || { echo "refused: not an RFC 3339 time between 2026-01-01 and 2100-01-01" >&2; return 2; }
+  if [ "$(timedatectl show -p NTP --value 2>/dev/null)" = yes ]; then echo "refused: NTP is on: switch it off first" >&2; return 2; fi
+  local wall
+  wall="$(LC_ALL=C date -d "@$EPOCH" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" || return 1
+  timedatectl set-time "$wall"
+}
+
+# ---- apply: one request of the console ---------------------------------------------------------------------------------------
+jesc() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | cut -c1-1500; }
+answer() {   # ID ACTION CODE OUTPUT
+  local ok=false
+  [ "$3" = 0 ] && ok=true
+  printf '{"id":"%s","action":"%s","ok":%s,"code":%s,"output":"%s"}\n' "$(jesc "$1")" "$(jesc "$2")" "$ok" "$3" "$(jesc "$4")" | put_file "$RES"
+}
+do_apply() {
+  local tmp rc out code line R_PROTO="" R_ID="" R_ACTION="" R_TZ="" R_NTP="" R_SERVERS="" R_TIME=""
+  tmp="$(mktemp)" || return 1
+  take_request "$REQ" "$tmp" 4096; rc=$?
+  if [ "$rc" = 1 ]; then rm -f -- "$tmp"; return 0; fi
+  if [ "$rc" != 0 ]; then rm -f -- "$tmp"; answer "" "" 2 "refused: the request is not a plain file of the service account"; return 2; fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      PROTO=*) R_PROTO="${line#PROTO=}";; ID=*) R_ID="${line#ID=}";; ACTION=*) R_ACTION="${line#ACTION=}";;
+      TZ=*) R_TZ="${line#TZ=}";; NTP=*) R_NTP="${line#NTP=}";; SERVERS=*) R_SERVERS="${line#SERVERS=}";; TIME=*) R_TIME="${line#TIME=}";;
+    esac
+  done <"$tmp"
+  rm -f -- "$tmp"
+  if [ "$R_PROTO" != 1 ] || [[ ! "$R_ID" =~ ^[0-9a-f]{16}$ ]]; then answer "" "" 2 "refused: unknown request"; return 2; fi
+  case "$R_ACTION" in
+    set-timezone) out="$(cmd_set_timezone "$R_TZ" 2>&1)"; code=$?;;
+    set-ntp) out="$(cmd_set_ntp "$R_NTP" 2>&1)"; code=$?;;
+    set-ntp-servers) local -a srv; read -ra srv <<<"$R_SERVERS"; out="$(cmd_set_ntp_servers "${srv[@]+"${srv[@]}"}" 2>&1)"; code=$?;;
+    set-time) out="$(cmd_set_time "$R_TIME" 2>&1)"; code=$?;;
+    *) out="refused: unknown action"; code=2;;
+  esac
+  answer "$R_ID" "$R_ACTION" "$code" "$out"
+  return 0
+}
+
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-time must run as root" >&2; exit 1; }
+case "${1:-}" in
+  apply) do_apply;;
+  status) cmd_status;;
+  set-timezone) [ "$#" = 2 ] || { echo "usage: toutwaf-time set-timezone ZONE" >&2; exit 2; }; cmd_set_timezone "$2";;
+  set-ntp) [ "$#" = 2 ] || { echo "usage: toutwaf-time set-ntp on|off" >&2; exit 2; }; cmd_set_ntp "$2";;
+  set-ntp-servers) shift; cmd_set_ntp_servers "$@";;
+  set-time) [ "$#" = 2 ] || { echo "usage: toutwaf-time set-time RFC3339" >&2; exit 2; }; cmd_set_time "$2";;
+  *) echo "usage: toutwaf-time apply|status|set-timezone ZONE|set-ntp on|off|set-ntp-servers [HOST...]|set-time RFC3339" >&2; exit 2;;
+esac
+TW_TIME_TPL
+  emit_helper toutwaf-sysupdate <<'TW_SYSUPDATE_TPL'
+#!/usr/bin/env bash
+# toutwaf-sysupdate-proto: 1
+#
+# toutwaf-sysupdate apply   (root; toutwaf-sysupdate.service, started by toutwaf-sysupdate.path) perform the pending @DATA_DIR@/sysupdate-request:
+#                           scan, plan (simulation), apply or reboot, for the operating system packages of THIS machine. The request is left by the
+#                           control plane (console host) or by the data plane (a node, command update_system); both are unprivileged and the file is
+#                           untrusted input: `toutwafctl sysupdate-host apply` reads it again, refuses any key or value outside its fixed list, and
+#                           never runs a shell. Answers: @DATA_DIR@/sysupdate-result.json and, during an update, @DATA_DIR@/sysupdate-state.json.
+# (docs/design/mises-a-jour-systeme.md)
+set -u
+CTL="@BIN_DIR@/toutwafctl"
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-sysupdate must run as root" >&2; exit 1; }
+case "${1:-}" in
+  apply)
+    [ -x "$CTL" ] || { echo "toutwafctl is missing" >&2; exit 1; }
+    exec "$CTL" sysupdate-host apply --data-dir "@DATA_DIR@";;
+  *) echo "usage: toutwaf-sysupdate apply" >&2; exit 2;;
+esac
+TW_SYSUPDATE_TPL
+  emit_helper toutwaf-relay <<'TW_RELAY_TPL'
+#!/usr/bin/env bash
+# toutwaf-relay-proto: 1
+#
+# toutwaf-relay apply   (root; toutwaf-relay.service) perform the pending @DATA_DIR@/relay-request, answer in @DATA_DIR@/relay-status
+# toutwaf-relay show    print the control_plane.relay block of @CONF_DIR@/toutwaf-dp.yaml (reads only)
+#
+# The console of ToutWAF can switch the relays of this node on or off (console: Nodes > Relays). The data plane runs without privilege in a read-only
+# sandbox, so it checks the order of the console (bounds, lists) and leaves a small request file; this helper does the work. The request is written
+# by the service account, so for root it is untrusted input and is checked again here, value by value:
+#   * the request is KEY=VALUE lines of a fixed list of keys, nothing else; the ACTION is "set"; there is no command line in a request;
+#   * allow is 0 or 1; max_sessions 1..16, max_seconds 60..3600, max_renewals 0..12; extra_allow at most 32 networks, each with a prefix of at
+#     least /16 (IPv4) or /48 (IPv6) and never loopback, link-local, multicast or unspecified; deny at most 32 networks. These are the bounds of the data
+#     plane (relaycfg.rs) and of the console: a value outside them is refused, never rounded;
+#   * only the `relay:` block under `control_plane:` of the configuration is rewritten, with a fixed shape built from the checked values; the rest of
+#     the file is copied as it is;
+#   * the new file is written next to the old one (same owner and mode), checked with `toutwaf-dp check-config`, put in place with one rename, the
+#     old file is kept (toutwaf-dp.yaml.relay-bak.<time>, the five newest), the service is restarted, and the old file is put back if the check or the
+#     restart fails. A request that changes nothing restarts nothing.
+set -uo pipefail
+DATA_DIR='@DATA_DIR@'; CONF_DIR='@CONF_DIR@'; BIN_DIR='@BIN_DIR@'
+REQ="$DATA_DIR/relay-request"; STATUS="$DATA_DIR/relay-status"; CONF="${TOUTWAF_DP_CONF:-$CONF_DIR/toutwaf-dp.yaml}"
+DP_UNIT="${TOUTWAF_DP_UNIT:-toutwaf-dp}"; DP_BIN="$BIN_DIR/toutwaf-dp"
+KEEP=5
+have() { command -v "$1" >/dev/null 2>&1; }
+# >>> hostio: how root touches the files of the service account (deploy/helpers/hostio.sh; deploy/tests/hostio-test.sh checks the copies) >>>
+# The account owns the data directory and can change any name in it at any moment: a link to a file of root, a FIFO that holds
+# root in open(2) for ever, a file with a second name. Nothing it wrote is opened without O_NOFOLLOW | O_NONBLOCK or judged by a
+# path that is opened later; nothing of root's is written through a path it could have swapped (no chown/chmod by path).
+_dd_nofollow() {   # 0 when dd can open with iflag=nofollow,nonblock (GNU dd; not busybox)
+  [ -n "${_DD_NF:-}" ] || { dd iflag=nofollow,nonblock if=/dev/null of=/dev/null count=0 2>/dev/null && _DD_NF=1 || _DD_NF=0; }
+  [ "$_DD_NF" = 1 ]
+}
+_bounded() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+# copy_safe SRC DST MAX   0: DST holds a copy of SRC; 1: SRC does not exist; 2: refused. SRC must be a regular file (no link, no FIFO,
+# no device) with one name, owned by the owner of its directory, that nobody else can write, of at most MAX bytes, and unchanged
+# while it was read. DST is a file of root's.
+copy_safe() {
+  local src="$1" dst="$2" max="$3" dir m1 m2 type uid nlink mode size
+  [ -e "$src" ] || [ -L "$src" ] || return 1
+  dir="$(dirname -- "$src")"
+  m1="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)" || return 2
+  IFS='|' read -r type uid nlink mode size _ <<<"$m1"
+  case "$type" in "regular file"|"regular empty file") ;; *) return 2;; esac
+  [ "$uid" = "$(stat -c %u -- "$dir" 2>/dev/null)" ] && [ "$nlink" = 1 ] || return 2
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -le "$max" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] || return 2
+  if _dd_nofollow; then
+    _bounded 10 dd if="$src" of="$dst" iflag=nofollow,nonblock bs=65536 count=$(( max / 65536 + 2 )) 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  else
+    _bounded 10 cat -- "$src" >"$dst" 2>/dev/null || { rm -f -- "$dst"; return 2; }
+  fi
+  m2="$(LC_ALL=C stat -c '%F|%u|%h|%a|%s|%i|%Y' -- "$src" 2>/dev/null)"
+  if [ "$m1" != "$m2" ] || [ ! -f "$dst" ] || [ -L "$dst" ] || [ "$(stat -c %s -- "$dst" 2>/dev/null || echo 999999999999)" -gt "$max" ]; then rm -f -- "$dst"; return 2; fi
+  return 0
+}
+# take_request SRC DST MAX: copy_safe, then SRC is removed whatever the answer (a request left in place would start the helper again
+# and again). 0: DST holds the request; 1: there was none; 2: refused.
+take_request() {
+  local rc
+  copy_safe "$1" "$2" "$3"; rc=$?
+  [ "$rc" -eq 1 ] || rm -f -- "$1"
+  return "$rc"
+}
+# put_file DEST: stdin becomes DEST, mode 0644, owned by root: a new file under a random name (noclobber: O_EXCL), renamed over
+# DEST. A link at DEST is replaced, never written through. The account only reads these files.
+put_file() {
+  local dest="$1" tmp
+  tmp="$(mktemp -u -- "$dest.XXXXXX")" || return 1
+  ( umask 022; set -C; cat >"$tmp" ) 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  mv -fT -- "$tmp" "$dest" 2>/dev/null || { [ -L "$dest" ] && rm -f -- "$dest"; mv -f -- "$tmp" "$dest"; } || { rm -f -- "$tmp"; return 1; }
+}
+# <<< hostio <<<
+
+# ---- the answer ----------------------------------------------------------------------------------------------------------------
+R_ID=""; R_ALLOW=""
+one_line() { printf '%s' "$1" | tr -d '\000-\037\177' | cut -c1-200; }
+write_status() {   # STATE MESSAGE
+  { printf 'ID=%s\nSTATE=%s\nMESSAGE=%s\nALLOW=%s\nFINISHED=%s\n' "$R_ID" "$1" "$(one_line "$2")" "$R_ALLOW" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; } | put_file "$STATUS"
+}
+
+# ---- validation (the request file is writable by the service account: never trust it) -----------------------------------------------
+valid_id() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
+in_range() {   # VALUE LOW HIGH
+  [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$((10#$1))" -ge "$2" ] && [ "$((10#$1))" -le "$3" ]
+}
+valid_v4() {   # ADDRESS  (canonical: no leading zeros), sets O1 O2
+  local a="$1" o; local -a p
+  [[ "$a" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+  IFS=. read -ra p <<<"$a"
+  for o in "${p[@]}"; do [[ "$o" =~ ^(0|[1-9][0-9]{0,2})$ ]] && [ "$o" -le 255 ] || return 1; done
+  O1="${p[0]}"; O2="${p[1]}"
+}
+valid_v6() {   # ADDRESS (lower case, as the data plane writes it), sets G1 to the value of the first group
+  local a="$1" g n=0; local -a p
+  [[ "$a" =~ ^[0-9a-f:]{2,39}$ ]] && [[ "$a" == *:*:* ]] && [[ "$a" != *:::* ]] && [[ "$a" != *::*::* ]] || return 1
+  case "$a" in :[!:]*|*[!:]:) return 1;; esac
+  IFS=: read -ra p <<<"$a"
+  for g in "${p[@]}"; do
+    [ -z "$g" ] && continue
+    [[ "$g" =~ ^[0-9a-f]{1,4}$ ]] || return 1
+    n=$((n + 1))
+  done
+  if [[ "$a" == *::* ]]; then [ "$n" -le 7 ] || return 1; else [ "$n" = 8 ] || return 1; fi
+  g="${p[0]:-}"; G1=0; [ -z "$g" ] || G1=$((16#$g))
+}
+valid_net() {   # NETWORK EXTRA(1 = an extra_allow entry: bounded, 0 = a deny entry)
+  local n="$1" extra="$2" a pre
+  [[ "$n" =~ ^[0-9a-f:.]{2,45}/[0-9]{1,3}$ ]] || return 1
+  a="${n%/*}"; pre="${n##*/}"
+  [[ "$pre" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+  if [[ "$a" == *:* ]]; then
+    valid_v6 "$a" && [ "$pre" -le 128 ] || return 1
+    if [ "$extra" = 1 ]; then
+      [ "$pre" -ge 48 ] || return 1
+      # ::/8 (unspecified, loopback, IPv4-mapped), fe80::/10 link-local, ff00::/8 multicast
+      [ "$G1" -gt 255 ] && { [ "$G1" -lt 65152 ] || [ "$G1" -gt 65215 ]; } && [ "$G1" -lt 65280 ] || return 1   # 65152 = 0xfe80, 65215 = 0xfebf, 65280 = 0xff00
+    fi
+  else
+    valid_v4 "$a" && [ "$pre" -le 32 ] || return 1
+    if [ "$extra" = 1 ]; then
+      [ "$pre" -ge 16 ] || return 1
+      [ "$O1" != 0 ] && [ "$O1" != 127 ] && [ "$O1" -lt 224 ] && ! { [ "$O1" = 169 ] && [ "$O2" = 254 ]; } || return 1
+    fi
+  fi
+  return 0
+}
+valid_list() {   # LIST(comma separated, may be empty) EXTRA
+  local l="$1" extra="$2" n=0 x; local -a items
+  [ -n "$l" ] || return 0
+  [[ "$l" != ,* && "$l" != *, && "$l" != *,,* ]] || return 1
+  IFS=, read -ra items <<<"$l"
+  for x in "${items[@]}"; do
+    valid_net "$x" "$extra" || return 1
+    n=$((n + 1))
+  done
+  [ "$n" -le 32 ]
+}
+
+# ---- the configuration ------------------------------------------------------------------------------------------------------------
+# new_config OUT: the current file with its control_plane.relay block replaced by the one of the request (or added at the end of control_plane).
+# 0 done; 3 the file has no control_plane block (the node is not linked to a console); 4 a shape this helper does not rewrite.
+new_config() {
+  local out="$1" top
+  top="$(grep -c '^control_plane:' "$CONF" 2>/dev/null)"
+  [ "${top:-0}" -ge 1 ] || return 3
+  [ "$top" = 1 ] || return 4
+  grep -q '^control_plane:[[:space:]]*\(#.*\)\{0,1\}$' "$CONF" || return 4   # control_plane: { ... } on one line
+  awk -v allow="$A_ALLOW" -v ms="$A_SESSIONS" -v sec="$A_SECONDS" -v ren="$A_RENEWALS" -v extra="$A_EXTRA" -v deny="$A_DENY" '
+    function ind(s) { match(s, /^ */); return RLENGTH }
+    function qlist(csv,   n, a, i, o) {
+      if (csv == "") return "[]"
+      n = split(csv, a, ","); o = "["
+      for (i = 1; i <= n; i++) o = o (i > 1 ? ", " : "") "\"" a[i] "\""
+      return o "]"
+    }
+    function emit(ci,   p, q) {
+      p = sprintf("%" ci "s", ""); q = sprintf("%" (ci + 2) "s", "")
+      print p "relay:                      # set from the console (Nodes > Relays) by toutwaf-relay"
+      print q "allow: " (allow == 1 ? "true" : "false")
+      print q "max_sessions: " ms + 0
+      print q "max_seconds: " sec + 0
+      print q "max_renewals: " ren + 0
+      print q "extra_allow: " qlist(extra)
+      print q "deny: " qlist(deny)
+    }
+    function flush_blanks(   i) { for (i = 1; i <= nb; i++) print blank[i]; nb = 0 }
+    function leave() { if (inblock && !done) { emit(ci ? ci : 2); done = 1 } flush_blanks(); inblock = 0 }
+    BEGIN { inblock = 0; done = 0; skipping = 0; ci = 0; nb = 0 }
+    {
+      line = $0
+      blankline = (line ~ /^[ \t]*$/)
+      if (!inblock && !seen && line ~ /^control_plane:/) { seen = 1; inblock = 1; print line; next }
+      if (inblock) {
+        if (!blankline && ind(line) == 0) { leave(); print line; next }   # the next top-level key (or comment): the block is over
+        if (blankline) { blank[++nb] = line; next }
+        if (ci == 0 && line !~ /^[ ]*#/) ci = ind(line)
+        if (skipping) {
+          if (ind(line) > rind) { nb = 0; next }   # a line of the old relay block (the blank lines inside it go with it)
+          skipping = 0
+        }
+        if (line ~ /^[ ]*relay:/ && ind(line) == (ci ? ci : 2)) {
+          rind = ind(line); skipping = 1
+          flush_blanks()
+          if (!done) { emit(rind); done = 1 }
+          next
+        }
+        flush_blanks(); print line; next
+      }
+      print line
+    }
+    END { leave() }
+  ' "$CONF" >"$out" 2>/dev/null
+}
+current_block() { awk '/^control_plane:/{c=1;next} c&&/^[^ \t#]/{c=0} c&&/^[ ]*relay:/{r=1;ri=match($0,/[^ ]/);print;next} r{m=match($0,/[^ ]/); if($0~/^[ \t]*$/||m>ri){print;next} r=0}' "$CONF" 2>/dev/null; }
+
+dp_active() { have systemctl && systemctl is-active --quiet "$DP_UNIT" 2>/dev/null; }
+dp_restart() {
+  _bounded 150 systemctl restart "$DP_UNIT" >/dev/null 2>&1 || return 1
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do dp_active && break; sleep "${TOUTWAF_RELAY_WAIT:-5}"; done
+  dp_active || return 1
+  sleep "${TOUTWAF_RELAY_SETTLE:-3}"; dp_active   # still up a moment later (a configuration that crashes it shows now)
+}
+# put_conf SRC: SRC (a file of root's next to the configuration) replaces it with one rename; the owner and mode are those of the old file
+put_conf() {
+  local src="$1"
+  if have chcon && have stat; then chcon --reference="$CONF" "$src" 2>/dev/null || true; fi
+  mv -f -- "$src" "$CONF"
+}
+prune_backups() {
+  local f n=0
+  # shellcheck disable=SC2012
+  for f in $(ls -1t -- "$CONF".relay-bak.* 2>/dev/null); do
+    n=$((n + 1)); [ "$n" -le "$KEEP" ] || rm -f -- "$f"
+  done
+}
+
+do_apply() {
+  local tmp rc line key val R_PROTO="" R_ACTION="" R_SESS="" R_SECS="" R_REN="" R_EXTRA="" R_DENY="" seen=" "
+  tmp="$(mktemp)" || return 1
+  take_request "$REQ" "$tmp" 4096; rc=$?
+  if [ "$rc" = 1 ]; then rm -f -- "$tmp"; return 0; fi
+  if [ "$rc" != 0 ]; then rm -f -- "$tmp"; write_status refused "the request is not a plain file of the service account"; return 2; fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[A-Z_]+=[0-9A-Za-z:./,_-]*$ ]] || { rm -f -- "$tmp"; write_status refused "the request has a line this helper does not read"; return 2; }
+    key="${line%%=*}"; val="${line#*=}"
+    case "$seen" in *" $key "*) rm -f -- "$tmp"; write_status refused "the request names $key twice"; return 2;; esac
+    seen="$seen$key "
+    case "$key" in
+      PROTO) R_PROTO="$val";; ACTION) R_ACTION="$val";; ID) R_ID="$val";; ALLOW) R_ALLOW="$val";;
+      MAX_SESSIONS) R_SESS="$val";; MAX_SECONDS) R_SECS="$val";; MAX_RENEWALS) R_REN="$val";; EXTRA_ALLOW) R_EXTRA="$val";; DENY) R_DENY="$val";;
+      *) rm -f -- "$tmp"; write_status refused "the request names a key this helper does not know"; return 2;;
+    esac
+  done <"$tmp"
+  rm -f -- "$tmp"
+  valid_id "$R_ID" || { R_ID=""; R_ALLOW=""; write_status refused "invalid request id"; return 2; }
+  [ "$R_PROTO" = 1 ] || { R_ALLOW=""; write_status refused "unknown request version"; return 2; }
+  [ "$R_ACTION" = set ] || { R_ALLOW=""; write_status refused "unknown action"; return 2; }
+  [ "$R_ALLOW" = 0 ] || [ "$R_ALLOW" = 1 ] || { R_ALLOW=""; write_status refused "allow must be 0 or 1"; return 2; }
+  in_range "$R_SESS" 1 16 || { write_status refused "max_sessions is outside 1..16"; return 2; }
+  in_range "$R_SECS" 60 3600 || { write_status refused "max_seconds is outside 60..3600"; return 2; }
+  in_range "$R_REN" 0 12 || { write_status refused "max_renewals is outside 0..12"; return 2; }
+  valid_list "$R_EXTRA" 1 || { write_status refused "extra_allow: a network is invalid, too wide (at least /16 or /48) or never reachable, or there are more than 32"; return 2; }
+  valid_list "$R_DENY" 0 || { write_status refused "deny: a network is invalid or there are more than 32"; return 2; }
+  A_ALLOW="$R_ALLOW"; A_SESSIONS="$((10#$R_SESS))"; A_SECONDS="$((10#$R_SECS))"; A_RENEWALS="$((10#$R_REN))"; A_EXTRA="$R_EXTRA"; A_DENY="$R_DENY"
+
+  [ -f "$CONF" ] && [ ! -L "$CONF" ] || { write_status failed "the configuration file $CONF is missing"; return 1; }
+  write_status applying "the relay settings are being written"
+  local new bak stamp
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"; bak="$CONF.relay-bak.$stamp"
+  new="$(mktemp -u -- "$CONF.relay-new.XXXXXX")" || { write_status failed "no temporary file"; return 1; }
+  # same owner, mode and context as the old file, then its content
+  cp -p -- "$CONF" "$new" 2>/dev/null || { rm -f -- "$new"; write_status failed "could not prepare the new configuration next to the old one"; return 1; }
+  new_config "$new.body"; rc=$?
+  case "$rc" in
+    0) ;;
+    3) rm -f -- "$new" "$new.body"; write_status failed "this node is not linked to a console: its configuration has no control_plane block"; return 1;;
+    *) rm -f -- "$new" "$new.body"; write_status failed "the control_plane block of the configuration has a shape this helper does not rewrite (one line, or more than one block): update the node with the installer, or edit control_plane.relay by hand"; return 1;;
+  esac
+  cat -- "$new.body" >"$new" 2>/dev/null || { rm -f -- "$new" "$new.body"; write_status failed "could not write the new configuration"; return 1; }
+  rm -f -- "$new.body"
+  if cmp -s -- "$CONF" "$new"; then
+    rm -f -- "$new"; write_status unchanged "the relay settings of this node already are what the console asked for"; return 0
+  fi
+  if [ -x "$DP_BIN" ]; then
+    out="$(_bounded 60 "$DP_BIN" --config "$new" check-config 2>&1)"; rc=$?
+    if [ "$rc" != 0 ]; then
+      rm -f -- "$new"
+      write_status failed "the new configuration was refused by check-config, nothing was changed: $(printf '%s' "$out" | tail -n1)"
+      return 1
+    fi
+  fi
+  cp -p -- "$CONF" "$bak" 2>/dev/null || { rm -f -- "$new"; write_status failed "could not keep a copy of the old configuration"; return 1; }
+  put_conf "$new" || { rm -f -- "$new"; write_status failed "could not put the new configuration in place (the old one is untouched)"; return 1; }
+  prune_backups
+  if dp_restart; then
+    if [ "$A_ALLOW" = 1 ]; then write_status ok "relays are switched on in the configuration of the node; the data plane was restarted"
+    else write_status ok "relays are switched off in the configuration of the node; the data plane was restarted"; fi
+    return 0
+  fi
+  # the service did not come back with the new file: put the old one back
+  local back; back="$(mktemp -u -- "$CONF.relay-new.XXXXXX")"
+  if cp -p -- "$bak" "$back" 2>/dev/null && put_conf "$back"; then
+    if dp_restart; then write_status rolled_back "the data plane did not start with the new settings: the previous configuration was put back and runs"; return 1; fi
+    write_status failed "copy of the previous configuration: $bak (the data plane starts neither with the new settings nor with it: see journalctl -u $DP_UNIT)"; return 1
+  fi
+  rm -f -- "$back"
+  write_status failed "the data plane did not start with the new settings and the previous configuration could not be put back: copy at $bak"
+  return 1
+}
+
+[ "$(id -u)" -eq 0 ] || { echo "toutwaf-relay must run as root" >&2; exit 1; }
+case "${1:-}" in
+  apply) do_apply; exit $?;;
+  show) current_block; exit 0;;
+  *) echo "usage: toutwaf-relay apply|show" >&2; exit 2;;
+esac
+TW_RELAY_TPL
+  cat >"$sd/toutwaf-upgrade.path" <<EOF
+[Unit]
+Description=ToutWAF upgrade requests (data plane update_engine, console Updates page)
+
+[Path]
+PathExists=$DATA_DIR/upgrade-request
+Unit=toutwaf-upgrade.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  cat >"$sd/toutwaf-upgrade.service" <<EOF
+[Unit]
+Description=ToutWAF upgrade (requested by the control plane or the data plane)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-$CONF_DIR/upgrade.env
+ExecStart=$BIN_DIR/toutwaf-upgrade apply
+# longest honest run: download and checks (10 min) + the installer (15 min) + the health window (up to 30 min); the transient rollback timer settles
+# the update anyway if systemd cuts the helper short (docs/design/update-resilience.md)
+TimeoutStartSec=60min
+$(sd_helper_sandbox basic)
+EOF
+  # finishes or undoes an update that a power loss, a killed helper or a reboot interrupted (no-op when the journal of the update helper is closed)
+  cat >"$sd/toutwaf-upgrade-guard.service" <<EOF
+[Unit]
+Description=ToutWAF: finish or undo an interrupted update
+After=local-fs.target network-online.target toutwaf-cp.service toutwaf-dp.service
+Wants=network-online.target
+ConditionPathExists=${DATA_DIR}-upgrade/journal.json
+
+[Service]
+Type=oneshot
+# a failed repair never stops the machine from booting
+ExecStart=-$BIN_DIR/toutwaf-upgrade recover
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  # the relay settings of THIS node, changed from the console (Nodes > Relays): the data plane leaves relay-request, this helper rewrites control_plane.relay
+  if want_dp; then
+    cat >"$sd/toutwaf-relay.path" <<EOF
+[Unit]
+Description=ToutWAF relay settings requests (console Nodes > Relays)
+
+[Path]
+PathExists=$DATA_DIR/relay-request
+Unit=toutwaf-relay.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-relay.service" <<EOF
+[Unit]
+Description=ToutWAF relay settings helper (requested by the data plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-relay apply
+TimeoutStartSec=6min
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+$(sd_helper_sandbox small)
+EOF
+  fi
+  if want_cp; then
+    cat >"$sd/toutwaf-firewall.path" <<EOF
+[Unit]
+Description=ToutWAF firewall requests (console Settings > Firewall)
+
+[Path]
+PathExists=$DATA_DIR/firewall-request
+Unit=toutwaf-firewall.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-firewall.service" <<EOF
+[Unit]
+Description=ToutWAF firewall helper (requested by the control plane)
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-firewall apply
+TimeoutStartSec=2min
+PrivateTmp=yes
+ProtectHome=yes
+EOF
+    cat >"$sd/toutwaf-blocklist.path" <<EOF
+[Unit]
+Description=ToutWAF kernel blocklist requests (console Lists > Kernel blocking)
+
+[Path]
+PathExists=$DATA_DIR/blocklist-request
+Unit=toutwaf-blocklist.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    # the helper needs the netfilter netlink socket and to write the status file for the service account, nothing else
+    cat >"$sd/toutwaf-blocklist.service" <<EOF
+[Unit]
+Description=ToutWAF kernel blocklist helper (requested by the control plane)
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-blocklist apply
+TimeoutStartSec=5min
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=$DATA_DIR
+RuntimeDirectory=toutwaf-blocklist
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+UMask=0022
+EOF
+    cat >"$sd/toutwaf-vpn.path" <<EOF
+[Unit]
+Description=ToutWAF VPN requests (console VPN)
+
+[Path]
+PathExists=$DATA_DIR/vpn-request
+Unit=toutwaf-vpn.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    # the helper starts and stops the tunnels (systemctl) and reads their state; the tunnels themselves run in their own units
+    cat >"$sd/toutwaf-vpn.service" <<EOF
+[Unit]
+Description=ToutWAF VPN helper (requested by the control plane)
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-vpn apply
+TimeoutStartSec=5min
+PrivateTmp=yes
+ProtectHome=yes
+$(sd_helper_sandbox net)
+EOF
+    cat >"$sd/toutwaf-fw.path" <<EOF
+[Unit]
+Description=ToutWAF firewall rules requests (console Firewall)
+
+[Path]
+PathExists=$DATA_DIR/fw-request
+Unit=toutwaf-fw.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    # the helper loads nftables rules (netlink) and starts the transient rollback timer (systemctl): it is not sandboxed further
+    cat >"$sd/toutwaf-fw.service" <<EOF
+[Unit]
+Description=ToutWAF firewall rules helper (requested by the control plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-fw apply
+TimeoutStartSec=2min
+PrivateTmp=yes
+ProtectHome=yes
+$(sd_helper_sandbox net)
+EOF
+    # loads the confirmed rules at boot, before the control plane runs; installed, NOT enabled (the control plane also compares the
+    # loaded rules with the confirmed ones at start-up and every 5 minutes): systemctl enable toutwaf-fw-boot.service
+    cat >"$sd/toutwaf-fw-boot.service" <<EOF
+[Unit]
+Description=ToutWAF firewall: load the confirmed rules at boot
+ConditionPathExists=$DATA_DIR/firewall/toutwaf-fw.nft
+Before=network-pre.target
+Wants=network-pre.target
+DefaultDependencies=no
+After=local-fs.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# a failed load never stops the machine from booting or the control plane from starting
+ExecStart=-$BIN_DIR/toutwaf-fw boot
+TimeoutStartSec=1min
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    # builds again the network interfaces (VLAN, bridge, bond, addresses) a confirmed change recorded; installed, NOT enabled by the installer:
+    # the root helper enables it itself the first time a change of interfaces is confirmed (a machine that never used it is never touched at boot)
+    cat >"$sd/toutwaf-netif-boot.service" <<EOF
+[Unit]
+Description=ToutWAF firewall: build again the network interfaces (VLAN, bridge, bond, addresses) a confirmed change recorded
+ConditionPathExists=/var/lib/toutwaf-fw/netif-boot.json
+Before=network-pre.target
+Wants=network-pre.target
+DefaultDependencies=no
+After=local-fs.target systemd-udevd.service
+Conflicts=shutdown.target
+StartLimitIntervalSec=2min
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# a failed restore never stops the machine from booting; it is tried again when a card was not there yet
+ExecStart=-$BIN_DIR/toutwaf-fw netif-boot
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=1min
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-jobs.path" <<EOF
+[Unit]
+Description=ToutWAF privileged job requests (console Scheduled tasks)
+
+[Path]
+PathExists=$DATA_DIR/jobs-request
+Unit=toutwaf-jobs.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-jobs.service" <<EOF
+[Unit]
+Description=ToutWAF privileged jobs helper (requested by the control plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-jobs apply
+TimeoutStartSec=50min
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+$(sd_helper_sandbox basic)
+EOF
+    cat >"$sd/toutwaf-time.path" <<EOF
+[Unit]
+Description=ToutWAF clock requests (console Settings > Date, time and time zone)
+
+[Path]
+PathExists=$DATA_DIR/time-request
+Unit=toutwaf-time.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-time.service" <<EOF
+[Unit]
+Description=ToutWAF clock helper (requested by the control plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-time apply
+TimeoutStartSec=2min
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+$(sd_helper_sandbox small keep)
+EOF
+  fi
+  if want_cp || want_dp; then
+    cat >"$sd/toutwaf-sysupdate.path" <<EOF
+[Unit]
+Description=ToutWAF operating system update requests (console System updates)
+
+[Path]
+PathExists=$DATA_DIR/sysupdate-request
+Unit=toutwaf-sysupdate.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat >"$sd/toutwaf-sysupdate.service" <<EOF
+[Unit]
+Description=ToutWAF operating system update helper (requested by the control plane or the data plane)
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/toutwaf-sysupdate apply
+# an update of the packages of a server can be long; the package manager is never cut by a shorter limit than this one
+TimeoutStartSec=75min
+PrivateTmp=yes
+ProtectHome=yes
+$(sd_helper_sandbox basic)
+EOF
+  fi
+  return 0
+}
+
+tune_sysctl() {
+  if [ "$NO_SYSCTL" = 1 ] || [ "$DRY_RUN" = 1 ]; then return 0; fi
+  mkdir -p "$(p /etc/sysctl.d)"
+  cat >"$(p /etc/sysctl.d/90-toutwaf.conf)" <<'EOF'
+# ToutWAF data plane: connection-heavy reverse proxy tuning
+net.core.somaxconn = 8192
+net.core.netdev_max_backlog = 16384
+net.ipv4.tcp_max_syn_backlog = 8192
+net.ipv4.ip_local_port_range = 10240 65000
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 20
+net.ipv4.tcp_keepalive_time = 300
+fs.file-max = 2097152
+EOF
+  if [ "$STAGING" = 0 ]; then sysctl -q -p "$(p /etc/sysctl.d/90-toutwaf.conf)" >/dev/null 2>&1 || true; fi
+  return 0
+}
+
+# SELinux is enforcing or permissive on this machine (a no-op everywhere else: no getenforce, "Disabled", or no restorecon)
+selinux_on() { have getenforce && have restorecon && [ "$(getenforce 2>/dev/null || echo Disabled)" != "Disabled" ]; }
+# Gives every file of the programs directory the type bin_t, so that systemd may execute it. A file written by cp/install/mv in a directory
+# that has no rule of its own gets the type of the directory (var_t under /var/toutwaf/bin) and systemd then fails with "Permission denied"
+# (status=203/EXEC): this runs after the programs are installed AND after a rollback put them back. A persistent rule when semanage exists
+# (restorecon then agrees with it), else chcon.
+selinux_label_bin() {
+  [ "${STAGING:-0}" = 0 ] && [ "${NO_SELINUX:-0}" = 0 ] && selinux_on || return 0
+  local pat persistent=0
+  pat="$(selinux_bin_pattern)"
+  if [ "$(se_default_type "$BIN_DIR/toutwaf-cp")" = bin_t ]; then
+    persistent=1   # the policy already says bin_t here (/usr/local/bin, /usr/bin): no local rule needed
+  elif have semanage; then
+    if semanage fcontext -a -t bin_t "$pat" >/dev/null 2>&1; then persistent=1; se_state_add fcontext "bin_t|$pat"
+    elif semanage fcontext -m -t bin_t "$pat" >/dev/null 2>&1; then persistent=1; fi
+  fi
+  case "$BIN_DIR" in
+    /usr/*|/bin|/sbin) restorecon -F "$BIN_DIR"/toutwaf* >/dev/null 2>&1 || true;;
+    *) restorecon -RF "$BIN_DIR" >/dev/null 2>&1 || true;;
+  esac
+  if [ "$persistent" = 0 ]; then chcon -t bin_t "$BIN_DIR"/toutwaf* >/dev/null 2>&1 || true; fi
+  return 0
+}
+# restorecon on data after a restore from a copy: the labels are those of the policy, never a blanket type
+selinux_restore() {
+  [ "${STAGING:-0}" = 0 ] && [ "${NO_SELINUX:-0}" = 0 ] && selinux_on || return 0
+  restorecon -RF "$@" >/dev/null 2>&1 || true
+  return 0
+}
+
+# ---- SELinux (EL9 / EL10 enforcing is a supported mode: docs/install/selinux.md)
+# Design: no custom policy module. The programs carry bin_t, so systemd runs them in the domain unconfined_service_t (the stock domain of
+# a service that has no policy of its own): it may bind the ports, drive nftables / eBPF / ipset, read /proc. What can still be refused is a
+# wrong FILE label (a file copied in keeps the label of its directory; systemd cannot start a var_t program: status=203/EXEC) and, for a
+# CONFINED peer (a web server in front of the console), a port label or a boolean. This step registers exactly those, idempotently, and
+# remembers what it added (selinux.state in the configuration directory) so that --uninstall removes exactly that. It NEVER changes the mode
+# (no setenforce, no /etc/selinux/config) and --no-selinux / TOUTWAF_NO_SELINUX=1 skips all of it.
+SELINUX_LINE=""; SE_RULES=0; SE_PORTS=0; SE_BAD=0
+se_state_file() { printf '%s' "$(p "$CONF_DIR/selinux.state")"; }
+# se_state_add KEY VALUE: one "KEY=VALUE" line per thing this installer added (not twice)
+se_state_add() {
+  local f; f="$(se_state_file)"; [ -d "$(dirname "$f")" ] || return 0
+  grep -qxF "$1=$2" "$f" 2>/dev/null || printf '%s=%s\n' "$1" "$2" >>"$f" 2>/dev/null || true
+  return 0
+}
+# the type the policy gives PATH today (local rules included); "" when matchpathcon is not there
+# (a failing matchpathcon, e.g. the SELinux tools are installed but the kernel / policy is not usable, must not abort the installer under pipefail)
+se_default_type() { have matchpathcon || return 0; matchpathcon -n "$1" 2>/dev/null | awk -F: 'NR==1{print $3}' || true; }
+selinux_bin_pattern() {
+  case "$BIN_DIR" in /usr/*|/bin|/sbin) printf '%s' "$BIN_DIR/toutwaf.*";; *) printf '%s' "$BIN_DIR(/.*)?";; esac   # a shared system directory: only our own files
+}
+# the file contexts ToutWAF needs besides bin_t, "type|pattern"; install and uninstall read the same list
+selinux_rules() {
+  printf '%s|%s\n' etc_t "$CONF_DIR(/.*)?" var_lib_t "$DATA_DIR(/.*)?" var_lib_t "${DATA_DIR}-upgrade(/.*)?" var_log_t "$LOG_DIR(/.*)?"
+  if [ "$LAYOUT" = home ]; then printf '%s|%s\n' usr_t "$HOME_DIR"; fi
+}
+# se_fcontext TYPE PATTERN: adds the rule unless the policy already gives that type there; a failure is reported, never fatal
+se_fcontext() {
+  local ty="$1" pat="$2" base cur
+  base="${pat%'(/.*)?'}"; cur="$(se_default_type "$base/x")"; [ "$pat" = "$base" ] && cur="$(se_default_type "$base")"
+  if [ "$cur" = "$ty" ]; then return 0; fi
+  if semanage fcontext -a -t "$ty" "$pat" >/dev/null 2>&1; then SE_RULES=$((SE_RULES + 1)); se_state_add fcontext "$ty|$pat"
+  elif semanage fcontext -m -t "$ty" "$pat" >/dev/null 2>&1; then SE_RULES=$((SE_RULES + 1))
+  else SE_BAD=1; warn "SELinux: could not register the file context $ty for $pat (by hand: semanage fcontext -a -t $ty '$pat')"; fi
+  return 0
+}
+# the type of the policy that owns the TCP port ("" when none)
+se_port_type() {
+  semanage port -l 2>/dev/null | awk -v p="$1" '$2=="tcp" { for (i = 3; i <= NF; i++) { t = $i; gsub(/,/, "", t)
+    if (t ~ /^[0-9]+$/ && t + 0 == p + 0) { print $1; exit }
+    if (t ~ /^[0-9]+-[0-9]+$/) { split(t, r, "-"); if (p + 0 >= r[1] + 0 && p + 0 <= r[2] + 0) { print $1; exit } } } }'
+}
+# se_port N: labels a TCP port http_port_t (so that a confined web server may proxy to it); a port the policy gives another type is left alone
+se_port() {
+  local port="$1" cur
+  cur="$(se_port_type "$port")"
+  [ "$cur" = http_port_t ] && return 0
+  if [ -z "$cur" ] || [ "$cur" = unreserved_port_t ]; then
+    if semanage port -a -t http_port_t -p tcp "$port" >/dev/null 2>&1; then SE_PORTS=$((SE_PORTS + 1)); se_state_add port "http_port_t|tcp|$port"; return 0; fi
+  fi
+  log "SELinux: port $port keeps its type ${cur:-?} (ToutWAF runs unconfined and does not need http_port_t; a confined web server in front: setsebool -P httpd_can_network_connect on)"
+  return 0
+}
+se_httpd_present() { have nginx || have httpd || have apache2 || [ -x /usr/local/lsws/bin/lshttpd ] || [ -x /usr/local/lsws/bin/openlitespeed ]; }
+# se_mislabelled: how many files of ToutWAF carry another type than the policy says (restorecon dry run: nothing is changed)
+se_mislabelled() {
+  local d paths=()
+  for d in "$CONF_DIR" "$DATA_DIR" "$LOG_DIR"; do [ -e "$d" ] && paths+=("$d"); done
+  { [ ${#paths[@]} -gt 0 ] && { restorecon -n -v -R "${paths[@]}" 2>/dev/null || true; }
+    restorecon -n -v "$BIN_DIR"/toutwaf* 2>/dev/null || true; } | awk '/^Would relabel / { split($(NF-2), a, ":"); split($NF, b, ":"); if (a[3] != b[3]) n++ } END { print n + 0 }'
+}
+
+setup_selinux() {
+  if [ "$STAGING" = 1 ]; then return 0; fi
+  # AppArmor (Debian / Ubuntu / SUSE): ToutWAF ships no profile, so nothing is confined by it; the systemd sandbox of the units applies
+  if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true)" = Y ]; then info "AppArmor is active: ToutWAF ships no AppArmor profile, the services are confined by their systemd sandbox only"; fi
+  have getenforce || return 0
+  local mode; mode="$(getenforce 2>/dev/null)"; mode="$(printf '%s' "$mode" | tr 'A-Z' 'a-z')"
+  [ -n "$mode" ] && [ "$mode" != disabled ] || return 0
+  if [ "$NO_SELINUX" = 1 ]; then SELINUX_LINE="$(t sel_skip)"; log "SELinux ($mode): left untouched (--no-selinux)"; return 0; fi
+  selinux_label_bin
+  have semanage || { warn "SELinux is $mode but semanage is missing; skipping file contexts and port labels. Install policycoreutils-python-utils and run the installer again. By hand: semanage fcontext -a -t var_lib_t '$DATA_DIR(/.*)?' && semanage fcontext -a -t var_log_t '$LOG_DIR(/.*)?' && restorecon -RF '$DATA_DIR' '$LOG_DIR'"; SELINUX_LINE="$(t sel_nosem "$mode")"; return 0; }
+  log "Configuring SELinux contexts ($mode)"
+  local ty pat port
+  while IFS='|' read -r ty pat; do [ -n "$ty" ] && se_fcontext "$ty" "$pat"; done < <(selinux_rules)
+  if [ "$LAYOUT" = home ]; then restorecon -F "$HOME_DIR" 2>/dev/null || true; fi
+  restorecon -RF "$CONF_DIR" "$DATA_DIR" "$LOG_DIR" 2>/dev/null || true
+  # the files written outside the ToutWAF directories take the type of the policy for their directory (units, logrotate, sysctl, sysusers, tmpfiles, firewalld)
+  local sysf=() g
+  for g in "$(p /etc/systemd/system)"/toutwaf* "$(p /etc/logrotate.d/toutwaf)" "$(p /etc/sysctl.d/90-toutwaf.conf)" "$(p /usr/lib/sysusers.d/toutwaf.conf)" "$(p /usr/lib/tmpfiles.d/toutwaf.conf)" "$(p /etc/firewalld/services/toutwaf-dp.xml)"; do
+    if [ -e "$g" ]; then sysf+=("$g"); fi
+  done
+  if [ ${#sysf[@]} -gt 0 ]; then restorecon -F "${sysf[@]}" 2>/dev/null || true; fi
+  # ports: the console and the data-plane API (and a data-plane port other than 80 / 443) are labelled http_port_t for a confined peer
+  if want_cp; then for port in "$CP_PORT" 9444; do se_port "$port"; done; fi
+  if want_dp; then for port in "$HTTP_PORT" "$HTTPS_PORT"; do case "$port" in 80|443) ;; *) se_port "$port";; esac; done; fi
+  # a confined web server (nginx, httpd, LiteSpeed) that proxies to the console or to origins needs this boolean; it is not set on a host
+  # without such a server (it weakens the confinement of httpd for the whole machine), and --uninstall never turns it back off
+  if se_httpd_present && [ "$(getsebool httpd_can_network_connect 2>/dev/null | awk '{print $NF}')" != on ]; then
+    if setsebool -P httpd_can_network_connect on >/dev/null 2>&1; then se_state_add bool httpd_can_network_connect; log "SELinux: boolean httpd_can_network_connect set (a web server is installed)"; fi
+  fi
+  local n; n="$(se_mislabelled)"
+  if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
+    SELINUX_LINE="$(t sel_bad "$mode" "$n" "$CONF_DIR $DATA_DIR $LOG_DIR $BIN_DIR/toutwaf*")"
+    warn "SELinux: $n file(s) still carry a wrong label: restorecon -RFv $CONF_DIR $DATA_DIR $LOG_DIR $BIN_DIR/toutwaf*"
+  elif [ "$SE_BAD" = 1 ]; then
+    SELINUX_LINE="$(t sel_bad "$mode" 0 "$CONF_DIR $DATA_DIR $LOG_DIR $BIN_DIR/toutwaf*")"
+  else
+    SELINUX_LINE="$(t sel_ok "$mode" "$SE_RULES" "$SE_PORTS")"
+  fi
+  return 0
+}
+
+# --uninstall: removes exactly the rules this installer added (the state file), or, for an installation older than the state file, the rules
+# it always added; the boolean is left (another site of this machine may rely on it). The mode is never touched.
+selinux_remove() {
+  [ "$STAGING" = 0 ] && [ "$NO_SELINUX" = 0 ] && selinux_on && have semanage || return 0
+  local f ty pat kind v proto port cur; f="$(se_state_file)"
+  if [ -r "$f" ]; then
+    while IFS='=' read -r kind v; do
+      case "$kind" in
+        fcontext) ty="${v%%|*}"; pat="${v#*|}"; semanage fcontext -d "$pat" >/dev/null 2>&1 || true;;
+        port) IFS='|' read -r ty proto port <<<"$v"; semanage port -d -t "$ty" -p "$proto" "$port" >/dev/null 2>&1 || true;;
+        bool) log "SELinux: boolean $v was set by the installer and is left on (setsebool -P $v off if nothing else needs it)";;
+      esac
+    done <"$f"
+    rm -f "$f"
+  else
+    while IFS='|' read -r ty pat; do [ -n "$ty" ] && { semanage fcontext -d "$pat" >/dev/null 2>&1 || true; }; done < <(selinux_rules)
+    semanage fcontext -d "$(selinux_bin_pattern)" >/dev/null 2>&1 || true
+    for port in "$CP_PORT" 9444; do
+      cur="$(semanage port -l -C 2>/dev/null | awk -v p="$port" '$1=="http_port_t" && $2=="tcp" {for(i=3;i<=NF;i++){t=$i; gsub(/,/,"",t); if(t==p) print "y"}}')"
+      [ -n "$cur" ] && { semanage port -d -t http_port_t -p tcp "$port" >/dev/null 2>&1 || true; }
+    done
+  fi
+  restorecon -RF "$CONF_DIR" "$DATA_DIR" "$LOG_DIR" 2>/dev/null || true
+  say "  $(paint "$GRN" "$OKM") $(t sel_removed)"
+  return 0
+}
+
+# BEGIN dns-server
+# The authoritative DNS server of the console (docs/design/dns-autoritatif.md). What the installer does for it, and ONLY that:
+#   * the control-plane unit gets CAP_NET_BIND_SERVICE (ambient) so that the console can bind port 53 as the unprivileged service user;
+#   * port 53 is looked at: free, held by the local stub resolver of systemd-resolved (127.0.0.53 / 127.0.0.54), or held by another program.
+#     The stub is switched off with a drop-in (DNSStubListener=no) and /etc/resolv.conf is pointed at the real upstream list, so that the machine
+#     keeps resolving; it is undoable. ANOTHER program is never stopped: it is named, and the owner decides;
+#   * port 53 (UDP and TCP) is opened in firewalld / ufw when OPEN_FW allows (nftables / iptables are never modified).
+# Everything it changes is recorded in $CONF_DIR/dns-server.undo (one shell command per line, run backwards by --no-dns-server and by the uninstall).
+dns_unit_has_caps() { grep -q '^AmbientCapabilities=CAP_NET_BIND_SERVICE' "$(p /etc/systemd/system/toutwaf-cp.service)" 2>/dev/null; }
+# dns_server_on: the option when given, else what the installed unit says (an update keeps it; a fresh installation without the option: off)
+dns_server_on() {
+  if [ -n "$DNS_SERVER" ]; then printf '%s' "$DNS_SERVER"; return 0; fi
+  if dns_unit_has_caps; then printf 1; else printf 0; fi
+}
+# the two capability lines of the cp unit (empty set unless the DNS server is on)
+dns_caps_lines() {
+  if [ "$(dns_server_on)" = 1 ]; then printf 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE'
+  else printf 'CapabilityBoundingSet=\nAmbientCapabilities='; fi
+}
+dns_undo_file() { p "$CONF_DIR/dns-server.undo"; }
+dns_undo_add() {   # dns_undo_add 'command' : remembered, run backwards by dns_server_revert
+  local f; f="$(dns_undo_file)"; mkdir -p "$(dirname "$f")" 2>/dev/null || true
+  printf '%s\n' "$1" >>"$f"; chmod 0600 "$f" 2>/dev/null || true
+}
+# dns_port_state: sets DNS_PORT_STATE (free | stub | busy | unknown) and DNS_PORT_USERS (names of the programs that hold port 53, for busy)
+dns_port_state() {
+  local out line addr proc name stub=0 other=0 users=""
+  DNS_PORT_STATE=free; DNS_PORT_USERS=""
+  if have ss; then out="$(ss -H -ltunp 'sport = :53' 2>/dev/null || true)"
+  else DNS_PORT_STATE=unknown; return 0; fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    addr="$(awk '{print $5}' <<<"$line")"; addr="${addr%:*}"; addr="${addr%%\%*}"; addr="${addr#[}"; addr="${addr%]}"
+    proc="$(sed -n 's/.*users:((\(.*\))).*/\1/p' <<<"$line")"
+    name="$(sed -n 's/^"\([^"]*\)".*/\1/p' <<<"$proc")"
+    case "$addr:$name" in
+      127.0.0.53:systemd-resolve*|127.0.0.54:systemd-resolve*) stub=1;;
+      *) other=1; case " $users " in *" ${name:-?} "*) ;; *) users="$users ${name:-?}";; esac;;
+    esac
+  done <<<"$out"
+  if [ "$other" = 1 ]; then DNS_PORT_STATE=busy; DNS_PORT_USERS="${users# }"
+  elif [ "$stub" = 1 ]; then DNS_PORT_STATE=stub; fi
+  return 0
+}
+# dns_release_stub: DNSStubListener=no in a drop-in of its own; /etc/resolv.conf pointed at the real list of upstream servers when it pointed at the stub
+dns_release_stub() {
+  have systemctl || return 1
+  local dropin rc ln prev
+  dropin="$(p /etc/systemd/resolved.conf.d/toutwaf-dns.conf)"
+  rc="$(p /etc/resolv.conf)"
+  mkdir -p "$(dirname "$dropin")"
+  # the undo list is run BACKWARDS: the restart is recorded first so that it runs last, after the drop-in is gone and resolv.conf is back
+  # (recorded last, it ran before them and the stub stayed off: found on a real systemd-resolved)
+  dns_undo_add "systemctl restart systemd-resolved"
+  printf '# written by the ToutWAF installer (--dns-server): frees port 53 for the DNS server of the console. Undo: --no-dns-server\n[Resolve]\nDNSStubListener=no\n' >"$dropin"
+  dns_undo_add "rm -f '$dropin'"
+  if [ -L "$rc" ]; then
+    prev="$(readlink "$rc")"
+    case "$prev" in
+      *stub-resolv.conf)
+        ln="$(dirname "$prev")/resolv.conf"
+        ln -sfn "$ln" "$rc" && dns_undo_add "ln -sfn '$prev' '$rc'";;
+    esac
+  fi
+  systemctl restart systemd-resolved >/dev/null 2>&1 || { warn "systemd-resolved did not restart after the change: check it (systemctl status systemd-resolved)"; return 1; }
+  return 0
+}
+dns_ufw_active() { have ufw && grep -qi 'status: active' <<<"$(ufw status 2>/dev/null | sed -n 1p)"; }
+# dns_open_firewall: 53/udp and 53/tcp, only where firewalld / ufw is running and only what is not already open; recorded for the undo
+dns_open_firewall() {
+  [ "$OPEN_FW" = 0 ] && return 0
+  local be="" pr
+  if firewalld_running; then be=firewalld; elif dns_ufw_active; then be=ufw; fi
+  if [ -z "$be" ]; then info "$(t dns_fw_manual)"; return 0; fi
+  for pr in udp tcp; do
+    case "$be" in
+      firewalld)
+        if ! firewall-cmd --query-port="53/$pr" >/dev/null 2>&1; then
+          firewall-cmd --permanent --add-port="53/$pr" >/dev/null 2>&1 && dns_undo_add "firewall-cmd --permanent --remove-port=53/$pr"
+        fi;;
+      ufw)
+        if ! grep -Eq "^53/${pr}[[:space:]]+ALLOW" <<<"$(ufw status 2>/dev/null)"; then
+          ufw allow "53/$pr" >/dev/null 2>&1 && dns_undo_add "ufw delete allow 53/$pr"
+        fi;;
+    esac
+  done
+  if [ "$be" = firewalld ]; then firewall-cmd --reload >/dev/null 2>&1 || true; dns_undo_add "firewall-cmd --reload"; fi
+  info "$(t dns_fw "$be")"
+  return 0
+}
+# dns_server_revert [quiet]: run the recorded undo commands, last first, then forget them
+dns_server_revert() {
+  local f line n=0; f="$(dns_undo_file)"
+  [ -f "$f" ] || return 0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if [ "$STAGING" = 1 ] || [ "$DRY_RUN" = 1 ]; then continue; fi
+    bash -c "$line" >>"${LOG:-/dev/null}" 2>&1 || true; n=$((n + 1))
+  done < <(tac "$f")
+  rm -f "$f"
+  [ "${1:-}" = quiet ] || info "$(t dns_reverted)"
+  return 0
+}
+# setup_dns_server: --dns-server (or the interactive answer) -> prepare the machine; --no-dns-server -> undo. The unit itself is written by write_units.
+setup_dns_server() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  if [ "$DNS_SERVER" = 0 ]; then dns_server_revert; return 0; fi
+  [ "$DNS_SERVER" = 1 ] || return 0
+  dns_port_state
+  case "$DNS_PORT_STATE" in
+    stub)
+      if [ "$DNS_FREE" = 1 ]; then
+        if dns_release_stub; then info "$(t dns_stub_released "$(dns_undo_file)")"; else warn "$(t dns_stub_kept)"; fi
+      else warn "$(t dns_stub_kept)"; fi;;
+    busy) warn "$(t dns_busy "$DNS_PORT_USERS")";;
+  esac
+  dns_open_firewall
+  info "$(t dns_ready)"
+  return 0
+}
+# ask_dns_server (interactive installation): the recommended answer is yes when nothing else listens on port 53 (free, or only the stub of systemd-resolved)
+ask_dns_server() {
+  local def=0 a f
+  dns_port_state
+  case "$DNS_PORT_STATE" in free|stub) def=1;; esac
+  say "  $D$(t dns_n1)$R"; say "  $D$(t dns_n2)$R"
+  ask_yn a "$(t q_dns)" "$def"
+  if [ "$a" != 1 ]; then DNS_SERVER=0; return 0; fi
+  DNS_SERVER=1
+  if [ "$DNS_PORT_STATE" = stub ]; then ask_yn f "$(t q_dns_free)" 1; DNS_FREE="$f"; fi
+  if [ "$DNS_PORT_STATE" = busy ]; then warn "$(t dns_busy "$DNS_PORT_USERS")"; fi
+  return 0
+}
+# END dns-server
+
+# firewall.conf (root-owned): the ports of this host that toutwaf-firewall may open. Written at every install / update (so that a
+# console "Open the required ports" works after a port change); only an install opens ports, an update never re-opens what an
+# administrator closed.
+write_firewall_conf() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  [ -d "$(p "$CONF_DIR")" ] || return 0
+  detect_installed
+  { printf '# written by install.sh: the ports of this host that toutwaf-firewall (root helper) is allowed to open; edit with care\n'
+    [ "$INST_DP" = 1 ] && printf 'DP_PORTS="%s %s"\n' "$HTTP_PORT" "$HTTPS_PORT"
+    # UDP (HTTP/3) is recorded only when HTTP/3 is on for this node: the helper can open nothing else than tcp otherwise
+    [ "$INST_DP" = 1 ] && [ "$(http3_on)" = 1 ] && printf 'DP_UDP_PORTS="%s"\n' "$HTTPS_PORT"
+    [ "$INST_CP" = 1 ] && printf 'CONSOLE_PORT=%s\nAGENT_PORT=9444\n' "$CP_PORT"; } >"$(p "$CONF_DIR/firewall.conf")"
+  chmod 0644 "$(p "$CONF_DIR/firewall.conf")"
+  return 0
+}
+
+setup_firewall() {
+  write_firewall_conf
+  if [ "$STAGING" = 1 ] || [ "$OPEN_FW" = 0 ]; then return 0; fi
+  # an update never re-opens what an administrator closed; an explicit --http3 / --no-http3 still reconciles the UDP rule (only it)
+  if [ "$ACTION" = update ] && [ -z "$HTTP3" ]; then return 0; fi
+  local fwh="$BIN_DIR/toutwaf-firewall" args=() out rc=0 backend
+  [ -x "$fwh" ] || { warn "toutwaf-firewall helper missing: firewall not configured"; return 0; }
+  detect_installed
+  if [ "$ACTION" != update ]; then [ "$INST_DP" = 1 ] && args+=(--dp "$HTTP_PORT,$HTTPS_PORT"); fi
+  if [ "$INST_DP" = 1 ] && { [ "$ACTION" != update ] || [ -n "$HTTP3" ]; }; then
+    if [ "$(http3_on)" = 1 ]; then args+=(--dp-udp "$HTTPS_PORT"); else args+=(--dp-udp none); fi
+  fi
+  if [ "$ACTION" != update ] && [ "$INST_CP" = 1 ] && [ "$OPEN_CP_PORT" = 1 ]; then args+=(--console "$CP_PORT"); [ -z "$CONSOLE_FROM" ] || args+=(--console-from "$CONSOLE_FROM"); fi
+  [ "${#args[@]}" -gt 0 ] || return 0
+  out="$("$fwh" open "${args[@]}" 2>&1)" || rc=$?
+  log "toutwaf-firewall open $(jn "${args[@]}") -> rc=$rc: $out"
+  backend="$("$fwh" status 2>/dev/null | sed -n 's/^BACKEND=//p' | head -n1 || true)"
+  case "$rc:$backend" in
+    0:firewalld|0:ufw) info "firewall ($backend): ports opened$([ "$(http3_on)" = 1 ] && echo " (UDP $HTTPS_PORT for HTTP/3 included)")";
+      if [ "$INST_CP" = 1 ] && [ "$OPEN_CP_PORT" = 1 ]; then
+        if [ -n "$CONSOLE_FROM" ]; then info "$(t fw_console_from "$CP_PORT" "$CONSOLE_FROM")"; else warn "$(t fw_console_open "$CP_PORT")"; fi
+      fi;;
+    0:*) info "$(t fw_none)";;
+    2:*) warn "$(t fw_manual "${backend:-?}")"; printf '%s\n' "$out" | sed -n '/^[a-z#]/{/^toutwaf-firewall/!p}' | while IFS= read -r l; do warn "    $l"; done;;
+    *) warn "$(t fw_failed "$out")";;
+  esac
+  if [ "$INST_CP" = 1 ]; then warn "$(t p_dpapi_warn) (--console-from / Settings > Firewall)"; fi
+  return 0
+}
+
+set_caps() {
+  [ "$STAGING" = 1 ] && return 0
+  if want_dp && have setcap && [ -e "$BIN_DIR/toutwaf-dp" ]; then
+    # also lets a manually started toutwaf-dp bind 80/443 as the toutwaf user (systemd uses AmbientCapabilities)
+    run setcap 'cap_net_bind_service=+ep' "$BIN_DIR/toutwaf-dp" || warn "setcap failed (the systemd unit still grants the capability)"
+  fi
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ health + rollback
+wait_healthy() {
+  # /readyz answers at once (the node is up and has its policy). /healthz probes the origins of EVERY site one after the other (up to 0.8 s
+  # each when an origin is unreachable): with many sites it exceeds any short timeout right after a start, and a healthy node was rolled
+  # back. /healthz stays the fallback for a data plane that has no /readyz.
+  local _
+  for _ in $(seq 1 30); do
+    curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:9101/readyz" 2>/dev/null && return 0
+    curl -fsS -o /dev/null --max-time 10 "http://127.0.0.1:9101/healthz" 2>/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+# BEGIN cp-wait (extracted by tests/cp-wait-test.sh: keep the markers)
+# The control plane opens its listeners first and prepares its database behind them (indexes, merge of the write-ahead log, counts of the
+# attack map: GET /readyz lists the phases). The installer waits until the service ANSWERS (/readyz 200: the database is open and the
+# console, the data-plane channel and the licence page work), never for the background phases. An older control plane has no /readyz (404
+# or the console's own answer): /healthz decides then.
+# A control plane that is legitimately still preparing its database (a write-ahead log of many GB left by an earlier run takes minutes to
+# open) is not a failure. "Preparing" means: the process is alive (the unit is active) and /readyz answers 503 with a phase, or does not
+# answer at all (timeout / refused) while a large -wal file is there (a process that reads 2 GB of log is slow to answer anything). While it
+# is preparing, EVERY observation counts, not only the 503 ones: the wait goes on up to TOUTWAF_CP_PREP_CAP seconds (default 90 min) and ends
+# after TOUTWAF_CP_PREP_STALL seconds (default 10 min) in which nothing moved (the phase, the size of the -wal file, and what the process
+# itself does: CPU time and bytes read / written in /proc/PID/io). Progress is logged every minute with the time elapsed.
+# A real crash is detected at once: a unit that is failed / inactive ends the wait; one that the supervisor restarts (activating, auto-restart
+# or more restarts than at the start) is tolerated TOUTWAF_CP_MAX_CRASH times (2: one start that dies on a lock held by another process is
+# retried by systemd after 2 s and is no reason to roll back), the next one ends the wait, and the end of the journal of the unit is logged.
+# Without a preparing answer the wait is TOUTWAF_CP_WAIT s (60).
+# Run by the update assistant (toutwaf-upgrade, TOUTWAF_CP_PREP_HANDOFF=1), whose own watch has its own stall / cap / rollback and whose
+# run of this installer is bounded (15 min), the installer does not wait for the end of the preparation: once the process has stayed up and
+# preparing for TOUTWAF_CP_HANDOFF_AFTER seconds (15: longer than the 10 s that a start waits for a lock) it hands over and succeeds.
+cp_wal_bytes() { stat -c %s "$DATA_DIR/toutwaf.db-wal" 2>/dev/null || echo 0; }
+fmt_bytes() { awk -v b="${1:-0}" 'BEGIN{ if (b>=1073741824) printf "%.1f GB", b/1073741824; else if (b>=1048576) printf "%.1f MB", b/1048576; else printf "%d KB", b/1024 }'; }
+now_s() { date +%s; }
+# cp_unit_info: "STATE SUB NRESTARTS MAINPID" of the unit; STATE "unknown" without systemd (staging) or when systemctl cannot say
+cp_unit_info() {
+  local out a="" s="" n="" pid=""
+  if [ "$HAS_SYSTEMD" = 1 ]; then
+    out="$(systemctl show toutwaf-cp -p ActiveState -p SubState -p NRestarts -p MainPID 2>/dev/null || true)"
+    a="$(printf '%s\n' "$out" | sed -n 's/^ActiveState=//p' | head -n1)"; s="$(printf '%s\n' "$out" | sed -n 's/^SubState=//p' | head -n1)"
+    n="$(printf '%s\n' "$out" | sed -n 's/^NRestarts=//p' | head -n1)"; pid="$(printf '%s\n' "$out" | sed -n 's/^MainPID=//p' | head -n1)"
+    if [ -z "$a" ]; then if svc_active toutwaf-cp; then a=active; else a=inactive; fi; fi
+  else a=unknown; fi
+  case "$n" in ''|*[!0-9]*) n=0;; esac; case "$pid" in ''|*[!0-9]*) pid=0;; esac
+  printf '%s %s %s %s' "$a" "${s:--}" "$n" "$pid"
+}
+# cp_proc_sig PID: what the process itself did (CPU ticks, bytes read and written): a start that reads a huge log moves these while nothing
+# else does. Empty when unreadable.
+cp_proc_sig() {
+  local pid="$1" r="${CP_PROC_ROOT:-/proc}" io cpu
+  [ "${pid:-0}" -gt 0 ] 2>/dev/null || return 0
+  io="$(awk '/^(rchar|wchar|read_bytes|write_bytes):/{printf "%s,", $2}' "$r/$pid/io" 2>/dev/null || true)"
+  cpu="$(sed 's/^.*) //' "$r/$pid/stat" 2>/dev/null | awk '{print $12+$13}' || true)"
+  printf '%s%s' "$io" "$cpu"
+}
+wait_cp_healthy() {
+  local code body now start last logged=0 sig prev="" wal ph cap="${TOUTWAF_CP_PREP_CAP:-5400}" stall="${TOUTWAF_CP_PREP_STALL:-600}" base="${TOUTWAF_CP_WAIT:-60}"
+  local maxcrash="${TOUTWAF_CP_MAX_CRASH:-2}" handoff="${TOUTWAF_CP_HANDOFF_AFTER:-15}" big="${TOUTWAF_CP_WAL_BIG:-67108864}"
+  local preparing=0 since=0 out ui st sub nr pid nr0 crashes seen_crash=0 phased note procsig info0 bstart
+  start="$(now_s)"; last="$start"; bstart="$start"
+  info0="$(cp_unit_info)"; IFS=" " read -r _ _ nr0 _ <<<"$info0"
+  while :; do
+    out="$(curl -ksS -w '\n%{http_code}' --max-time "${TOUTWAF_CP_CURL_MAX:-5}" "https://127.0.0.1:$CP_PORT/readyz" 2>/dev/null || true)"
+    code="${out##*$'\n'}"; body="${out%$'\n'*}"
+    if [ "$code" = 200 ]; then [ "$seen_crash" = 0 ] || log "toutwaf-cp is up after $(( $(now_s) - start ))s (it was restarted by systemd ${seen_crash} time(s) on the way)"; return 0; fi
+    if [ "$code" != 503 ] && [ "$code" != 000 ]; then
+      code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time "${TOUTWAF_CP_CURL_MAX:-5}" "https://127.0.0.1:$CP_PORT/healthz" 2>/dev/null || true)"
+      if [ "$code" = 200 ]; then return 0; fi
+    fi
+    now="$(now_s)"
+    # the process: alive, restarted by the supervisor, or gone
+    ui="$(cp_unit_info)"; IFS=" " read -r st sub nr pid <<<"$ui"
+    crashes=$((nr - nr0)); [ "$crashes" -ge 0 ] || { nr0="$nr"; crashes=0; }
+    [ "$sub" != auto-restart ] || crashes=$((crashes + 1))
+    if [ "$crashes" -gt "$seen_crash" ]; then
+      seen_crash="$crashes"; last="$now"; prev=""; since=0; preparing=0; bstart="$now"   # the new process proves itself again
+      log "toutwaf-cp stopped by itself ${crashes} time(s) in $((now - start))s (unit $st/$sub, systemd restarts it)"
+    fi
+    case "$st" in
+      active|activating) ;;
+      unknown) ;;
+      *) cp_wait_fail "toutwaf-cp is not running: the unit is $st/$sub after $((now - start))s"; return 1;;
+    esac
+    if [ "$crashes" -gt "$maxcrash" ]; then cp_wait_fail "toutwaf-cp keeps stopping: $crashes starts in $((now - start))s, the supervisor's restarts are not tolerated beyond $maxcrash"; return 1; fi
+    # does the answer say that the database is being prepared?
+    phased=0
+    [ "$code" != 503 ] || ! printf '%s' "$body" | grep -q '"phase"\|database_preparing' || phased=1
+    wal="$(cp_wal_bytes)"
+    if [ "$st" = active ] && { [ "$phased" = 1 ] || { [ "$wal" -ge "$big" ] 2>/dev/null; }; }; then
+      [ "$preparing" = 1 ] || { preparing=1; since="$now"; }
+    fi
+    if [ "$preparing" = 1 ]; then
+      ph="$(printf '%s' "$body" | sed -n 's/.*"phase":"\([a-z]*\)".*/\1/p' | head -n1)"
+      procsig="$(cp_proc_sig "$pid")"
+      sig="$(printf '%s' "$body" | sed 's/"uptime_s":[0-9]*//' | tr -d ' \n')|$wal|$procsig"
+      if [ "$sig" != "$prev" ]; then prev="$sig"; last="$now"; fi
+      note="phase ${ph:-database}, WAL $(fmt_bytes "$wal") left, $((now - start))s since the start"; [ "$phased" = 1 ] || note="$note, no answer yet (HTTP $code)"
+      if [ $((now - last)) -ge "$stall" ]; then cp_wait_fail "database preparing: no progress for ${stall}s ($note): giving up"; return 1; fi
+      if [ $((now - start)) -ge "$cap" ]; then cp_wait_fail "database preparing: still not ready after ${cap}s ($note): giving up"; return 1; fi
+      if [ $((now - logged)) -ge 60 ]; then logged="$now"; log "database preparing: $note"; fi
+      if [ "${TOUTWAF_CP_PREP_HANDOFF:-0}" = 1 ] && [ $((now - since)) -ge "$handoff" ]; then
+        log "database preparing: toutwaf-cp is up and preparing its database ($note); the update assistant keeps watching it (its own stall, limit and rollback apply)"
+        return 0
+      fi
+    elif [ $((now - bstart)) -ge "$base" ]; then
+      cp_wait_fail "toutwaf-cp does not answer on :$CP_PORT after ${base}s (unit $st/$sub, HTTP $code)"; return 1
+    fi
+    sleep 1
+  done
+}
+# cp_wait_fail MESSAGE: the reason the wait ended, with what systemd and the journal say (the log is what the owner sends back)
+cp_wait_fail() {
+  log "$1"
+  if [ "$HAS_SYSTEMD" = 1 ]; then
+    log "systemctl show toutwaf-cp: $(systemctl show toutwaf-cp -p ActiveState -p SubState -p Result -p ExecMainStatus -p ExecMainCode -p NRestarts -p MainPID 2>/dev/null | tr '\n' ' ')"
+    if have journalctl; then journalctl -u toutwaf-cp -n 25 --no-pager -o short-precise 2>/dev/null | cut -c1-300 | while IFS= read -r l; do log "  journal: $l"; done; fi
+  fi
+  return 0
+}
+# END cp-wait
+
+# BEGIN svc-diag (extracted by tests/svc-diag-test.sh: keep the markers)
+# svc_diag UNIT: a service did not become healthy after its (re)start. Prints (to the console AND the log, which the console shows the owner) what
+# the system says: the state, `systemctl status`, the journal, and, when the unit has an ExecStartPre (the data plane runs `check-config` first: the
+# "control process" of "Job for toutwaf-dp.service failed because the control process exited with error code"), that very command run by hand as the
+# service user with the unit's environment, with its output and status (and, for check-config only, the same as root: told apart a refused
+# configuration from a permission / SELinux / sandbox problem), the exact paths with their owners, modes and SELinux contexts, and the AVC
+# denials when SELinux enforces. Everything printed goes through diag_redact (tokens, passwords, keys). Never fails, never changes anything.
+diag_redact() {
+  sed -E \
+    -e 's/(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{8,}/\1 [redacted]/Ig' \
+    -e 's/([A-Za-z0-9_.-]*(token|secret|passw|apikey|api_key|api-key|enrol|signing_key|private_key|credential|authoriz)[A-Za-z0-9_.-]*"?[[:space:]]*[:=][[:space:]]*)("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:],;]+)/\1[redacted]/Ig' \
+    -e 's/(--?[a-z-]*(token|secret|password|passwd|key)[a-z-]*[= ])[^[:space:]]+/\1[redacted]/Ig' \
+    -e 's/\btw[a-z]{0,8}_[A-Za-z0-9_-]{12,}/[redacted]/g'
+}
+diag_line() { local IFS=' '; printf '%s\n' "$*" >>"${LOG:-/dev/null}" 2>/dev/null || true; { printf '    %s\n' "$*" >&3; } 2>/dev/null || true; return 0; }
+diag_out() { local l; diag_redact | cut -c1-300 | while IFS= read -r l; do diag_line "$l"; done; return 0; }
+# diag_cmd CMD...: the command, its output (the last DIAG_TAIL lines, 60 by default) and its exit status, secrets hidden
+diag_cmd() {
+  local rc=0 out IFS=' '
+  printf '$ %s\n' "$*" | diag_out
+  if have timeout; then out="$(timeout "${DIAG_TIMEOUT:-30}" "$@" 2>&1 </dev/null)" || rc=$?; else out="$("$@" 2>&1 </dev/null)" || rc=$?; fi
+  [ -z "$out" ] || printf '%s\n' "$out" | tail -n "${DIAG_TAIL:-60}" | diag_out
+  printf '(exit status %s)\n' "$rc" | diag_out
+  return 0
+}
+svc_diag() {
+  local unit="$1" user="" pre="" bin="" cfg="" w ev="" envs=() argv=() f
+  [ "${DRY_RUN:-0}" = 0 ] && [ "${HAS_SYSTEMD:-0}" = 1 ] || return 0
+  diag_line "---- $(t diag_head "$unit") ----"
+  diag_cmd systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainStatus -p NRestarts
+  DIAG_TAIL=25 diag_cmd systemctl status "$unit" --no-pager -l
+  diag_cmd journalctl -u "$unit" -n 40 --no-pager
+  user="$(systemctl show "$unit" -p User --value 2>/dev/null || true)"; [ -n "$user" ] || user="$SVC_USER"
+  pre="$(systemctl cat "$unit" 2>/dev/null | sed -n 's/^ExecStartPre=//p' | head -n1 || true)"
+  pre="${pre#"${pre%%[!-@+!:]*}"}"
+  ev="$(systemctl show "$unit" -p Environment --value 2>/dev/null || true)"
+  [ -z "$ev" ] || IFS=' ' read -r -a envs <<<"$ev"
+  if [ -n "$pre" ]; then
+    IFS=' ' read -r -a argv <<<"$pre"
+    bin="${argv[0]}"
+    for ((w = 1; w < ${#argv[@]}; w++)); do [ "${argv[w-1]}" != --config ] || cfg="${argv[w]}"; done
+    diag_line "ExecStartPre of the unit: $pre"
+    if have runuser; then diag_cmd runuser -u "$user" -- env "${envs[@]+"${envs[@]}"}" "${argv[@]}"
+    elif have sudo; then diag_cmd sudo -n -u "$user" env "${envs[@]+"${envs[@]}"}" "${argv[@]}"; fi
+    if [ "${argv[${#argv[@]} - 1]}" = check-config ]; then   # read-only: run once more as root, to tell a refused configuration from a permission / SELinux problem
+      diag_line "the same check-config as root (read-only): exit 0 here and an error above means permissions, SELinux or the unit's sandbox, not the configuration"
+      diag_cmd env "${envs[@]+"${envs[@]}"}" "${argv[@]}"
+    fi
+  fi
+  [ -n "$cfg" ] || cfg="$CONF_DIR/toutwaf-dp.yaml"
+  diag_line "files and permissions:"
+  [ -z "$bin" ] || diag_cmd ls -lZ "$bin"
+  diag_cmd ls -ldZ "$CONF_DIR" "$DATA_DIR" "$LOG_DIR"
+  diag_cmd ls -lZ "$cfg"
+  have namei && diag_cmd namei -l "$cfg"
+  if [ -r "$cfg" ] && [ "$unit" = toutwaf-dp ]; then diag_line "$cfg (secrets hidden):"; head -n 80 "$cfg" | diag_out; fi
+  if have getenforce && [ "$(getenforce 2>/dev/null)" = Enforcing ]; then
+    diag_line "$(t diag_sel)"
+    diag_cmd getenforce
+    if have ausearch; then DIAG_TAIL=15 diag_cmd ausearch -m avc,user_avc,selinux_err -ts recent
+    else diag_line "ausearch is missing (audit package): grep AVC /var/log/audit/audit.log | tail"; fi
+    if have restorecon; then f="$bin"; diag_cmd restorecon -nvR "$CONF_DIR" "$DATA_DIR" ${f:+"$f"}; fi
+  fi
+  diag_line "$(t diag_hint "$unit")"
+  return 0
+}
+# END svc-diag
+
+rollback_dp() {
+  svc_diag toutwaf-dp   # before anything is restarted: the journal and the status still say why the new version did not start
+  warn "$(t w_rollback)"
+  if [ -x "$BIN_DIR/toutwaf-dp.prev" ]; then
+    mv -f "$BIN_DIR/toutwaf-dp.prev" "$BIN_DIR/toutwaf-dp"
+    selinux_label_bin   # before the start: a restored program without bin_t cannot be executed by systemd
+    systemctl restart toutwaf-dp || true
+    wait_healthy && warn "rolled back to the previous version" || warn "rollback copy also unhealthy: check 'journalctl -u toutwaf-dp'"
+  else
+    warn "no previous binary to roll back to; check 'journalctl -u toutwaf-dp'"
+  fi
+  die "toutwaf-dp did not become healthy ($(t w_rollback))"
+}
+DB_BACKUP_DIR=""
+rollback_cp() {
+  svc_diag toutwaf-cp
+  warn "$(t w_rollback)"
+  systemctl stop toutwaf-cp 2>/dev/null || true
+  if [ -x "$BIN_DIR/toutwaf-cp.prev" ]; then
+    mv -f "$BIN_DIR/toutwaf-cp.prev" "$BIN_DIR/toutwaf-cp"
+    if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then [ -e "$DB_BACKUP_DIR/toutwaf.db-wal" ] || rm -f "$DATA_DIR/toutwaf.db-wal" "$DATA_DIR/toutwaf.db-shm"; cp -dR --preserve=mode,timestamps --no-preserve=context,ownership "$DB_BACKUP_DIR"/. "$DATA_DIR"/ 2>/dev/null && chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR" 2>/dev/null || true; selinux_restore "$DATA_DIR"; fi
+    selinux_label_bin   # before the start: a restored program without bin_t cannot be executed by systemd
+    systemctl restart toutwaf-cp || true
+    # (never handed over to the update assistant here: the verdict on the restored version is this one's)
+    TOUTWAF_CP_PREP_HANDOFF=0 wait_cp_healthy && warn "rolled back to the previous version" || warn "rollback copy also unhealthy: check 'journalctl -u toutwaf-cp'"
+  else
+    warn "no previous binary to roll back to; check 'journalctl -u toutwaf-cp'"
+  fi
+  die "toutwaf-cp did not become healthy ($(t w_rollback))"
+}
+
+# BEGIN update-db-backup (extracted by tests/update-db-backup-test.sh: keep the markers)
+# SQLite, run by hand (no update program around): what the copy really costs. The write-ahead log is merged into the database first (by the
+# installed control plane, as the service account); if the new control plane has no migration to apply, the previous version reads the same
+# file after a rollback and no copy is made; otherwise the disk is checked BEFORE the service is stopped, the copy is checked, and a copy
+# that cannot be made stops the update (it used to go on without one).
+db_size_bytes() { local f s t=0; for f in "$@"; do [ -f "$f" ] || continue; s="$(stat -c %s "$f" 2>/dev/null || echo 0)"; t=$((t + s)); done; printf '%s' "$t"; }
+backup_sqlite_before_update() {
+  local dir="$1" db="$DATA_DIR/toutwaf.db" newcp="${SRC_DIR:-}/toutwaf-cp" st applied known need free fmb sz wal
+  [ -f "$db" ] || return 0
+  if [ -x "$(cp_exe)" ] && command -v runuser >/dev/null 2>&1; then
+    runuser -u "$SVC_USER" -- "$(cp_exe)" db-snapshot --db "$db" --checkpoint-only >>"$LOG" 2>&1 || log "the write-ahead log could not be merged first (the installed control plane predates it)"
+  fi
+  if [ -x "$newcp" ]; then
+    st="$("$newcp" schema-status --db "$db" 2>>"$LOG" | tail -n1 || true)"
+    applied="$(printf '%s' "$st" | sed -n 's/.*"applied":\([0-9][0-9]*\).*/\1/p')"; known="$(printf '%s' "$st" | sed -n 's/.*"known":\([0-9][0-9]*\).*/\1/p')"
+    if [ -n "$applied" ] && [ -n "$known" ] && [ "$applied" -ge "$known" ]; then
+      info "no database migration is pending (schema $applied): the previous version reads the same database after a rollback, so no copy of it is made"
+      return 0
+    fi
+  fi
+  # The way back after a rollback is the CONFIGURATION: a slim copy leaves out the rows of the journal of the events and of the raw logs
+  # (most of a large database: 7 of 8.4 GB on a real site) and needs the disk of what it keeps, with the service running. The installed
+  # control plane may predate --slim: the whole copy below is then made, with its disk check.
+  local slimtmp="$DATA_DIR/backup/.pre-update-$$.db"
+  if [ -x "$(cp_exe)" ] && command -v runuser >/dev/null 2>&1 && [ "${TOUTWAF_UPDATE_FULL_DB_COPY:-0}" != 1 ]; then
+    if runuser -u "$SVC_USER" -- "$(cp_exe)" db-snapshot --db "$db" --out "$slimtmp" --slim >>"$LOG" 2>&1 && mv "$slimtmp" "$dir/db/toutwaf.db" 2>>"$LOG"; then
+      cp -a "$DATA_DIR"/master.key "$dir/db/" 2>/dev/null || true
+      DB_BACKUP_DIR="$dir/db"
+      info "database copy before the update: $(( $(db_size_bytes "$dir/db/toutwaf.db") / 1024 / 1024 )) MB without the events journal (TOUTWAF_UPDATE_FULL_DB_COPY=1 for a whole copy)"
+      return 0
+    fi
+    rm -f "$slimtmp" "$slimtmp.part"
+    info "the slim copy of the database could not be made (the installed control plane predates it?): the whole database is copied"
+  fi
+  sz="$(db_size_bytes "$db")"; wal="$(db_size_bytes "$db-wal")"
+  # MB: the database, what of the log can still hold pages the file does not have (the service's clean stop merges the rest; at most a tenth
+  # of the database), and a tenth more for the way the copy lands
+  local sz_mb=$((sz / 1024 / 1024)) wal_mb=$((wal / 1024 / 1024)) allow
+  allow=$((sz_mb / 10 + 64)); [ "$wal_mb" -ge "$allow" ] || allow="$wal_mb"
+  need=$(( (sz_mb + allow) * 11 / 10 + 64 ))
+  fmb="$(df -Pm "$DATA_DIR/backup" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  case "$fmb" in ""|*[!0-9]*) fmb="";; esac
+  if [ -n "$fmb" ] && [ "$fmb" -lt "$need" ]; then
+    die "not enough free disk space on the disk of $DATA_DIR/backup: $fmb MB free, about $need MB needed for the copy of the database before the migration (toutwaf.db $sz_mb MB, toutwaf.db-wal $wal_mb MB). Nothing was changed. Free that space, move the data directory to a larger disk, reduce the retention of events, or delete the older copies in $DATA_DIR/backup/pre-update-*/db, then try again"
+  fi
+  if svc_active toutwaf-cp; then systemctl stop toutwaf-cp; fi      # consistent copy of the SQLite files (restarted below)
+  if ! cp -a "$DATA_DIR"/toutwaf.db* "$DATA_DIR"/master.key "$dir/db/" 2>>"$LOG"; then
+    rm -rf "$dir/db"
+    if [ "$HAS_SYSTEMD" = 1 ]; then systemctl start toutwaf-cp 2>/dev/null || true; fi
+    die "the copy of the database before the update could not be completed (is the disk full? see $LOG). Nothing was replaced and the service was started again"
+  fi
+  DB_BACKUP_DIR="$dir/db"
+}
+
+# The update worked (every service restarted and answered): what was kept in case it went wrong is only taking disk from now on. The copy of
+# the database made before the update and the previous programs (*.prev) are deleted, and the space is said. TOUTWAF_UPDATE_KEEP_COPIES=1 keeps
+# them. (The root update helper does the same for its own snapshots, after its watch window.)
+update_confirmed_cleanup() {
+  [ "$ACTION" = update ] || return 0
+  [ "$DRY_RUN" = 0 ] || return 0
+  [ "${TOUTWAF_UPDATE_KEEP_COPIES:-0}" != 1 ] || { info "update confirmed; the copies made before it are kept (TOUTWAF_UPDATE_KEEP_COPIES=1)"; return 0; }
+  # Started by the update assistant: only it knows that the new version is healthy (its watch runs AFTER this installer) and it deletes its own copies and
+  # the *.prev programs itself once the window is over (confirmed.go). Here the services were only started once: nothing is confirmed yet.
+  [ "${TOUTWAF_UPDATE_DB_HANDLED:-0}" != 1 ] || { info "the update program confirms the update after its health window and deletes the copies made for a rollback then"; return 0; }
+  local kb=0 f n
+  if [ -n "$DB_BACKUP_DIR" ] && [ -d "$DB_BACKUP_DIR" ]; then
+    n="$(du -sk "$DB_BACKUP_DIR" 2>/dev/null | awk '{print $1}')"; kb=$((kb + ${n:-0}))
+    rm -rf "$DB_BACKUP_DIR"; DB_BACKUP_DIR=""
+  fi
+  for f in "$BIN_DIR"/*.prev; do
+    [ -f "$f" ] || continue
+    n="$(du -sk "$f" 2>/dev/null | awk '{print $1}')"; kb=$((kb + ${n:-0}))
+    rm -f "$f"
+  done
+  info "update confirmed: the copy of the database and the previous programs made for a rollback were deleted ($((kb / 1024)) MB given back)"
+}
+
+# update: snapshot configuration, unit files and (for the control plane) the database before replacing anything
+backup_before_update() {
+  [ "$STAGING" = 1 ] && return 0
+  local ts dir; ts="$(date -u +%Y%m%dT%H%M%SZ)"; dir="$DATA_DIR/backup/pre-update-$ts"
+  mkdir -p "$dir"; chmod 0700 "$dir"
+  tar -czf "$dir/etc-toutwaf.tar.gz" -C / "${CONF_DIR#/}" etc/systemd/system 2>/dev/null || true
+  if [ "$INST_CP" = 1 ] && want_cp; then
+    mkdir -p "$dir/db"
+    if [ "$(db_existing_engine)" = postgres ]; then
+      # a database server: a verified pg_dump before the migrations of the new version run (the service keeps running, MVCC gives a consistent dump)
+      cp -a "$DATA_DIR"/master.key "$dir/db/" 2>/dev/null || true
+      if runuser -u "$SVC_USER" -- "$(cp_exe)" db backup --config "$CONF_DIR/toutwaf-cp.yaml" --dir "$dir/db" --keep 1 >>"$LOG" 2>&1; then DB_BACKUP_DIR="$dir/db"; else warn "the database could not be dumped before the update (see the log): the migrations of the new version will run without this safety copy"; fi
+    elif [ "${TOUTWAF_UPDATE_DB_HANDLED:-0}" = 1 ]; then
+      # started by toutwafctl upgrade-host: it has saved the database itself (a consistent copy in its private directory) or found that
+      # nothing is to be migrated; a second copy of a database of many gigabytes here would only fill the disk
+      info "the database is looked after by the update program: no second copy here"
+    else
+      backup_sqlite_before_update "$dir"
+    fi
+  fi
+  chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR/backup" 2>/dev/null || true
+  # keep the five most recent pre-update snapshots (configuration), and the copy of the database in the newest only (a copy of a database
+  # of many gigabytes for every update is what fills a disk); the leftovers of copies that were never finished go too
+  rm -f "$DATA_DIR"/backup/.pre-update-*.db "$DATA_DIR"/backup/.pre-update-*.db.part 2>/dev/null || true
+  ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -5 | while IFS= read -r old; do rm -rf "$old"; done || true
+  ls -1d "$DATA_DIR"/backup/pre-update-* 2>/dev/null | sort | head -n -1 | while IFS= read -r old; do [ ! -d "$old/db" ] || rm -rf "$old/db"; done || true
+  info "backup written to $dir"
+  return 0
+}
+# END update-db-backup
+
+# ------------------------------------------------------------------------------------------------ database
+# BEGIN db-setup
+# The control plane stores its data in a database: PostgreSQL (recommended; the only engine for several control planes) or SQLite (one file,
+# small installations on one server). This block does EVERYTHING itself, with no SQL to type:
+#   local     installs the PostgreSQL server package of the distribution if missing, initialises the cluster, starts and enables the service,
+#             creates the database and a dedicated user (no superuser, random password, scram-sha-256), listens on the loopback only, sizes
+#             the server for this machine, schedules a daily verified pg_dump, then applies the schema and checks it
+#   existing  with an administrator connection (given once, kept in memory) creates the user and the database; with only the application
+#             connection creates or upgrades the schema; when the rights are not enough, prints the exact GRANT statements
+# Every step can be run again; a failed run undoes what it created. Passwords are never printed, never put on a command line, never logged:
+# they travel through files of mode 0600 and standard input.
+db_log() { local IFS=' '; log "db: $*"; }
+db_die() { db_undo; die "$@"; }
+db_secret_file() { printf '%s' "$(p "$CONF_DIR/db.dsn")"; }
+# the engine of an existing installation, read from its configuration (empty when it has none)
+db_existing_engine() {
+  local f; f="$(p "$CONF_DIR/toutwaf-cp.yaml")"
+  [ -r "$f" ] || return 0
+  sed -n 's/^[[:space:]]*driver:[[:space:]]*\([a-z]*\).*/\1/p' "$f" | head -n1
+}
+
+# the machine's memory in MB (from /proc/meminfo, or TOUTWAF_TEST_MEM_MB in tests)
+db_mem_mb() {
+  if [ -n "${TOUTWAF_TEST_MEM_MB:-}" ]; then printf '%s' "$TOUTWAF_TEST_MEM_MB"; return 0; fi
+  awk '/^MemTotal:/ {printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null || printf '2048'
+}
+
+# conservative server settings for this machine: the control plane may share it with the data plane
+db_tuning() {
+  local mem sb ec wm mw; mem="$(db_mem_mb)"; [ -n "$mem" ] || mem=2048
+  sb=$((mem * 15 / 100)); [ "$sb" -ge 128 ] || sb=128; [ "$sb" -le 1024 ] || sb=1024
+  ec=$((mem * 40 / 100)); [ "$ec" -ge 256 ] || ec=256
+  wm=4; [ "$mem" -lt 3072 ] || wm=8; [ "$mem" -lt 16384 ] || wm=16
+  mw=64; [ "$mem" -lt 3072 ] || mw=128; [ "$mem" -lt 16384 ] || mw=256
+  cat <<EOT
+# written by the ToutWAF installer; edit freely, it is not overwritten (delete the file to have it generated again)
+listen_addresses = '127.0.0.1'
+password_encryption = 'scram-sha-256'
+max_connections = 100
+shared_buffers = ${sb}MB
+effective_cache_size = ${ec}MB
+work_mem = ${wm}MB
+maintenance_work_mem = ${mw}MB
+log_min_duration_statement = 1000
+log_lock_waits = on
+idle_in_transaction_session_timeout = '10min'
+EOT
+}
+
+# packages of the server and of the client tools (pg_dump) per distribution family
+db_packages() {   # db_packages server|client -> package names
+  case "${FAMILY:-${FAMILY_GUESS:-}}:$1" in
+    debian:server) echo "postgresql";;
+    debian:client) echo "postgresql-client";;
+    rhel:server) echo "postgresql-server postgresql";;
+    rhel:client) echo "postgresql";;
+    amazon:server) echo "postgresql15-server postgresql15";;
+    amazon:client) echo "postgresql15";;
+    suse:server) echo "postgresql-server postgresql";;
+    suse:client) echo "postgresql";;
+    arch:*) echo "postgresql";;
+    *) return 1;;
+  esac
+}
+
+db_pkg_manager() {
+  case "$(pf_fam "${FAMILY:-${FAMILY_GUESS:-}}" 3)" in
+    dnf) if have dnf; then echo dnf; elif have yum; then echo yum; fi;;
+    apt) have apt-get && echo apt;;
+    zypper) have zypper && echo zypper;;
+    pacman) have pacman && echo pacman;;
+  esac
+}
+
+# run a command as the PostgreSQL system user
+db_as_pg() { if [ "$(id -u)" = 0 ]; then runuser -u postgres -- "$@"; else "$@"; fi; }
+# shellcheck disable=SC2120  # forwards the optional arguments of psql; the callers send the SQL on the standard input
+db_psql() { db_as_pg psql -X -q -v ON_ERROR_STOP=1 -At -d postgres "$@"; }   # SQL on the standard input, never on the command line
+
+DB_PG_GLOBS="${TOUTWAF_TEST_PG_GLOBS:-/usr/lib/postgresql/*/bin/postgres /usr/pgsql-*/bin/postgres}"   # (the variable is a test hook)
+db_server_installed() { local g; have postgres && return 0; for g in $DB_PG_GLOBS; do [ -x "$g" ] && return 0; done; return 1; }
+
+db_pg_major() {   # major version of the installed server
+  local v; v="$( { postgres --version || ls -d /usr/lib/postgresql/*/ /usr/pgsql-*/ 2>/dev/null | tail -n1; } 2>/dev/null | grep -o '[0-9][0-9]*' | head -n1)"
+  case "$v" in ""|*[!0-9]*) v="";; esac
+  printf '%s' "$v"
+}
+
+db_install_server() {
+  if db_server_installed && have psql; then db_log "PostgreSQL is already installed"; return 0; fi
+  local fam="${FAMILY:-${FAMILY_GUESS:-}}" pm pk
+  pk="$(db_packages server)" || db_die "$(t db_no_pkg)"
+  pm="$(db_pkg_manager)"; [ -n "$pm" ] || db_die "$(t db_no_pkg)"
+  # Red Hat 8: the default stream is too old
+  if [ "$pm" = dnf ] && [ "$fam" = rhel ] && [ "${OS_VER%%.*}" = 8 ]; then run dnf -y module enable postgresql:15 || true; fi
+  db_log "installing $pk with $pm"
+  local -a pka; IFS=' ' read -ra pka <<<"$pk"   # the packages are blank separated whatever the IFS of the script
+  pkg_install "$pm" "${pka[@]}" || db_die "$(t db_install_failed)"
+  # shellcheck disable=SC2034  # set when this run installed the database server package; no step reads it yet
+  DB_UNDO_PKG=1
+  return 0
+}
+
+# find the files of the running server (works on every distribution because the server tells where they are)
+db_cluster_init() {
+  local fam="${FAMILY:-${FAMILY_GUESS:-}}"
+  local rh="${TOUTWAF_TEST_PGDATA:-/var/lib/pgsql/data}" ar="${TOUTWAF_TEST_PGDATA:-/var/lib/postgres/data}"   # (the variable is a test hook)
+  case "$fam" in
+    rhel|amazon)
+      if [ ! -f "$rh/PG_VERSION" ]; then
+        db_log "initialising the cluster"
+        if have postgresql-setup; then postgresql-setup --initdb >>"$LOG" 2>&1 || db_die "$(t db_init_failed)"; else db_as_pg initdb -D "$rh" -A scram-sha-256 >>"$LOG" 2>&1 || db_die "$(t db_init_failed)"; fi
+      fi;;
+    arch)
+      if [ ! -f "$ar/PG_VERSION" ]; then
+        db_log "initialising the cluster"
+        db_as_pg initdb -D "$ar" --locale=C.UTF-8 -E UTF8 >>"$LOG" 2>&1 || db_die "$(t db_init_failed)"
+      fi;;
+    debian)
+      if have pg_lsclusters && [ -z "$(pg_lsclusters -h 2>/dev/null)" ] && have pg_createcluster; then
+        local v; v="$(ls /usr/lib/postgresql 2>/dev/null | sort -V | tail -n1)"
+        db_log "creating the cluster $v/main"
+        pg_createcluster "$v" main >>"$LOG" 2>&1 || db_die "$(t db_init_failed)"
+      fi;;
+  esac
+  return 0
+}
+
+db_service() { printf 'postgresql'; }
+
+db_start_server() {
+  if [ "$HAS_SYSTEMD" = 1 ]; then
+    systemctl enable "$(db_service)" >>"$LOG" 2>&1 || true
+    systemctl start "$(db_service)" >>"$LOG" 2>&1 || db_die "$(t db_start_failed)"
+  fi
+  local i=0
+  while [ "$i" -lt 30 ]; do
+    if db_as_pg pg_isready -q 2>/dev/null; then return 0; fi
+    sleep 1; i=$((i + 1))
+  done
+  db_die "$(t db_start_failed)"
+}
+
+DB_SOCKDIR=""; DB_CONF=""; DB_HBA=""
+db_discover() {
+  DB_SOCKDIR="$(printf 'SHOW unix_socket_directories;\n' | db_psql | cut -d, -f1 | tr -d ' ')"
+  DB_CONF="$(printf 'SHOW config_file;\n' | db_psql)"
+  DB_HBA="$(printf 'SHOW hba_file;\n' | db_psql)"
+  [ -n "$DB_SOCKDIR" ] && [ -n "$DB_CONF" ] && [ -n "$DB_HBA" ] || db_die "$(t db_start_failed)"
+}
+
+# a self-signed certificate for the loopback listener (TLS on, so that the day a replica or a tool connects it is encrypted)
+db_tls_files() {
+  have openssl || return 1
+  local d; d="$(p "$CONF_DIR/pg")"
+  if [ ! -s "$d/server.crt" ]; then
+    install -d -m 0750 -o postgres -g postgres "$d" 2>/dev/null || install -d -m 0750 "$d"
+    openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+      -keyout "$d/server.key" -out "$d/server.crt" >>"$LOG" 2>&1 || return 1
+    chown postgres:postgres "$d/server.key" "$d/server.crt" 2>/dev/null || true
+    chmod 0600 "$d/server.key"; chmod 0644 "$d/server.crt"
+  fi
+  printf '%s' "$d"
+}
+
+db_configure_server() {
+  local cdir conf d inc
+  cdir="$(dirname "$DB_CONF")"
+  if [ -d "$cdir/conf.d" ]; then conf="$cdir/conf.d/toutwaf.conf"; inc=""; else conf="$cdir/toutwaf.conf"; inc="include_if_exists = 'toutwaf.conf'"; fi
+  if [ ! -s "$conf" ]; then
+    db_tuning >"$conf"
+    if d="$(db_tls_files)"; then printf "ssl = on\nssl_cert_file = '%s/server.crt'\nssl_key_file = '%s/server.key'\n" "$d" "$d" >>"$conf"; fi
+    chown postgres "$conf" 2>/dev/null || true; chmod 0644 "$conf"
+    DB_NEEDS_RESTART=1
+  fi
+  if [ -n "$inc" ] && ! grep -qF "$inc" "$DB_CONF" 2>/dev/null; then printf '\n# ToutWAF\n%s\n' "$inc" >>"$DB_CONF"; DB_NEEDS_RESTART=1; fi
+  # pg_hba.conf: the user of the control plane authenticates with scram-sha-256 on the socket and on the loopback, ahead of any other rule
+  if ! grep -q '^# BEGIN toutwaf' "$DB_HBA" 2>/dev/null; then
+    local tmp; tmp="$(mktemp)"
+    {
+      printf '# BEGIN toutwaf (managed by the ToutWAF installer)\n'
+      printf 'local   %s   %s   scram-sha-256\n' "$DB_NAME" "$DB_USER"
+      printf 'host    %s   %s   127.0.0.1/32   scram-sha-256\n' "$DB_NAME" "$DB_USER"
+      printf 'host    %s   %s   ::1/128        scram-sha-256\n' "$DB_NAME" "$DB_USER"
+      printf '# END toutwaf\n'
+      cat "$DB_HBA"
+    } >"$tmp"
+    cat "$tmp" >"$DB_HBA"; rm -f "$tmp"
+    DB_NEEDS_RELOAD=1
+  fi
+  if [ "${DB_NEEDS_RESTART:-0}" = 1 ] && [ "$HAS_SYSTEMD" = 1 ]; then
+    systemctl restart "$(db_service)" >>"$LOG" 2>&1 || db_die "$(t db_start_failed)"
+    local i=0; while [ "$i" -lt 30 ]; do db_as_pg pg_isready -q 2>/dev/null && break; sleep 1; i=$((i + 1)); done
+  elif [ "${DB_NEEDS_RELOAD:-0}" = 1 ]; then
+    printf 'SELECT pg_reload_conf();\n' | db_psql >/dev/null
+  fi
+  return 0
+}
+
+db_random_password() {
+  local pw; pw="$(LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' </dev/urandom 2>/dev/null | head -c 32 || true)"
+  [ "${#pw}" -ge 24 ] || pw="$(openssl rand -hex 24)"
+  printf '%s' "$pw"
+}
+
+# DSN of the application user for a unix socket / host
+db_make_dsn() {   # host port user password database tls ca
+  local host="$1" port="$2" user="$3" pw="$4" name="$5" tls="$6" ca="$7" enc q=""
+  enc="$(printf '%s' "$pw" | od -An -tx1 | tr -d ' \n' | sed 's/\(..\)/%\1/g')"
+  [ -z "$tls" ] || q="sslmode=$tls"
+  [ -z "$ca" ] || q="${q:+$q&}sslrootcert=$ca"
+  case "$host" in
+    /*) printf 'postgres://%s:%s@/%s?host=%s%s%s' "$user" "$enc" "$name" "$host" "${port:+&port=$port}" "${q:+&$q}";;
+    *) printf 'postgres://%s:%s@%s%s/%s%s' "$user" "$enc" "$host" "${port:+:$port}" "$name" "${q:+?$q}";;
+  esac
+}
+
+# write the DSN secret file: mode 0600, owned by the service user, atomically
+db_write_secret() {
+  local f; f="$(db_secret_file)"
+  ( umask 077; printf '%s\n' "$1" >"$f.new" ) || db_die "cannot write $f"
+  chmod 0600 "$f.new"
+  if [ "$STAGING" = 0 ]; then chown "$SVC_USER:$SVC_USER" "$f.new" 2>/dev/null || true; fi
+  mv -f "$f.new" "$f"
+  DB_SECRET_WRITTEN=1
+}
+
+# local installation: package, cluster, service, configuration, user and database (psql as the postgres user), secret file
+db_setup_local() {
+  local f pw exists_role exists_db
+  f="$(db_secret_file)"
+  db_install_server
+  db_cluster_init
+  db_start_server
+  local major; major="$(db_pg_major)"
+  if [ -n "$major" ] && [ "$major" -lt 13 ]; then db_die "$(t db_too_old "$major")"; fi
+  db_discover
+  db_configure_server
+  exists_role="$(printf "SELECT 1 FROM pg_roles WHERE rolname='%s';\n" "$DB_USER" | db_psql)"
+  exists_db="$(printf "SELECT 1 FROM pg_database WHERE datname='%s';\n" "$DB_NAME" | db_psql)"
+  if [ -s "$f" ] && [ -n "$exists_role" ] && [ -n "$exists_db" ]; then
+    db_log "the user and the database already exist and the secret file is in place: nothing to create"
+    DB_RESULT="kept"; DB_SERVER_LOCAL=1
+    return 0
+  fi
+  if [ -n "$exists_role" ] || [ -n "$exists_db" ]; then
+    # something of the same name that we do not own (no secret file): never take it over, never reset a password we did not set
+    db_die "$(t db_exists "$DB_USER" "$DB_NAME")"
+  fi
+  pw="$(db_random_password)"
+  # the password goes to psql on the standard input only
+  if ! printf "CREATE ROLE \"%s\" LOGIN PASSWORD '%s' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;\n" "$DB_USER" "$pw" | db_psql >/dev/null; then db_die "$(t db_create_failed)"; fi
+  DB_UNDO_ROLE=1
+  if ! printf 'CREATE DATABASE "%s" OWNER "%s" ENCODING '"'UTF8'"' TEMPLATE template0;\nREVOKE ALL ON DATABASE "%s" FROM PUBLIC;\nGRANT CONNECT, TEMPORARY ON DATABASE "%s" TO "%s";\nGRANT pg_monitor TO "%s";\n' \
+        "$DB_NAME" "$DB_USER" "$DB_NAME" "$DB_NAME" "$DB_USER" "$DB_USER" | db_psql >/dev/null; then db_die "$(t db_create_failed)"; fi
+  DB_UNDO_DB=1
+  db_write_secret "$(db_make_dsn "$DB_SOCKDIR" "" "$DB_USER" "$pw" "$DB_NAME" "" "")"
+  pw=""
+  DB_RESULT="created"
+  DB_SERVER_LOCAL=1
+  return 0
+}
+
+# an existing server: an administrator connection creates the user and the database; the application connection alone creates the schema
+db_setup_existing() {
+  local cp; cp="$(cp_exe)"; local f; f="$(db_secret_file)"
+  if [ -n "$DB_DSN_FILE" ]; then
+    ( umask 077; cp "$DB_DSN_FILE" "$f.new" ) 2>/dev/null || db_die "cannot read $DB_DSN_FILE"; [ -s "$f.new" ] || db_die "empty DSN file"
+    chmod 0600 "$f.new"; [ "$STAGING" = 1 ] || chown "$SVC_USER:$SVC_USER" "$f.new" 2>/dev/null || true; mv -f "$f.new" "$f"; DB_SECRET_WRITTEN=1
+  elif [ -n "$DB_DSN" ]; then
+    db_write_secret "$DB_DSN"
+  fi
+  if [ -s "$f" ] && [ -z "$DB_DSN$DB_DSN_FILE" ] && [ "$DB_SECRET_WRITTEN" = 0 ]; then
+    # a previous run left the connection of the application user: the user and the database exist, nothing to create and no administrator
+    # connection needed; the schema is brought up to date below
+    db_log "the connection file is already in place: nothing to create"
+    DB_RESULT="kept"; return 0
+  fi
+  if [ -n "$DB_ADMIN_DSN_FILE" ] || [ -n "${TOUTWAF_DB_ADMIN_DSN:-}" ]; then
+    local pwargs=()
+    [ -z "$DB_PASSWORD_FILE" ] || pwargs=(--app-password-file "$DB_PASSWORD_FILE")
+    local args=(db provision --database "$DB_NAME" --user "$DB_USER" --dsn-out -)
+    [ -z "$DB_HOST" ] || args+=(--app-host "$DB_HOST"); [ -z "$DB_PORT" ] || args+=(--app-port "$DB_PORT")
+    [ -z "$DB_TLS_MODE" ] || args+=(--tls-mode "$DB_TLS_MODE"); [ -z "$DB_CA" ] || args+=(--ca-file "$DB_CA")
+    local out rc
+    if [ -n "$DB_ADMIN_DSN_FILE" ]; then
+      out="$("$cp" "${args[@]}" "${pwargs[@]}" --admin-dsn-file "$DB_ADMIN_DSN_FILE" 2>>"$LOG")" && rc=0 || rc=$?
+    else
+      out="$(printf '%s\n' "$TOUTWAF_DB_ADMIN_DSN" | "$cp" "${args[@]}" "${pwargs[@]}" --admin-dsn-stdin 2>>"$LOG")" && rc=0 || rc=$?
+    fi
+    unset TOUTWAF_DB_ADMIN_DSN
+    if [ "$rc" = 3 ]; then db_print_grants; db_die "$(t db_rights)"; fi
+    [ "$rc" = 0 ] || db_die "$(t db_create_failed)"
+    if [ -n "$out" ]; then db_write_secret "$out"; DB_RESULT="created"; else DB_RESULT="kept"; fi
+  else
+    # only the application connection: the database and the user must exist
+    if [ -z "$DB_DSN$DB_DSN_FILE" ]; then
+      if [ -n "$DB_HOST" ] && [ -n "$DB_PASSWORD_FILE" ]; then
+        db_write_secret "$(db_make_dsn "$DB_HOST" "${DB_PORT:-5432}" "$DB_USER" "$(tr -d '\r\n' <"$DB_PASSWORD_FILE")" "$DB_NAME" "${DB_TLS_MODE:-prefer}" "$DB_CA")"
+      elif [ ! -s "$f" ]; then db_die "$(t db_need_conn)"; fi
+    fi
+    DB_RESULT="schema"
+  fi
+  return 0
+}
+
+db_say() { local IFS=' '; [ "$QUIET" = 1 ] || printf '%s\n' "$*" >&3 2>/dev/null || true; }   # to the terminal even from inside a step (whose output goes to the log)
+db_print_grants() {
+  db_say ""
+  "$(cp_exe)" db grants --database "$DB_NAME" --user "$DB_USER" 2>/dev/null | while IFS= read -r l; do db_say "    $l"; done
+  db_say ""
+}
+
+# the schema, the check and the summary
+db_apply_schema() {
+  local cp rc out; cp="$(cp_exe)"
+  [ -x "$cp" ] || { warn "toutwaf-cp is not installed yet: the schema is applied at the first start"; return 0; }
+  # run as the service user: this is exactly how the service will connect
+  if [ "$STAGING" = 0 ] && [ "$(id -u)" = 0 ]; then
+    out="$(runuser -u "$SVC_USER" -- "$cp" db init --dsn-file "$(db_secret_file)" ${DB_TLS_MODE:+--tls-mode "$DB_TLS_MODE"} ${DB_CA:+--ca-file "$DB_CA"} 2>&1)" && rc=0 || rc=$?
+  else
+    out="$("$cp" db init --dsn-file "$(db_secret_file)" ${DB_TLS_MODE:+--tls-mode "$DB_TLS_MODE"} ${DB_CA:+--ca-file "$DB_CA"} 2>&1)" && rc=0 || rc=$?
+  fi
+  printf '%s\n' "$out" >>"$LOG"
+  if [ "$rc" = 3 ]; then printf '%s\n' "$out" | sed 's/^/    /' >&3 2>/dev/null || true; db_die "$(t db_rights)"; fi
+  [ "$rc" = 0 ] || db_die "$(t db_schema_failed)"
+  DB_SCHEMA_LINE="$(printf '%s\n' "$out" | tail -n1)"
+  return 0
+}
+
+# the daily dump: a systemd timer that runs `toutwaf-cp db backup` as the service user (verified, rotated, status for the console)
+db_backup_units() {
+  [ "$DB_BACKUP_TIMER" = 1 ] && [ "$HAS_SYSTEMD" = 1 ] || return 0
+  local sd; sd="$(p /etc/systemd/system)"; mkdir -p "$sd"
+  local pk; pk="$(db_packages client 2>/dev/null || true)"
+  if ! have pg_dump && ! ls /usr/lib/postgresql/*/bin/pg_dump >/dev/null 2>&1 && [ -n "$pk" ]; then
+    local pm; pm="$(db_pkg_manager)"; local -a pka; IFS=' ' read -ra pka <<<"$pk"
+    [ -z "$pm" ] || pkg_install "$pm" "${pka[@]}" >>"$LOG" 2>&1 || warn "$(t db_no_pgdump)"
+  fi
+  cat >"$sd/toutwaf-db-backup.service" <<EOT
+[Unit]
+Description=ToutWAF database backup (pg_dump, verified, rotated)
+After=postgresql.service network-online.target
+
+[Service]
+Type=oneshot
+User=$SVC_USER
+Group=$SVC_USER
+EnvironmentFile=-$CONF_DIR/cp.env
+ExecStart=$BIN_DIR/toutwaf-cp db backup --config $CONF_DIR/toutwaf-cp.yaml --dir $DATA_DIR/db-backups --keep 7
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=$DATA_DIR
+ReadOnlyPaths=$CONF_DIR
+UMask=0077
+EOT
+  cat >"$sd/toutwaf-db-backup.timer" <<EOT
+[Unit]
+Description=Daily ToutWAF database backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOT
+  if [ "$DRY_RUN" = 0 ]; then
+    systemctl daemon-reload >>"$LOG" 2>&1 || true
+    systemctl enable --now toutwaf-db-backup.timer >>"$LOG" 2>&1 || warn "the backup timer could not be enabled"
+  fi
+  DB_BACKUP_SCHEDULED=1
+}
+
+# the control plane starts after a local PostgreSQL (a drop-in: the unit file itself is left alone)
+db_unit_dropin() {
+  [ "$HAS_SYSTEMD" = 1 ] || return 0
+  [ "$DB_SERVER_LOCAL" = 1 ] || return 0
+  local d; d="$(p /etc/systemd/system/toutwaf-cp.service.d)"; mkdir -p "$d"
+  printf '[Unit]\nAfter=postgresql.service\nWants=postgresql.service\n' >"$d/database.conf"
+}
+
+# undo what this run created, when a later step fails
+db_undo() {
+  [ "${DB_UNDO_DB:-0}" = 1 ] && printf 'DROP DATABASE IF EXISTS "%s";\n' "$DB_NAME" | db_psql >/dev/null 2>&1
+  [ "${DB_UNDO_ROLE:-0}" = 1 ] && printf 'DROP ROLE IF EXISTS "%s";\n' "$DB_USER" | db_psql >/dev/null 2>&1
+  if [ "${DB_SECRET_WRITTEN:-0}" = 1 ]; then rm -f "$(db_secret_file)"; fi
+  return 0
+}
+
+# the whole database phase of an installation
+phase_database() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  local existing; existing="$(db_existing_engine)"
+  if [ -n "$existing" ]; then
+    # an installation that already has a configuration keeps its database exactly as it is
+    DB_ENGINE="$existing"; DB_RESULT="unchanged"
+    if [ "$existing" = postgres ] && [ -s "$(db_secret_file)" ]; then DB_SERVER_LOCAL="$(db_unit_dropin_present && echo 1 || echo 0)"; fi
+    return 0
+  fi
+  if [ -z "$DB_ENGINE" ]; then DB_ENGINE=sqlite; DB_RESULT="default"; return 0; fi
+  if [ "$DB_ENGINE" = sqlite ]; then DB_RESULT="sqlite"; return 0; fi
+  if [ "$DB_LOCAL" = 1 ]; then db_setup_local; else db_setup_existing; fi
+  db_apply_schema
+  db_backup_units
+  db_unit_dropin
+  db_log "done: $DB_RESULT"
+  return 0
+}
+db_unit_dropin_present() { [ -f "$(p /etc/systemd/system/toutwaf-cp.service.d/database.conf)" ]; }
+
+# the database section of toutwaf-cp.yaml
+db_yaml() {
+  if [ "$DB_ENGINE" = postgres ]; then
+    printf 'database:\n  driver: postgres\n  dsn_file: %s\n' "$CONF_DIR/db.dsn"
+    [ -z "$DB_TLS_MODE" ] || printf '  tls_mode: %s\n' "$DB_TLS_MODE"
+    [ -z "$DB_CA" ] || printf '  ca_file: %s\n' "$DB_CA"
+  else
+    printf 'database:\n  driver: sqlite\n'
+  fi
+}
+
+# the plain summary, shown at the end of the database step (no secret in it)
+db_summary() {
+  case "$DB_ENGINE:$DB_RESULT" in
+    *:unchanged|*:"") ;;
+    sqlite:default) say "  $BUL $(t db_hint)";;
+    postgres:*)
+      say "  $BUL $(t db_sum_engine "PostgreSQL")"
+      if [ "$DB_SERVER_LOCAL" = 1 ]; then say "  $BUL $(t db_sum_local "$DB_NAME" "$DB_USER")"; else say "  $BUL $(t db_sum_remote "$DB_NAME" "$DB_USER")"; fi
+      [ -z "${DB_SCHEMA_LINE:-}" ] || say "  $BUL $(t db_sum_schema "$DB_SCHEMA_LINE")"
+      say "  $BUL $(t db_sum_secret "$CONF_DIR/db.dsn")"
+      if [ "${DB_BACKUP_SCHEDULED:-0}" = 1 ]; then say "  $BUL $(t db_sum_backup)"; else say "  $BUL $(t db_sum_nobackup)"; fi;;
+    sqlite:*) say "  $BUL $(t db_sum_sqlite)";;
+  esac
+}
+
+# the questions of the interactive mode
+db_ask() {
+  local c sub ok an ap enc
+  # shellcheck disable=SC2034  # set when the person was asked; no step reads it yet
+  DB_ASKED=1
+  say ""; say "  $(paint "$B" "$(t db_choose)")"
+  say "    1) $(t db_opt_pg)"
+  say "    2) $(t db_opt_sqlite)"
+  ask c "$(t choice)" 1
+  if [ "$c" = 2 ]; then DB_ENGINE=sqlite; say "  $D$(t db_sqlite_note)$R"; return 0; fi
+  DB_ENGINE=postgres
+  say "    1) $(t db_opt_pg_local)"
+  say "    2) $(t db_opt_pg_remote)"
+  ask sub "$(t choice)" 1
+  if [ "$sub" != 2 ]; then DB_LOCAL=1; return 0; fi
+  ask DB_HOST "$(t db_q_host)" "${DB_HOST:-127.0.0.1}"
+  ask DB_PORT "$(t db_q_port)" "${DB_PORT:-5432}"
+  ask DB_NAME "$(t db_q_name)" "$DB_NAME"
+  ask DB_USER "$(t db_q_user)" "$DB_USER"
+  ask DB_TLS_MODE "$(t db_q_tls)" "${DB_TLS_MODE:-prefer}"
+  case "$DB_TLS_MODE" in verify-ca|verify-full) ask DB_CA "$(t db_q_ca)" "$DB_CA";; esac
+  ask an "$(t db_q_admin)" ""
+  if [ -n "$an" ]; then
+    ask ap "$(t db_q_adminpw)" "" secret
+    enc="$(printf '%s' "$ap" | od -An -tx1 | tr -d ' \n' | sed 's/\(..\)/%\1/g')"
+    DB_ADMIN_DSN_FILE="$TMP/db-admin.dsn"
+    ( umask 077; printf 'postgres://%s:%s@%s:%s/postgres?sslmode=%s%s\n' "$an" "$enc" "$DB_HOST" "$DB_PORT" "$DB_TLS_MODE" "${DB_CA:+&sslrootcert=$DB_CA}" >"$DB_ADMIN_DSN_FILE" )
+    ap=""; enc=""
+  fi
+  ask ap "$(t db_q_pw)" "" secret
+  if [ -n "$ap" ]; then DB_PASSWORD_FILE="$TMP/db-app.pw"; ( umask 077; printf '%s' "$ap" >"$DB_PASSWORD_FILE" ); fi
+  ap=""
+  return 0
+}
+
+# `toutwaf-install --db-prepare --db-install-local`: prepare a PostgreSQL server for an installation that already runs on SQLite (the console assistant
+# "Switch to PostgreSQL" asks for it through the root helper). Installs the package if missing, initialises and secures the server (loopback only), creates the
+# role and the database with a random password, writes the connection file and applies the schema. It does NOT touch the configuration of the control plane
+# and moves no data: the assistant of the console does that, with a backup, a verification and a roll-back.
+cmd_db_prepare() {
+  DB_LOCAL=1
+  detect_installed
+  [ "$INST_CP" = 1 ] || die "$(t not_installed)"
+  compat_gate
+  db_setup_local
+  db_apply_schema
+  db_backup_units
+  db_unit_dropin
+  printf 'TW_DB_PREPARE=ok\nDSN_FILE=%s\nRESULT=%s\n' "$(db_secret_file)" "$DB_RESULT"
+}
+# END db-setup
+
+# ------------------------------------------------------------------------------------------------ install / update flow
+CHANGED=0; OLD_DP=""; UPDATE_NOOP=0; PANEL_RAN=0
+# a new attempt after a correction (autofix): the programs the earlier attempt replaced are still to be started (see af_reexec)
+if [ "${AF_TRY:-0}" -gt 0 ] && [ "${TOUTWAF_AUTOFIX_CHANGED:-0}" = 1 ]; then CHANGED=1; fi
+phase_account() { create_user; make_dirs; }
+# The control plane serves the host agent builds to the servers of the cluster: the Linux ones ship in every archive (agent-dist/) and are kept next to the control
+# plane data, replaced at every update. The ones for Windows, and the antivirus programs, come with the extras of the release (install_extras).
+install_agent_dist() {
+  local d="" src f own grp
+  for src in "$(dirname "$SRC_DIR")/agent-dist" "$SRC_DIR/agent-dist"; do
+    if [ -d "$src" ]; then d="$src"; break; fi
+  done
+  [ -n "$d" ] || { info "this release carries no host agent builds (the Cluster page cannot enrol servers until you update)"; return 0; }
+  own="$([ "$STAGING" = 1 ] && id -un || echo "$SVC_USER")"; grp="$([ "$STAGING" = 1 ] && id -gn || echo "$SVC_USER")"
+  run install -d -m 0750 -o "$own" -g "$grp" "$(p "$DATA_DIR/agent-dist")" || return 0
+  for f in "$d"/toutwaf-agent-*; do
+    [ -f "$f" ] || continue
+    run install -m 0640 -o "$own" -g "$grp" "$f" "$(p "$DATA_DIR/agent-dist/$(basename "$f")")" || warn "could not install $(basename "$f")"
+  done
+  info "host agent builds installed in $DATA_DIR/agent-dist"
+}
+# ---- ToutWAF Cloud (--cloud-url): the node connects OUTBOUND to the hosted control plane through toutwaf-cloudlink --------------------------
+# The link enrols the node (its key pair is made here, only the public key leaves), keeps one HTTPS connection to the account, and gives the data plane a
+# control-plane address on the loopback interface (http://127.0.0.1:$CLOUDLINK_PORT). The data plane keeps filtering with its last policy if the cloud is
+# unreachable. Nothing listens for the platform.
+cloud_prepare() {
+  case "$CLOUD_URL" in https://*) ;; *) die "$(t cloud_https)";; esac
+  CLOUD_URL="${CLOUD_URL%/}"
+  if [ "$COMPONENT" = all ]; then COMPONENT=dp; fi
+  [ "$COMPONENT" = dp ] || die "$(t cloud_dp_only)"
+  if [ -z "$ENROLL_TOKEN" ] && [ ! -f "$(p "$DATA_DIR/cloudlink/link.json")" ]; then
+    if interactive; then ask ENROLL_TOKEN "$(t q_token)" "" secret; fi
+    [ -n "$ENROLL_TOKEN" ] || die "$(t cloud_need_token)"
+  fi
+  if [ -n "$CLOUD_CA" ]; then
+    case "$CLOUD_CA" in http://*|https://*) die "$(t cloud_ca_local)";; *) [ -f "$CLOUD_CA" ] || die "--cloud-ca: file not found: $CLOUD_CA";; esac
+  fi
+  # the data plane talks to the link, not to the internet: the enrolment token is consumed by the link, never written in the data plane's file
+  CP_URL="http://127.0.0.1:$CLOUDLINK_PORT"
+  CLOUD_ENROL_TOKEN="$ENROLL_TOKEN"; ENROLL_TOKEN=""
+}
+cloud_link_args() {
+  local IFS=$' \t\n'; local a="" pin
+  for pin in $CLOUD_PINS; do a="$a --pin $pin"; done
+  [ -z "$CLOUD_CA" ] || a="$a --ca $CONF_DIR/certs/cloud-ca.pem"
+  printf '%s' "$a"
+}
+# enrol the node with the account (once; a link that is already enrolled is left alone) and hand its local secret to the data plane
+cloud_link_enrol() {
+  local IFS=$' \t\n'   # the pins are split on blanks whatever the IFS of the caller
+  [ -n "$CLOUD_URL" ] || return 0
+  [ "$DRY_RUN" = 1 ] && return 0
+  local dir; dir="$(p "$DATA_DIR/cloudlink")"
+  run install -d -m 0700 "$dir"
+  if [ -n "$CLOUD_CA" ]; then
+    run install -d -m 0755 "$(p "$CONF_DIR/certs")"
+    run cp "$CLOUD_CA" "$(p "$CONF_DIR/certs/cloud-ca.pem")"; run chmod 0644 "$(p "$CONF_DIR/certs/cloud-ca.pem")"
+  fi
+  if [ -f "$dir/link.json" ] && [ -f "$dir/node.key" ]; then info "the node is already enrolled with this account"
+  else
+    [ -n "$CLOUD_ENROL_TOKEN" ] || die "$(t cloud_need_token)"
+    log "Enrolling this node with $CLOUD_URL"
+    local -a eargs=(); local pin
+    for pin in $CLOUD_PINS; do eargs+=(--pin "$pin"); done
+    [ -z "$CLOUD_CA" ] || eargs+=(--ca "$(p "$CONF_DIR/certs/cloud-ca.pem")")
+    if ! TOUTWAF_ENROL_TOKEN="$CLOUD_ENROL_TOKEN" "$(p "$BIN_DIR/toutwaf-cloudlink")" enrol --dir "$dir" --cloud-url "$CLOUD_URL" ${eargs[@]+"${eargs[@]}"} --name "$(hostname 2>/dev/null || echo node)" >>"$LOG" 2>&1; then
+      tail -n 5 "$LOG" >&2
+      die "$(t cloud_enrol_failed)"
+    fi
+  fi
+  if [ "$STAGING" = 0 ]; then chown -R "$SVC_USER:$SVC_USER" "$dir"; fi
+  NODE_TOKEN="$(cat "$dir/local.token" 2>/dev/null || true)"
+  [ -n "$NODE_TOKEN" ] || die "$(t cloud_enrol_failed)"
+  CLOUD_ENROL_TOKEN=""
+}
+cloud_link_unit() {
+  [ -n "$CLOUD_URL" ] || [ -f "$(p "$DATA_DIR/cloudlink/link.json")" ] || return 0
+  [ "$DRY_RUN" = 1 ] && return 0
+  local sd envf; sd="$(p /etc/systemd/system)"; mkdir -p "$sd"
+  envf="$(p "$CONF_DIR/cloudlink.env")"
+  # the proxy of the machine is the one of the link: the values present at installation are kept in a file the administrator can edit
+  if [ ! -e "$envf" ]; then
+    { echo "# environment of toutwaf-cloudlink (systemctl restart toutwaf-cloudlink after a change)"
+      echo "# HTTPS_PROXY=http://proxy.example.com:3128"
+      echo "# NO_PROXY=localhost,127.0.0.1"
+      [ -z "${HTTPS_PROXY:-}" ] || echo "HTTPS_PROXY=$HTTPS_PROXY"
+      [ -z "${https_proxy:-}" ] || echo "https_proxy=$https_proxy"
+      [ -z "${NO_PROXY:-}" ] || echo "NO_PROXY=$NO_PROXY"
+    } >"$envf"; chmod 0640 "$envf"; if [ "$STAGING" = 0 ]; then chown "root:$SVC_USER" "$envf"; fi
+  fi
+  cat >"$sd/toutwaf-cloudlink.service" <<EOF
+[Unit]
+Description=ToutWAF Cloud link (outbound connection of this node to its hosted account)
+Documentation=https://github.com/$REPO
+After=network-online.target
+Wants=network-online.target
+Before=toutwaf-dp.service
+# A crash loop must never end the service for good: without this systemd gives up after 5 starts in 10 s (start-limit-hit) and the unit stays stopped.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=$SVC_USER
+Group=$SVC_USER
+EnvironmentFile=-$CONF_DIR/cloudlink.env
+ExecStart=$BIN_DIR/toutwaf-cloudlink run --dir $DATA_DIR/cloudlink --listen 127.0.0.1:$CLOUDLINK_PORT$(cloud_link_args)
+Restart=always
+RestartSec=2s
+LimitNOFILE=65536
+# --- sandboxing: it needs the network (outbound only) and its own directory, nothing else -----------------------------------
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @swap @reboot @raw-io @obsolete @debug @cpu-emulation @clock
+UMask=0077
+ReadWritePaths=$DATA_DIR/cloudlink
+ReadOnlyPaths=$CONF_DIR
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  # the data plane starts after the link (it asks it for its policy)
+  if [ -e "$sd/toutwaf-dp.service" ] && ! grep -q 'toutwaf-cloudlink' "$sd/toutwaf-dp.service"; then
+    sed -i 's/^After=network-online.target/After=network-online.target toutwaf-cloudlink.service/' "$sd/toutwaf-dp.service"
+  fi
+}
+phase_binaries() {
+  if want_dp; then
+    OLD_DP="$(installed_label "$(p "$BIN_DIR/toutwaf-dp")")"; [ "$OLD_DP" != "?" ] || OLD_DP=""
+    if install_binary toutwaf-dp; then CHANGED=1; fi
+    if [ -n "$CLOUD_URL" ] || [ -x "$(p "$BIN_DIR/toutwaf-cloudlink")" ]; then
+      if [ ! -e "$SRC_DIR/toutwaf-cloudlink" ] && [ "$DRY_RUN" = 0 ]; then die "$(t cloud_nolink)"; fi
+      if install_binary toutwaf-cloudlink; then CHANGED=1; fi
+    fi
+  fi
+  if want_cp; then
+    if install_binary toutwaf-cp; then CHANGED=1; fi
+    if install_binary toutwafctl; then CHANGED=1; fi
+    keep_installer_copy
+    install_agent_dist
+    install_extras         # the Windows agents and the antivirus programs (obtain_extras unpacked them; nothing when there are none)
+  fi
+  link_cli
+  return 0
+}
+# The installer stays on the machine (toutwaf-install): the console's "Switch to PostgreSQL" assistant asks the root helper (toutwaf-jobs, verb
+# pg_install_local) to run `toutwaf-install --db-prepare --db-install-local`, the same code that installs PostgreSQL during an installation.
+keep_installer_copy() {
+  [ "$DRY_RUN" = 0 ] || return 0
+  [ -f "$0" ] && head -c 2 "$0" 2>/dev/null | grep -q '#!' || return 0
+  run install -m 0755 "$0" "$(p "$BIN_DIR/toutwaf-install")" || warn "could not keep a copy of the installer"
+}
+phase_config() { if want_dp; then cloud_link_enrol; dp_config; fi; if want_cp; then cp_config; fi; return 0; }
+phase_units() { write_units; cloud_link_unit; tune_sysctl; set_caps; return 0; }
+prepare_panel() { prepare_panel_run; }
+
+start_services() {
+  # the update helper serves the console Updates page (cp) and update_engine (dp); the firewall helper serves Settings > Firewall (cp)
+  if want_dp || want_cp; then systemctl enable --now toutwaf-upgrade.path >/dev/null 2>&1 || warn "could not enable toutwaf-upgrade.path"; fi
+  # enabled, never started now: this installer may be running under the update helper, whose journal is still open
+  if want_dp || want_cp; then systemctl enable toutwaf-upgrade-guard.service >/dev/null 2>&1 || warn "could not enable toutwaf-upgrade-guard.service"; fi
+  if want_dp; then systemctl enable --now toutwaf-relay.path >/dev/null 2>&1 || warn "could not enable toutwaf-relay.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-firewall.path >/dev/null 2>&1 || warn "could not enable toutwaf-firewall.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-blocklist.path >/dev/null 2>&1 || warn "could not enable toutwaf-blocklist.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-vpn.path >/dev/null 2>&1 || warn "could not enable toutwaf-vpn.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-fw.path >/dev/null 2>&1 || warn "could not enable toutwaf-fw.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-jobs.path >/dev/null 2>&1 || warn "could not enable toutwaf-jobs.path"; fi
+  if want_cp; then systemctl enable --now toutwaf-time.path >/dev/null 2>&1 || warn "could not enable toutwaf-time.path"; fi
+  if want_cp || want_dp; then systemctl enable --now toutwaf-sysupdate.path >/dev/null 2>&1 || warn "could not enable toutwaf-sysupdate.path"; fi
+  if want_cp; then
+    systemctl enable toutwaf-cp >/dev/null 2>&1 || true
+    if svc_active toutwaf-cp && [ "$CHANGED" = 0 ] && ! svc_stale toutwaf-cp "$(p "$BIN_DIR/toutwaf-cp")"; then :; else
+      log "(Re)starting toutwaf-cp"
+      systemctl restart toutwaf-cp >>"$LOG" 2>&1 || true
+      if ! wait_cp_healthy && ! autofix_unhealthy toutwaf-cp wait_cp_healthy noslow; then
+        if [ "$ACTION" = update ]; then rollback_cp; fi
+        svc_diag toutwaf-cp
+        warn "toutwaf-cp does not answer on :$CP_PORT yet (journalctl -u toutwaf-cp)"
+      fi
+    fi
+  fi
+  if want_dp && [ -e "$(p /etc/systemd/system/toutwaf-cloudlink.service)" ]; then
+    systemctl enable toutwaf-cloudlink >/dev/null 2>&1 || true
+    if svc_active toutwaf-cloudlink && [ "$CHANGED" = 0 ]; then :; else log "(Re)starting toutwaf-cloudlink"; systemctl restart toutwaf-cloudlink >>"$LOG" 2>&1 || warn "toutwaf-cloudlink did not start (journalctl -u toutwaf-cloudlink)"; fi
+  fi
+  if want_dp; then
+    systemctl enable toutwaf-dp >/dev/null 2>&1 || true
+    if svc_active toutwaf-dp && [ "$CHANGED" = 0 ] && [ "$DP_CFG_CHANGED" = 0 ] && ! svc_stale toutwaf-dp "$(p "$BIN_DIR/toutwaf-dp")"; then log "data plane unchanged; reloading configuration"; systemctl reload toutwaf-dp || true
+    else
+      log "(Re)starting toutwaf-dp"
+      systemctl restart toutwaf-dp >>"$LOG" 2>&1 || autofix_service toutwaf-dp wait_healthy || rollback_dp   # (autofix block: corrects the known causes before the rollback)
+      wait_healthy || autofix_unhealthy toutwaf-dp wait_healthy || rollback_dp
+    fi
+  fi
+  update_confirmed_cleanup
+  return 0
+}
+
+# An update that finds the same programs (UPDATE_NOOP) still writes the units and the root helpers again: they are written by THIS installer, not
+# carried by the archive, so an installation made by an older build of the same version kept stale ones (a stale or missing toutwaf-jobs unit made
+# the "Switch to PostgreSQL" job time out). The programs are not touched and a running service is not restarted for it; a path unit whose file
+# changed is restarted (systemd re-reads a service at its next start, but a running path unit keeps its old paths), and the path units that were
+# not enabled are enabled, as the full flow does.
+noop_refresh() {
+  [ "$ACTION" = update ] && [ "$DRY_RUN" = 0 ] || return 0
+  local sd before after u
+  sd="$(p /etc/systemd/system)"
+  before="$( (cd "$sd" 2>/dev/null && sha256sum toutwaf-*.path 2>/dev/null) || true)"
+  step "$(t s_user)" phase_account
+  load_existing_ports
+  step "$(t s_units)" phase_units
+  if [ "$STAGING" = 0 ]; then step "$(t s_selinux)" setup_selinux; fi
+  if [ "$HAS_SYSTEMD" = 1 ]; then
+    run systemctl daemon-reload
+    after="$( (cd "$sd" 2>/dev/null && sha256sum toutwaf-*.path 2>/dev/null) || true)"
+    while IFS= read -r u; do
+      [ -n "$u" ] || continue
+      if ! grep -qxF -- "$u" <<<"$before"; then
+        u="${u#*  }"
+        [ "$u" = toutwaf-upgrade.path ] && continue   # the update helper may be the one running this installer: its watch is re-read at the next boot or restart
+        run systemctl restart "$u" || warn "could not restart $u"
+      fi
+    done <<<"$after"
+    if [ "$NO_START" = 0 ]; then step "$(t s_start)" start_services; fi
+  fi
+  say "  $BUL $(t up_refreshed)"
+  return 0
+}
+
+# update_verdict VERSION BUILD: the rule applied to every installed component that this run touches; "same" only when each one is
+update_verdict() {
+  local b v bb st res=same
+  for b in toutwaf-dp toutwaf-cp; do
+    case "$b" in toutwaf-dp) { want_dp && [ "$INST_DP" = 1 ]; } || continue;; *) { want_cp && [ "$INST_CP" = 1 ]; } || continue;; esac
+    v="$(installed_version "$(p "$BIN_DIR/$b")")"; [ -n "$v" ] || continue
+    bb="$(inst_build "$(p "$BIN_DIR/$b")" "$v")"
+    st="$(update_state "$v" "$bb" "$1" "${2:-}")"
+    case "$st" in newer) res=newer;; rebuilt) [ "$res" = newer ] || res=rebuilt;; older) [ "$res" != same ] || res=older;; esac
+  done
+  printf '%s' "$res"
+}
+# what is installed, as one label (the data plane when there is one, else the control plane)
+installed_identity_label() {
+  if [ "$INST_DP" = 1 ] && want_dp; then installed_label "$(p "$BIN_DIR/toutwaf-dp")"; else installed_label "$(p "$BIN_DIR/toutwaf-cp")"; fi
+}
+
+do_install_flow() {
+  step "$(t s_prereq)" install_pkgs
+  if [ "$DRY_RUN" = 1 ]; then   # the prerequisites were only listed, not installed: what needs them cannot be shown
+    local _tool
+    for _tool in curl tar gzip awk sha256sum; do
+      if ! have "$_tool"; then say "  $BUL (dry-run) $_tool is not installed yet: download, verification and the steps after it are skipped"; return 0; fi
+    done
+  fi
+  SRC_DIR=""
+  RESOLVED_VERSION="${TARBALL:+local}"
+  NEW_BUILD=""
+  if [ "$VIA_REPO" = 1 ] && [ -z "$TARBALL" ] && [ -z "$BASE_URL" ]; then via_repo_try || true; fi   # sets BASE_URL to the staged package on success
+  if [ -z "$TARBALL" ]; then resolve_release; fi
+  if [ -n "$CH_JSON" ] && [ "$RESOLVED_VERSION" = "$CH_VERSION" ]; then NEW_BUILD="$CH_BUILD"; fi
+  if [ "$ACTION" = update ] && [ -z "$TARBALL" ] && [ "$FORCE" = 0 ]; then
+    # THE rule, before anything is downloaded: same version AND same build as the channel's = nothing to do. (A channel that does not state its
+    # build cannot tell: the archive is downloaded and its files are compared, as before.)
+    local ust; ust="$(update_verdict "$RESOLVED_VERSION" "$NEW_BUILD")"
+    case "$ust" in
+      same) if [ -n "$NEW_BUILD" ] && [ "$CHANGED" = 0 ]; then say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "$RESOLVED_VERSION" "$NEW_BUILD")")"; UPDATE_NOOP=1; noop_refresh; extras_maintain "$RESOLVED_VERSION" "$NEW_BUILD"; return 0; fi;;
+      rebuilt) say "  $BUL $(t up_rebuilt "$(installed_identity_label)" "$(ver_label "$RESOLVED_VERSION" "$NEW_BUILD")")";;
+    esac
+  fi
+  step "$(t s_fetch "${RESOLVED_VERSION:-?}" "$ARCH")" obtain_binaries
+  [ -z "$ARCHIVE_BUILD" ] || NEW_BUILD="$ARCHIVE_BUILD"
+  if want_cp && [ "$NO_EXTRAS" = 0 ]; then step "$(t "$(extras_key s_extras)")" obtain_extras; fi   # downloaded and checked now, installed with the programs (never fatal)
+  if [ "$ACTION" = update ]; then
+    local cur="" curb="" same=1 b
+    if want_dp && [ "$INST_DP" = 1 ]; then cur="$(installed_version "$(p "$BIN_DIR/toutwaf-dp")")"; curb="$(inst_build "$(p "$BIN_DIR/toutwaf-dp")" "$cur")"; fi
+    if [ -z "$cur" ] && want_cp && [ "$INST_CP" = 1 ]; then cur="$(installed_version "$(p "$BIN_DIR/toutwaf-cp")")"; curb="$(inst_build "$(p "$BIN_DIR/toutwaf-cp")" "$cur")"; fi
+    for b in toutwaf-dp toutwaf-cp toutwafctl; do
+      case "$b" in toutwaf-dp) want_dp || continue;; *) want_cp || continue;; esac
+      same_file "$SRC_DIR/$b" "$(p "$BIN_DIR/$b")" || same=0
+    done
+    if [ -n "$cur" ] && [ "$RESOLVED_VERSION" != local ] && [ "$RESOLVED_VERSION" != source ] && semver_lt "$RESOLVED_VERSION" "$cur" && [ "$FORCE" = 0 ]; then die "$(t e_downgrade "$RESOLVED_VERSION" "$CHANNEL" "$cur")"; fi
+    if [ "$same" = 1 ] && [ "$FORCE" = 0 ] && [ "$CHANGED" = 0 ]; then   # (CHANGED=1: an earlier attempt of this run replaced them: not "nothing to do", they were never started)
+      say "  $(paint "$GRN" "$OKM") $(t up_to_date "$(ver_short "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}")")"; UPDATE_NOOP=1; noop_refresh
+      # the files are the archive's: whatever the binaries cannot say of themselves, the archive does
+      record_installed "${cur:-${ARCHIVE_VERSION:-$RESOLVED_VERSION}}" "${curb:-$NEW_BUILD}"
+      if [ -n "$EXTRAS_DIR" ]; then install_extras; extras_report; else extras_maintain "${ARCHIVE_VERSION:-$RESOLVED_VERSION}" "${ARCHIVE_BUILD:-$NEW_BUILD}"; fi   # same programs: the extras alone may be missing
+      return 0
+    fi
+    if [ "$CHANGED" = 0 ]; then step "$(t s_backup)" backup_before_update; fi   # (not again: the copy of the first attempt is the one that goes back)
+  fi
+  step "$(t s_user)" phase_account
+  write_installer_conf
+  step "$(t s_bin)" phase_binaries
+  if want_cp && [ "$ACTION" = install ]; then step "$(t s_db)" phase_database; db_summary; fi
+  step "$(t s_cfg)" phase_config
+  load_existing_ports
+  step "$(t s_units)" phase_units
+  if [ "$STAGING" = 0 ]; then step "$(t s_selinux)" setup_selinux; fi
+  if [ "$STAGING" = 0 ]; then step "$(t s_fw)" setup_firewall; fi
+  if [ "$STAGING" = 0 ] && want_cp && [ -n "$DNS_SERVER" ]; then step "$(t s_dns)" setup_dns_server; fi
+  if want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_boot)" prepare_panel; fi
+  if want_dp && want_cp && [ "$DRY_RUN" = 0 ]; then step "$(t s_link)" link_local_dp; fi
+  if want_cp && [ "$FW_MODULE" = 1 ]; then step "$(t s_fwmod)" enable_firewall_module; fi
+  if want_cp && [ "$BACKUP_CLIENT" = 1 ]; then step "$(t s_bkclient)" install_backup_client; fi
+  if [ "$HAS_SYSTEMD" = 1 ] && [ "$DRY_RUN" = 0 ]; then
+    run systemctl daemon-reload
+    if [ "$NO_START" = 0 ]; then
+      step "$(t s_start)" start_services
+    else
+      say "  $BUL services installed but not started (--no-start)"
+    fi
+    if [ "$NO_ENABLE" = 1 ]; then
+      for u in toutwaf-cp toutwaf-dp toutwaf-upgrade.path toutwaf-upgrade-guard.service toutwaf-firewall.path toutwaf-blocklist.path toutwaf-vpn.path toutwaf-fw.path toutwaf-jobs.path toutwaf-time.path toutwaf-sysupdate.path toutwaf-relay.path; do systemctl disable "$u" >/dev/null 2>&1 || true; done
+    fi
+  fi
+  record_installed_now
+  return 0
+}
+# the new binaries are in service: remember their version and build (the binary's own when it names one, else what the archive / channel says)
+record_installed_now() {
+  local bin="" v b
+  if want_cp && [ -x "$(p "$BIN_DIR/toutwaf-cp")" ]; then bin="$(p "$BIN_DIR/toutwaf-cp")"; elif want_dp && [ -x "$(p "$BIN_DIR/toutwaf-dp")" ]; then bin="$(p "$BIN_DIR/toutwaf-dp")"; fi
+  [ -n "$bin" ] || return 0
+  v="$(installed_version "$bin")"; b="$(installed_build "$bin")"
+  [ -n "$v" ] || { case "$RESOLVED_VERSION" in local|source|"") v="$ARCHIVE_VERSION";; *) v="$RESOLVED_VERSION";; esac; }
+  [ -n "$b" ] || b="$NEW_BUILD"
+  record_installed "$v" "$b"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ interactive configuration
+configure_interactively() {
+  local fw fwm boot go su
+  box_top "$(t cfg_title)"; box_bottom
+  if [ "$COMPONENT" = dp ] && [ -z "$CP_URL" ]; then ask CP_URL "$(t q_cp_url)" ""; fi
+  if [ -n "$CP_URL" ] && [ -z "$NODE_TOKEN$ENROLL_TOKEN" ]; then ask ENROLL_TOKEN "$(t q_token)" "" secret; fi
+  if [ -n "$CP_URL" ] && [[ "$CP_URL" =~ ^https:// ]] && [ -z "$CP_CA" ]; then ask CP_CA "$(t q_cp_ca)" ""; fi
+  if want_cp; then ask CP_PORT "$(t q_cp_port)" "$CP_PORT"; ask PUBLIC_HOST "$(t q_public_host)" "$PUBLIC_HOST"; fi
+  if want_dp; then ask HTTP_PORT "$(t q_http_port)" "$HTTP_PORT"; ask HTTPS_PORT "$(t q_https_port)" "$HTTPS_PORT"; fi
+  if want_cp && [ "$ACTION" = install ] && [ -z "$DB_ENGINE" ] && [ -z "$(db_existing_engine)" ]; then db_ask; fi
+  ask_yn fw "$(t q_firewall)" 1; if [ "$fw" = 1 ]; then OPEN_FW=1; OPEN_CP_PORT=1; else OPEN_FW=0; fi
+  if want_cp && [ "$OPEN_FW" = 1 ]; then
+    say "  $D$(t fw_console_note "$CP_PORT")$R"
+    ask CONSOLE_FROM "$(t q_console_from)" "$CONSOLE_FROM"
+    if [ -n "$CONSOLE_FROM" ] && { ! [[ "$CONSOLE_FROM" =~ ^[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?$ ]] || [[ "$CONSOLE_FROM" == */0 ]]; }; then say "  $(paint "$RED" "$(t q_console_from_bad)")"; CONSOLE_FROM=""; fi
+  fi
+  if want_cp && [ -z "$DNS_SERVER" ] && [ "$ACTION" = install ]; then ask_dns_server; fi
+  if want_cp && [ -z "$FW_MODULE" ] && [ "$ACTION" = install ]; then
+    echo >&3
+    say "  $D$(t fwmod_n1)$R"; say "  $D$(t fwmod_n2)$R"; say "  $D$(t fwmod_n3)$R"
+    ask_yn fwm "$(t q_fwmodule)" 0; FW_MODULE="$fwm"
+  fi
+  ask_yn boot "$(t q_boot)" 1; if [ "$boot" != 1 ]; then NO_ENABLE=1; fi
+  if [ "$SKIP_SYSUPDATE" != 1 ]; then ask_yn su "$(t q_sysupdate)" 1; if [ "$su" != 1 ]; then SKIP_SYSUPDATE=1; fi; fi
+  if [ -z "$TARBALL" ]; then ask CHANNEL "$(t q_channel)" "$CHANNEL"; fi
+  if [ "$LAYOUT" = home ] && [ "$BIN_EXPLICIT" = 0 ]; then
+    local h="$HOME_DIR"; ask h "$(t q_bindir)" "$HOME_DIR"
+    if valid_home "$h"; then apply_home "$h"; else say "  $(paint "$RED" "$(t home_bad "$h")")"; fi
+  else ask BIN_DIR "$(t q_bindir)" "$BIN_DIR"; fi
+  check_ports
+  case "$CHANNEL" in beta) CHANNEL=dev;; stable|dev) ;; *) CHANNEL=stable;; esac
+  ask_yn go "$(t q_confirm)" 1; [ "$go" = 1 ] || { say "  $(t aborted)"; exit 0; }
+  return 0
+}
+
+menu() {
+  local choice st lab d i=1 k
+  banner
+  st="$(state_line)"
+  if [ -n "$st" ]; then say "  $(t state_installed "$st")"; else say "  $(t state_none)"; fi
+  echo
+  box_top "$(t menu_title)"
+  for k in install cp dp update uninstall status links; do
+    case "$k" in install) lab="$(t opt_install)"; d="$(t opt_install_d)";; cp) lab="$(t opt_cp)"; d="$(t opt_cp_d)";; dp) lab="$(t opt_dp)"; d="$(t opt_dp_d)";;
+      update) lab="$(t opt_update)"; d="$(t opt_update_d)";; uninstall) lab="$(t opt_uninstall)"; d="$(t opt_uninstall_d)";;
+      status) lab="$(t opt_status)"; d="$(t opt_status_d)";; links) lab="$(t opt_links)"; d="$(t opt_links_d)";; esac
+    box_line "${B}${VIO}[$i]${R} ${B}${lab}${R}"
+    box_line "    $D$d$R"
+    i=$((i + 1))
+  done
+  box_line "${B}${VIO}[q]${R} $(t opt_quit)"
+  box_bottom
+  while :; do
+    ask choice "$(t choice)" ""
+    case "$choice" in
+      1) ACTION=install; COMPONENT=all; return 0;;
+      2) ACTION=install; COMPONENT="cp"; return 0;;
+      3) ACTION=install; COMPONENT="dp"; return 0;;
+      4) ACTION=update; return 0;;
+      5) ACTION=uninstall; return 0;;
+      6) ACTION=status; return 0;;
+      7) ACTION=links; return 0;;
+      q|Q) exit 0;;
+      *) say "  $(paint "$RED" "$(t invalid_choice)")";;
+    esac
+  done
+}
+
+# One clear paragraph about telemetry: what is shared by default, what never is, and how to switch it off. Printed once, at the start of an installation.
+telemetry_notice() {
+  [ "$QUIET" = 0 ] || return 0
+  if [ "$NO_TELEMETRY" = 1 ]; then say "  $BUL $(t tele_off)"; else say "  $BUL $(t tele_on)"; fi
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------ main
+decide_channel
+if [ -z "$ACTION" ]; then
+  if [ "$NARGS" -eq 0 ] && interactive; then menu; else ACTION=install; fi
+fi
+
+if [ "$RESTORE" = 1 ]; then   # a restore on a new machine: everything is checked now, before anything is changed, and nothing is ever asked
+  case "$ACTION" in install) ;; *) echo "error: --restore is an option of --install (a new, empty machine)" >&2; exit 2;; esac
+  case "$COMPONENT" in dp) echo "error: --restore needs the control plane (--component cp or all)" >&2; exit 2;; esac
+  BACKUP_CLIENT=1; ASSUME_YES=1
+  restore_validate || { printf 'error: %s\n' "$RESTORE_ERR" >&2; exit 2; }
+fi
+case "$ACTION" in
+  checkenv) detect_installed; if [ "$INST_CP" = 1 ] || [ "$INST_DP" = 1 ]; then load_existing_ports; fi; rc=0; env_run_check || rc=$?; exit "$rc";;
+  checkprereq) rc=0; prereq_run_check || rc=$?; exit "$rc";;
+  verifyself) rc=0; cmd_verify_self || rc=$?; exit "$rc";;
+  status) persist_log; rc=0; cmd_status || rc=$?; exit "$rc";;      # (a plain call would fire the ERR trap on a non-zero status)
+  links) persist_log; rc=0; cmd_links || rc=$?; exit "$rc";;
+  extras) persist_log; rc=0; cmd_extras || rc=$?; exit "$rc";;
+  uninstall) persist_log; cmd_uninstall; exit 0;;
+  dbprepare) persist_log; rc=0; cmd_db_prepare || rc=$?; exit "$rc";;
+esac
+compat_gate          # unsupported system: stops here (exit 3) before anything is changed
+persist_log
+
+detect_installed
+if [ "$RESTORE" = 1 ] && [ "$INST_CP" = 1 ] && [ "$RESTORE_FORCE" = 0 ]; then
+  die "--restore is for a new, empty machine: ToutWAF is already installed here (--force-restore restores over it; the current data is kept in pre-restore-*)"
+fi
+if [ "$ACTION" = update ]; then
+  [ "$INST_DP$INST_CP" != 00 ] || die "$(t not_installed)"
+  component_from_installed          # an update refreshes what is installed, nothing else
+  load_existing_ports
+  if interactive && [ "$NARGS" -eq 0 ]; then ask CHANNEL "$(t q_channel)" "$CHANNEL"; case "$CHANNEL" in beta) CHANNEL=dev;; stable|dev) ;; *) CHANNEL=stable;; esac; fi
+else
+  if [ "$INST_CP" = 1 ]; then load_existing_ports; fi
+  banner
+  if [ "$ACTION" = install ]; then installer_fingerprint_notice; fi
+  if interactive && [ "$STAGING" = 0 ]; then configure_interactively; fi
+fi
+if [ -n "$CLOUD_URL" ]; then cloud_prepare; fi
+if [ -n "$ENROLL_TOKEN$NODE_TOKEN" ] && [ -z "$CP_URL" ]; then die "$(t need_cp)"; fi
+banner
+say "  ${D}os=$OS_ID $OS_VER family=${FAMILY:-${FAMILY_GUESS:-?}} arch=$ARCH component=$COMPONENT channel=$CHANNEL${DESTDIR:+ staging=$DESTDIR}$R"
+[ -z "$LAYOUT_NOTE" ] || say "  ${D}$LAYOUT_NOTE$R"
+if [ "$COMPAT_OK" = 1 ]; then
+  say "  $(paint "$GRN" "$OKM") $COMPAT_LINE"
+  for _n in ${CP_NOTES[@]+"${CP_NOTES[@]}"}; do warn "$_n"; done
+fi
+if want_cp && [ "$ACTION" = install ]; then telemetry_notice; fi   # what is shared with the publisher space, said before anything is installed
+if [ "$ACTION" = install ]; then env_gate; fi   # what is in the way is said now, before anything is changed (exit 4)
+prereq_gate          # disk space, DNS and clock, with the fix of each problem (only a full disk refuses, exit 4)
+sysupdate_run        # then the system packages (an installation or an update; TOUTWAF_SKIP_SYSUPDATE=1 skips it; a failure is a warning)
+if want_cp && [ "$STAGING" = 0 ] && [ "$DRY_RUN" = 0 ]; then detect_public_ip; fi
+AF_FLOW=1; autofix_preflight    # from here a failure is diagnosed and corrected; --autofix-dry-run: what the corrections would do now
+do_install_flow
+autofix_report_success   # a new attempt that went through: each correction of the earlier attempts says so
+if [ "$RESTORE" = 1 ]; then restore_fresh; fi
+
+new_dp="$(installed_label "$(p "$BIN_DIR/toutwaf-dp")" 2>/dev/null || true)"; [ "$new_dp" != "?" ] || new_dp=""
+echo
+if [ "$DRY_RUN" = 1 ]; then say "  $(t dry_done)"; exit 0; fi
+if [ "$UPDATE_NOOP" = 1 ]; then exit 0; fi
+say "  $(paint "$GRN" "$OKM") $(t "done")${new_dp:+  toutwaf-dp $new_dp${OLD_DP:+ (was $OLD_DP)}}"
+if [ "${#WARNINGS[@]}" -gt 0 ] && [ "$QUIET" = 0 ] && [ "$UI_COLOR" = 1 ]; then local_w=""; for local_w in "${WARNINGS[@]}"; do printf '  %s%s%s %s\n' "$YLW" "$WRM" "$R" "$local_w"; done; fi
+if want_cp && [ "$PANEL_RAN" = 0 ] && [ "$STAGING" = 0 ]; then cp_links; fi
+render_summary tty
+extras_report
+if [ "$FW_MODULE_RESULT" = on ]; then say "  $BUL $(t fwmod_done)"; fi
+if [ "$BACKUP_CLIENT_RESULT" = on ]; then say "  $BUL $(t bkc_done)"; fi
+if want_dp; then
+  say "  ${D}data plane: systemctl status toutwaf-dp   config: $CONF_DIR/toutwaf-dp.yaml   health: curl http://127.0.0.1:9101/healthz$R"
+  if [ -z "$CP_URL" ] && { [ "$COMPONENT" != all ] || [ "$DP_LINK" = failed ]; }; then say "  ${D}policy: edit $CONF_DIR/policy.yaml (hot reloaded) - apps start in detect mode$R"; fi
+fi
+write_summary_file
+exit 0

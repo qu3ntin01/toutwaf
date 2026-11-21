@@ -1,8 +1,8 @@
 {
   "channel": "stable",
-  "version": "0.6.3",
-  "build": "2486bf8ba738",
-  "released_at": "2026-11-20T10:09:17Z",
+  "version": "0.7.0",
+  "build": "a7e4c64561ed",
+  "released_at": "2026-11-21T04:16:01Z",
   "min_installer": "2",
   "notes_url": "CHANGELOG.md",
   "assets": [
@@ -10,29 +10,29 @@
       "name": "toutwaf-linux-amd64.tar.gz",
       "os": "linux",
       "arch": "amd64",
-      "size": 85981803,
-      "sha256": "309b6823bf46ea83b2b0685ec23d8ebd7e231fa62c85c6c589546110cf08f17e"
+      "size": 87861005,
+      "sha256": "10b8c2a230adbdd646d399dde1afc85ccc2b6dda33c17dcbdb646f75ef15edb1"
     },
     {
       "name": "toutwaf-windows-amd64.zip",
       "os": "windows",
       "arch": "amd64",
-      "size": 89389062,
-      "sha256": "2501fcf10252545b226d97b595e3584601c07a2d8bc4e58efb63159e98b7a65e"
+      "size": 91489400,
+      "sha256": "5a839f1b9fcd1755ecc8301a559e79ccbf141992e061534d67365cc51274fc8d"
     },
     {
       "name": "toutwaf-windows-arm64.zip",
       "os": "windows",
       "arch": "arm64",
-      "size": 85993677,
-      "sha256": "f4c0462c2555236dc50d8e530ae08e85315dc3da419db682ef73925dd03b4ab9"
+      "size": 88097702,
+      "sha256": "611269bc2d5221d02e779a70f4fafb7eaedb9210894bb47d598df28a7b56fab7"
     },
     {
       "name": "toutwaf-extras.tar.gz",
       "os": "any",
       "arch": "any",
-      "size": 21412419,
-      "sha256": "78907669dbb3379d6a6c7348bf737bda231d9e0960cb15661ec1f60be9ae6eb9",
+      "size": 21566014,
+      "sha256": "173006b5fc343ef0282a7a13e5c86ca89e2a258bc96a6f36f879fdfc37993312",
       "kind": "extras",
       "part": 1,
       "parts": 1
@@ -149,6 +149,11 @@
       "version": "0.6.3",
       "released_at": "2026-11-20T10:09:17Z",
       "path": "releases/0.6.3/"
+    },
+    {
+      "version": "0.7.0",
+      "released_at": "2026-11-21T04:16:01Z",
+      "path": "releases/0.7.0/"
     }
   ],
   "public_key": "gPNG5qkoXV0gO8qTrENwPvxBxHJDbZ6G36UMvAcCJm0=",
